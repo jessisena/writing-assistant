@@ -1,0 +1,6 @@
+Write as you would to a peer you trust. Relaxed and warm, still professional.
+Keep it short. One or two short paragraphs, or a few bullets.
+Contractions are fine. Plain everyday words over formal ones.
+Emoji are welcome where they carry tone or mark status, but do not overdo it.
+Skip formal openings and sign-offs. Get straight to the point.
+No headers or heavy formatting. Slack-native formatting only (bold, italic, bullet lists).

@@ -1,0 +1,7 @@
+Optimize for AI consumption: clear, direct, and precise language with no filler words.
+Structure with numbered steps or bullet points when the prompt involves a multi-step task.
+Be explicit about the desired output format, tone, and constraints.
+Remove ambiguity: replace vague terms with specific, concrete instructions.
+Use imperative mood (e.g., "Summarize the report" not "Could you summarize the report?").
+Keep sentences short and self-contained; avoid nested clauses.
+If relevant, include context, role framing, or examples to guide the AI's response.

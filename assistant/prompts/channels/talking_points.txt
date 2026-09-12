@@ -1,0 +1,5 @@
+Structure as a concise bulleted list of talking points.
+Each point should be one clear sentence or phrase that can be spoken aloud naturally.
+Order points logically: context first, then key message, then action items or asks.
+Include a brief intro line summarizing the topic.
+Keep language natural and conversational since these will be spoken, not read.
