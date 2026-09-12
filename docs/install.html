@@ -401,16 +401,13 @@
   <header class="header">
     <span class="kicker">Getting started</span>
     <h1>Writing Assistant Setup</h1>
-    <p class="header-sub">Install the app as a native-feeling desktop tool, understand its channels, and get comfortable with the day-to-day workflow.</p>
+    <p class="header-sub">Install the app as a native macOS window, understand its channels, and get comfortable with the day-to-day workflow.</p>
   </header>
 
   <!-- ── Prerequisites ── -->
   <section>
     <h2>Before you begin</h2>
     <ul class="prereq-list">
-      <li>
-        <span><strong>Chrome</strong> installed — the PWA installs through Chrome's address bar menu <span class="prereq-note">(Safari Web Apps work differently and are not covered here)</span></span>
-      </li>
       <li>
         <span><strong>claude CLI</strong> installed and authenticated — run <code>claude --version</code> in a terminal to confirm</span>
       </li>
@@ -457,31 +454,8 @@
       <div class="step">
         <div class="step-num">4</div>
         <div class="step-body">
-          <h3>Start the server and open Chrome</h3>
-          <p>This is the only time you start the server manually.</p>
-          <pre><code>bash scripts/serve.sh</code></pre>
-          <p style="margin-top:10px">Then open <strong>http://127.0.0.1:8765</strong> in Chrome.</p>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">5</div>
-        <div class="step-body">
-          <h3>Install as a Chrome app</h3>
-          <p>In Chrome's address bar: click <strong>⋮</strong> → Cast, Save and Share → <strong>Install page as app</strong>.</p>
-          <p>Chrome creates <code>~/Applications/Chrome Apps/Writing Assistant.app</code>. This is the PWA window the launcher will open.</p>
-          <div class="tip">
-            <span class="tip-icon">↗</span>
-            <p>If you don't see the "Install page as app" option, the service worker may not have registered yet. Reload the page once and look again.</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="step-num">6</div>
-        <div class="step-body">
           <h3>Pin the launcher to your Dock</h3>
-          <p>Open <code>~/Applications</code> in Finder, find <strong>Writing Assistant</strong>, and drag it to the Dock. This is your entry point from now on — not the Chrome Apps version.</p>
+          <p>Open <code>~/Applications</code> in Finder, find <strong>Writing Assistant</strong>, and drag it to the Dock. That's your entry point from now on.</p>
         </div>
       </div>
 
@@ -492,7 +466,7 @@
   <section>
     <h2>Day-to-day use</h2>
 
-    <p>Click the Dock icon. The server starts if it isn't already running (expect 2–4 seconds on a cold start), then a standalone window opens. From there:</p>
+    <p>Click the Dock icon. A native macOS window opens — the server starts automatically in the same process (expect 2–4 seconds on a cold start). From there:</p>
 
     <div class="steps" style="margin-top:24px">
       <div class="step">
@@ -567,19 +541,15 @@
     <div class="lifecycle">
       <div class="lifecycle-row">
         <span class="lifecycle-event">Dock click</span>
-        <span class="lifecycle-desc">Server starts automatically if not already running. Cold start is 2–4 seconds.</span>
-      </div>
-      <div class="lifecycle-row">
-        <span class="lifecycle-event">Window open</span>
-        <span class="lifecycle-desc">The app sends a heartbeat to the server every 15 seconds while the window is open.</span>
+        <span class="lifecycle-desc">Server and window start together in one process. Cold start is 2–4 seconds.</span>
       </div>
       <div class="lifecycle-row">
         <span class="lifecycle-event">Window closed</span>
-        <span class="lifecycle-desc">Heartbeats stop. Server exits cleanly within ~2 minutes. Nothing lingers.</span>
+        <span class="lifecycle-desc">Server stops immediately. Nothing lingers.</span>
       </div>
       <div class="lifecycle-row">
         <span class="lifecycle-event">Manual stop</span>
-        <span class="lifecycle-desc">Run <code>bash scripts/stop.sh</code> from the project directory to kill immediately.</span>
+        <span class="lifecycle-desc">Press <kbd>⌘Q</kbd> to close the window and stop the server.</span>
       </div>
       <div class="lifecycle-row">
         <span class="lifecycle-event">Logs</span>
@@ -595,7 +565,7 @@
     <ul class="trouble-list">
       <li>
         <p class="trouble-q">"claude CLI not found" banner in the app</p>
-        <p class="trouble-a">The server is running but can't find the <code>claude</code> binary on the PATH the launcher uses. Check <code>ls -la ~/.local/bin/claude</code>. If it's installed elsewhere, update the <code>PATH</code> export at the top of <code>scripts/serve.sh</code>.</p>
+        <p class="trouble-a">The server started but can't find the <code>claude</code> binary on the PATH the launcher uses. Check <code>ls -la ~/.local/bin/claude</code>. If it's installed elsewhere, update the <code>PATH</code> line in <code>scripts/launcher.applescript</code> and rebuild with <code>bash scripts/build_launcher.sh</code>.</p>
       </li>
       <li>
         <p class="trouble-q">"claude CLI failed" after a reboot</p>
@@ -603,15 +573,11 @@
       </li>
       <li>
         <p class="trouble-q">The launcher opens but the window shows a connection error</p>
-        <p class="trouble-a">The server didn't finish starting in time, or crashed on startup. Check the log: <code>tail -30 ~/Library/Logs/writing-assistant.log</code>. Then try <code>bash scripts/serve.sh</code> directly in a terminal to see the error inline.</p>
+        <p class="trouble-a">The server crashed on startup. Check the log: <code>tail -30 ~/Library/Logs/writing-assistant.log</code>. You can also run <code>uv run python -m assistant.desktop</code> in a terminal to see the error inline.</p>
       </li>
       <li>
         <p class="trouble-q">Requests consistently time out</p>
         <p class="trouble-a">The server waits up to 120 seconds for a Claude response. If it times out regularly, check your Claude subscription status — it can happen under heavy load. Trying again usually works.</p>
-      </li>
-      <li>
-        <p class="trouble-q">The install button doesn't appear in Chrome</p>
-        <p class="trouble-a">The PWA install button only appears after the service worker registers. Reload the page once and check again. If it still doesn't appear, open DevTools → Application → Service Workers and confirm the worker is registered and activated.</p>
       </li>
     </ul>
   </section>

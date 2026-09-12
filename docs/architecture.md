@@ -59,12 +59,16 @@ does not cause a `FileNotFoundError`.
 ### On-demand launch + auto-shutdown
 
 The app is not always-on. An AppleScript `.app` (`scripts/launcher.applescript`) runs
-`scripts/serve.sh`, which starts `uvicorn` only if port 8765 is not already listening, then opens
-the installed Chrome PWA. The frontend sends a heartbeat `POST /api/heartbeat` every 15 seconds.
-`assistant/session.py` watches for the heartbeat to go stale and raises `SIGTERM` when the window
-has been closed for more than 120 seconds (generous to tolerate Chrome's background timer
-throttling). `watch()` does nothing until the first heartbeat arrives, so plain `uv run uvicorn …`
-during development never auto-exits.
+`uv run python -m assistant.desktop`, which starts uvicorn in a background thread and opens a
+native macOS WKWebView window — server and UI in one process. When the window closes,
+`desktop.py`'s `on_closed` handler sets `server.should_exit = True`, stopping the server
+immediately.
+
+The frontend also sends a heartbeat `POST /api/heartbeat` every 15 seconds. `assistant/session.py`
+watches for the heartbeat to go stale and raises `SIGTERM` after 120 seconds of silence — a
+fallback that matters only for the standalone `uv run uvicorn …` dev workflow, where there is no
+`on_closed` hook. `watch()` does nothing until the first heartbeat arrives, so the dev server never
+auto-exits on startup.
 
 ---
 
@@ -104,19 +108,20 @@ paste + channel
 ```
 assistant/
   claude_cli.py      run_claude() + extract_json()
+  desktop.py         desktop entry point: starts uvicorn in thread, opens pywebview window
   models.py          Channel enum, request/response Pydantic models
   routing.py         pick_model() heuristic + model ID constants
   pipeline.py        polish() — the single entry point per request
-  main.py            FastAPI: /api/health, /api/polish, StaticFiles mount
+  session.py         heartbeat watcher — auto-SIGTERM for standalone dev server
+  main.py            FastAPI: /api/health, /api/polish, /api/heartbeat, StaticFiles mount
   prompts/
     polish.txt       4-step instructions + global style rules (editable)
     channels/        per-channel rules — one .txt per channel (editable)
 static/
   index.html  app.js  styles.css
-  manifest.json  sw.js
   icons/           icon-192.png, icon-512.png, icon-1024.png, icon.icns
 scripts/
-  serve.sh         idempotent server start + readiness probe
+  serve.sh         dev-only: idempotent server start + readiness probe
   stop.sh          kill uvicorn by port
   build_launcher.sh  osacompile → ~/Applications/Writing Assistant.app
   launcher.applescript

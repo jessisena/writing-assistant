@@ -7,10 +7,11 @@ the one outstanding install task.
 
 ## Live end-to-end testing
 
-Start the server manually:
+Start the desktop app (or the server alone for curl-based testing):
 
 ```sh
-uv run uvicorn assistant.main:app --host 127.0.0.1 --port 8765
+uv run python -m assistant.desktop        # full app: server + native window
+uv run uvicorn assistant.main:app --host 127.0.0.1 --port 8765   # server only
 ```
 
 ### 1. All six channels — Spanish input
@@ -63,7 +64,7 @@ Click the Copy button on the Polished Text card — confirm the text lands on th
 
 This is the critical step — the launcher runs inside a `do shell script` environment that does
 not load `~/.zshrc`, so `uv` and `claude` must be reachable via the explicit `PATH` in
-`scripts/serve.sh`.
+`scripts/launcher.applescript`.
 
 **Install:**
 
@@ -73,10 +74,8 @@ uv run --with pillow python scripts/make_icons.py   # generate icons (once)
 bash scripts/build_launcher.sh                      # builds ~/Applications/Writing Assistant.app
 ```
 
-Open Chrome at `http://127.0.0.1:8765`, then ⋮ → Cast, Save and Share → **Install page as app**.
-
 **Reboot**, then click `Writing Assistant` in `~/Applications` (or the Dock). Confirm:
-- The standalone window opens within ~5s.
+- The native window opens within ~5s.
 - A real polish request completes successfully.
 
 If it fails with "claude CLI not found", run `claude` once interactively to re-confirm OAuth, then
