@@ -3,14 +3,13 @@
 A local macOS writing tool that polishes text for different channels (Slack, formal, talking points,
 AI prompts) and produces an English learning summary when you write directly in English.
 
-**Stack:** Python 3.12, FastAPI, vanilla HTML/JS/CSS frontend, claude CLI for model calls.
+**Stack:** Python 3.12, FastAPI, vanilla HTML/JS/CSS frontend, pywebview for the native window, claude CLI for model calls.
 
-**macOS only** — the launcher uses AppleScript and the PWA install path assumes Chrome on macOS.
+**macOS only** — the launcher uses AppleScript and pywebview's Cocoa backend.
 
 **Prerequisites:**
 - [claude CLI](https://claude.ai/download) installed and authenticated (`claude --version` passes)
 - [uv](https://docs.astral.sh/uv/) installed (`uv --version` passes)
-- Chrome — the PWA installs through Chrome's address bar menu
 
 **Privacy note:** the text you paste is sent to Anthropic's Claude model via your local `claude`
 CLI subscription. No `ANTHROPIC_API_KEY` is needed or used. Input is bounded to 20,000 characters.
@@ -32,9 +31,8 @@ Then open **http://127.0.0.1:8765** in your browser.
 
 ## Install as a desktop app
 
-The app can run as an installed Chrome PWA with a dock icon. Clicking the icon starts the server
-on demand and opens a standalone window. Closing the window shuts the server down automatically
-within ~2 minutes.
+The app runs as a native macOS window with a Dock icon. The server and UI are one process —
+clicking the icon starts both, closing the window stops both immediately.
 
 ### Step 1 — Generate icons and build the launcher
 
@@ -46,19 +44,12 @@ uv run --with pillow python scripts/make_icons.py
 bash scripts/build_launcher.sh
 ```
 
-### Step 2 — Install the PWA in Chrome
+### Step 2 — Pin to Dock
 
-1. Start the server: `bash scripts/serve.sh` (or click the launcher from Finder).
-2. Open **http://127.0.0.1:8765** in Chrome.
-3. In the address bar menu (⋮ → Cast, Save and Share → **Install page as app**).
-4. Chrome creates `~/Applications/Chrome Apps/Writing Assistant.app`.
+Drag `~/Applications/Writing Assistant.app` to the Dock.
 
-### Step 3 — Pin to Dock
-
-Drag `~/Applications/Writing Assistant.app` (the launcher) to the Dock.
-
-From now on: click the Dock icon → server starts → standalone window opens. Close the window →
-server exits within ~2 minutes.
+From now on: click the Dock icon → native window opens (2–4 s cold start). Close the window →
+server exits immediately.
 
 ### Logs
 
@@ -68,9 +59,7 @@ tail -f ~/Library/Logs/writing-assistant.log
 
 ### Stop the server manually
 
-```sh
-bash scripts/stop.sh
-```
+Press **⌘Q** in the app window, or close the window.
 
 ---
 
@@ -78,7 +67,7 @@ bash scripts/stop.sh
 
 ### App shows "claude CLI not found"
 
-The server can't find the `claude` binary. Check:
+The server can't find the `claude` binary on the PATH the launcher uses. Check:
 
 ```sh
 # Confirm claude is on PATH
@@ -88,7 +77,8 @@ command -v claude
 claude --version
 ```
 
-If `claude` is not found, ensure its install directory is on your `PATH`.
+If `claude` is installed but not found, add its directory to the `PATH` line in
+`scripts/launcher.applescript` and rebuild: `bash scripts/build_launcher.sh`.
 
 ### App shows "claude CLI failed" after a reboot
 
@@ -100,15 +90,19 @@ interactively in a terminal to re-authenticate, then try the launcher again.
 The server returns a 504 with a clear message. This can happen under heavy subscription load.
 Try again; if it happens consistently, check your Claude subscription status.
 
-### Launcher opens but window says ERR_CONNECTION_REFUSED
+### Launcher opens but window shows a connection error
 
-The server did not start in time. Check the log:
+The server crashed on startup. Check the log:
 
 ```sh
 tail -30 ~/Library/Logs/writing-assistant.log
 ```
 
-Then try `bash scripts/serve.sh` directly in a terminal to see the error.
+Or run the app directly in a terminal to see the error inline:
+
+```sh
+uv run python -m assistant.desktop
+```
 
 ---
 
