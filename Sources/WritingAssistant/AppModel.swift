@@ -17,6 +17,7 @@ import WritingAssistantCore
     @ObservationIgnored private let writeToPasteboard: @MainActor (String) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
     @ObservationIgnored private var copyGeneration = 0
+    @ObservationIgnored private var startupErrorMessage: String?
 
     /// Creates the model.
     ///
@@ -56,17 +57,21 @@ import WritingAssistantCore
     }
 
     /// Shows a banner when the polisher can't run (for example, the claude CLI is missing).
+    /// A startup error already in the banner is kept, followed by the readiness message.
     func checkReadiness() async {
         do {
             try await polisher.checkReady()
         } catch {
-            errorMessage = error.errorDescription
+            errorMessage = [startupErrorMessage, error.errorDescription]
+                .compactMap { $0 }
+                .joined(separator: "\n")
         }
     }
 
     /// Shows a startup failure, such as prompts that couldn't be seeded, in the error banner.
     func showStartupError(_ error: any Error) {
-        errorMessage = error.localizedDescription
+        startupErrorMessage = error.localizedDescription
+        errorMessage = startupErrorMessage
     }
 
     /// Copies the polished text and shows "Copied" for `copiedDuration`.
