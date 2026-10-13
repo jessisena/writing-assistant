@@ -21,7 +21,7 @@ struct WritingAssistantApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Writing Assistant") {
+        Window("Writing Assistant", id: "main") {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
                 .task { await model.checkReadiness() }

@@ -80,10 +80,11 @@ The bundled defaults live in `Sources/WritingAssistantCore/Resources/Prompts/`.
 The app logs CLI errors and unexpected responses with the subsystem `local.writing-assistant`:
 
 ```sh
-log stream --predicate 'subsystem == "local.writing-assistant"'
+/usr/bin/log stream --predicate 'subsystem == "local.writing-assistant"'
 ```
 
-Or open Console.app and filter on that subsystem. Errors that say "Check the logs" refer to these.
+Use the full `/usr/bin/log` path: in zsh, plain `log` is a shell builtin. Or open Console.app and
+filter on that subsystem. Errors that say "Check the logs" refer to these.
 
 ---
 

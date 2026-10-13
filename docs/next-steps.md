@@ -36,7 +36,7 @@ Launch `Writing Assistant` from Finder or the Dock, not from a terminal. This pr
 Watch the logs while testing:
 
 ```sh
-log stream --predicate 'subsystem == "local.writing-assistant"'
+/usr/bin/log stream --predicate 'subsystem == "local.writing-assistant"'
 ```
 
 ---
