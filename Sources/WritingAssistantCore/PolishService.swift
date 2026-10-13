@@ -68,9 +68,9 @@ public struct PolishService: Polishing {
             return try prompts.assemble(for: channel)
         } catch {
             let detail = error.localizedDescription
+            let name = channel.rawValue
             Self.logger.error(
-                "Prompt unavailable for \(channel.rawValue, privacy: .public): \(detail, privacy: .public)"
-            )
+                "Prompt unavailable for \(name, privacy: .public): \(detail, privacy: .public)")
             throw .promptUnavailable(detail: detail)
         }
     }
@@ -80,7 +80,7 @@ public struct PolishService: Polishing {
         guard let polishedText = object["polished_text"] as? String else {
             throw badFormat("missing or non-string polished_text")
         }
-        let wasTranslated = isJSONTrue(object["was_translated"])
+        let wasTranslated = isTruthy(object["was_translated"])
         let summary = wasTranslated ? nil : try decodeSummary(object["learning_summary"])
         return PolishResult(
             polishedText: polishedText,
@@ -120,11 +120,23 @@ public struct PolishService: Polishing {
         }
     }
 
-    private static func isJSONTrue(_ value: Any?) -> Bool {
-        guard let number = value as? NSNumber else {
+    /// Mirrors Python's `bool()` so any truthy `was_translated` drops the summary.
+    private static func isTruthy(_ value: Any?) -> Bool {
+        switch value {
+        case let number as NSNumber:
+            if CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() {
+                return number.boolValue
+            }
+            return number.doubleValue != 0
+        case let string as String:
+            return !string.isEmpty
+        case let array as [Any]:
+            return !array.isEmpty
+        case let object as [String: Any]:
+            return !object.isEmpty
+        default:
             return false
         }
-        return CFGetTypeID(number) == CFBooleanGetTypeID() && number.boolValue
     }
 
     private static func badFormat(_ detail: String) -> PolishError {
