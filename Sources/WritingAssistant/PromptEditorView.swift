@@ -61,6 +61,7 @@ private struct PromptEditorDetail: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor))
                 )
+                .disabled(!model.isCurrentFileEditable)
                 .accessibilityLabel("\(model.selection.displayName) prompt text")
             if let message = model.errorMessage {
                 Text(message)
@@ -82,14 +83,18 @@ private struct PromptEditorDetail: View {
 private struct PromptEditorActions: View {
     let model: PromptEditorModel
 
+    private var hasEditableChanges: Bool {
+        model.isCurrentFileEditable && model.isCurrentFileDirty
+    }
+
     var body: some View {
         HStack {
             Button("Save") { model.save() }
                 .keyboardShortcut("s", modifiers: .command)
-                .disabled(!model.isCurrentFileDirty)
+                .disabled(!hasEditableChanges)
                 .accessibilityHint("Saves this prompt file")
             Button("Revert") { model.revert() }
-                .disabled(!model.isCurrentFileDirty)
+                .disabled(!hasEditableChanges)
                 .accessibilityHint("Discards unsaved changes to this prompt file")
             Spacer()
             Button("Restore Default…") { model.requestRestore() }

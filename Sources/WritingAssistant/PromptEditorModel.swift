@@ -6,7 +6,8 @@ import WritingAssistantCore
 ///
 /// A file has a draft only while its edited text differs from the saved text, so a file is
 /// dirty exactly when it has a draft. Drafts are kept per file, so switching files never loses
-/// unsaved edits.
+/// unsaved edits. A file that couldn't be read has no saved text and is read-only until it
+/// reads successfully or is restored, so an empty editor can never overwrite it.
 @Observable @MainActor
 final class PromptEditorModel {
     private let store: any PromptStoring
@@ -24,15 +25,14 @@ final class PromptEditorModel {
         self.store = store
     }
 
-    /// Text shown in the editor for the selected file.
+    /// Text shown in the editor for the selected file. Editing clears the file's error message;
+    /// edits to a read-only file are ignored.
     var draft: String {
         get { drafts[selection] ?? savedTexts[selection] ?? "" }
         set {
-            if newValue == (savedTexts[selection] ?? "") {
-                drafts[selection] = nil
-            } else {
-                drafts[selection] = newValue
-            }
+            guard let saved = savedTexts[selection], newValue != draft else { return }
+            errors[selection] = nil
+            drafts[selection] = newValue == saved ? nil : newValue
         }
     }
 
@@ -42,6 +42,9 @@ final class PromptEditorModel {
     var fileURL: URL { store.fileURL(selection) }
 
     var isCurrentFileDirty: Bool { isDirty(selection) }
+
+    /// False while the selected file has no saved text, e.g. after a read error.
+    var isCurrentFileEditable: Bool { savedTexts[selection] != nil }
 
     func isDirty(_ file: PromptFile) -> Bool {
         drafts[file] != nil
@@ -56,7 +59,7 @@ final class PromptEditorModel {
 
     func save() {
         let file = selection
-        guard let text = drafts[file] else { return }
+        guard savedTexts[file] != nil, let text = drafts[file] else { return }
         do {
             try store.write(text, to: file)
             savedTexts[file] = text
@@ -98,6 +101,7 @@ final class PromptEditorModel {
             savedTexts[file] = try store.read(file)
             errors[file] = nil
         } catch {
+            savedTexts[file] = nil
             errors[file] = "Couldn't read \(file.displayName): \(error.localizedDescription)"
         }
     }
