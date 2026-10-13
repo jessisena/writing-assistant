@@ -60,7 +60,7 @@ public struct ClaudeCLI: ClaudeRunning {
         }
         let arguments = ["--print", "--output-format", "text", "--model", model] + headlessFlags
         let environment = makeEnvironment(binaryDirectory: binary.deletingLastPathComponent())
-        var lastStderr = ""
+        var lastFailure = ""
         for attempt in 1...maxAttempts {
             let outcome: SubprocessOutcome
             do {
@@ -77,18 +77,31 @@ public struct ClaudeCLI: ClaudeRunning {
             if outcome.status == 0 {
                 return .success(trimmed(outcome.stdout))
             }
-            lastStderr = trimmed(outcome.stderr)
+            lastFailure = failureDetail(outcome)
             claudeLogger.error(
                 """
                 claude CLI exited with status \(outcome.status) \
-                (attempt \(attempt) of \(maxAttempts)): \(lastStderr, privacy: .public)
+                (attempt \(attempt) of \(maxAttempts)): \(lastFailure, privacy: .public)
                 """)
         }
-        return .failure(.cliFailed(stderr: lastStderr))
+        return .failure(.cliFailed(stderr: lastFailure))
+    }
+
+    /// claude reports some failures (e.g. "Not logged in") on stdout, so fall back to it.
+    private static func failureDetail(_ outcome: SubprocessOutcome) -> String {
+        let stderr = trimmed(outcome.stderr)
+        return stderr.isEmpty ? trimmed(outcome.stdout) : stderr
     }
 
     static func makeEnvironment(binaryDirectory: URL) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
+        // claude needs USER to find its keychain login; Finder launches can lack it.
+        if environment["USER", default: ""].isEmpty {
+            environment["USER"] = NSUserName()
+        }
+        if environment["HOME", default: ""].isEmpty {
+            environment["HOME"] = NSHomeDirectory()
+        }
         environment["ANTHROPIC_API_KEY"] = nil
         environment["MAX_THINKING_TOKENS"] = "0"
         environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
@@ -174,6 +187,8 @@ enum Subprocess {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        // A neutral cwd keeps claude from picking up the caller's project context.
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
         if let environment {
             process.environment = environment
         }

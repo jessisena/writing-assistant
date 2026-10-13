@@ -38,7 +38,49 @@ private struct FakeClaude {
     }
 }
 
+extension FakeClaude {
+    /// The child's environment as recorded by `env > "$DIR/env"`. Assertions look up single
+    /// keys so a failure never prints the whole environment (which can hold tokens).
+    func recordedEnvironment() throws -> [String: String] {
+        var environment: [String: String] = [:]
+        for line in try contents(of: "env").split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            if parts.count == 2 {
+                environment[String(parts[0])] = String(parts[1])
+            }
+        }
+        return environment
+    }
+}
+
 private let countInvocation = #"echo x >> "$DIR/count""#
+
+/// Applies `overrides` to this process's environment (nil unsets) for the duration of `body`.
+/// Callers must be in a `.serialized` suite.
+private func withEnvironment(
+    _ overrides: [String: String?], body: () async throws -> Void
+) async rethrows {
+    let environment = ProcessInfo.processInfo.environment
+    let previous = overrides.keys.map { ($0, environment[$0]) }
+    defer { previous.forEach(setEnvironment) }
+    overrides.forEach(setEnvironment)
+    try await body()
+}
+
+/// Resolves every symlink, including `/var` → `/private/var`, to match `pwd -P`.
+private func realPath(_ path: String) -> String? {
+    guard let resolved = realpath(path, nil) else { return nil }
+    defer { free(resolved) }
+    return String(cString: resolved)
+}
+
+private func setEnvironment(_ name: String, _ value: String?) {
+    if let value {
+        setenv(name, value, 1)
+    } else {
+        unsetenv(name)
+    }
+}
 
 @Suite(.serialized) struct ClaudeCLITests {
     @Test func successReturnsTrimmedStdoutAndReceivesPromptOnStdin() async throws {
@@ -67,28 +109,76 @@ private let countInvocation = #"echo x >> "$DIR/count""#
             ])
     }
 
-    @Test func stripsApiKeyAndSetsHeadlessEnvironment() async throws {
-        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+    @Test func runsInTemporaryDirectoryNotCallersDirectory() async throws {
+        let fake = try FakeClaude(script: #"pwd -P > "$DIR/cwd"; echo ok"#)
         defer { fake.remove() }
-        let previousKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
-        setenv("ANTHROPIC_API_KEY", "sk-test-should-not-leak", 1)
-        defer {
-            if let previousKey {
-                setenv("ANTHROPIC_API_KEY", previousKey, 1)
-            } else {
-                unsetenv("ANTHROPIC_API_KEY")
-            }
-        }
 
         _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
 
-        let lines = try fake.contents(of: "env").split(separator: "\n").map(String.init)
-        #expect(!lines.contains { $0.hasPrefix("ANTHROPIC_API_KEY=") })
-        #expect(lines.contains("MAX_THINKING_TOKENS=0"))
-        #expect(lines.contains("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"))
-        let path = try #require(lines.first { $0.hasPrefix("PATH=") })
-        #expect(path.hasPrefix("PATH=\(fake.directory.path):"))
+        let cwd = try fake.contents(of: "cwd").trimmingCharacters(in: .newlines)
+        #expect(cwd == realPath(FileManager.default.temporaryDirectory.path))
+        #expect(cwd != realPath(FileManager.default.currentDirectoryPath))
+    }
+
+    @Test func stripsApiKeyAndSetsHeadlessEnvironment() async throws {
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        defer { fake.remove() }
+
+        try await withEnvironment(["ANTHROPIC_API_KEY": "sk-test-should-not-leak"]) {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+
+        let environment = try fake.recordedEnvironment()
+        #expect(environment["ANTHROPIC_API_KEY"] == nil)
+        #expect(environment["MAX_THINKING_TOKENS"] == "0")
+        #expect(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1")
+        let path = try #require(environment["PATH"])
+        #expect(path.hasPrefix("\(fake.directory.path):"))
         #expect(path.contains("/opt/homebrew/bin"))
+    }
+
+    @Test func fillsInMissingUserAndHome() async throws {
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        defer { fake.remove() }
+
+        try await withEnvironment(["USER": nil, "HOME": nil]) {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+
+        let environment = try fake.recordedEnvironment()
+        #expect(environment["USER"] == NSUserName())
+        #expect(environment["HOME"] == NSHomeDirectory())
+    }
+
+    @Test func keepsUserAndHomeThatAreAlreadySet() async throws {
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        defer { fake.remove() }
+
+        try await withEnvironment(["USER": "someone-else", "HOME": "/tmp/elsewhere"]) {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+
+        let environment = try fake.recordedEnvironment()
+        #expect(environment["USER"] == "someone-else")
+        #expect(environment["HOME"] == "/tmp/elsewhere")
+    }
+
+    @Test func failureOnStdoutOnlyIsReported() async throws {
+        let fake = try FakeClaude(script: "echo 'Not logged in · Please run /login'; exit 1")
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "Not logged in · Please run /login")) {
+            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+    }
+
+    @Test func stderrIsPreferredOverStdoutOnFailure() async throws {
+        let fake = try FakeClaude(script: "echo partial; echo 'real error' >&2; exit 1")
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "real error")) {
+            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
     }
 
     @Test func nonZeroExitIsRetriedOnceThenFailsWithStderr() async throws {
