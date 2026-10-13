@@ -75,6 +75,13 @@ private let englishResponse = json([
     "learning_summary": summaryObject(),
 ])
 
+/// A valid summary with the given `was_translated` value; `nil` leaves the key out.
+private func responseWithSummary(wasTranslated: Any?) -> String {
+    var object: [String: Any] = ["polished_text": "Hi", "learning_summary": summaryObject()]
+    object["was_translated"] = wasTranslated
+    return json(object)
+}
+
 private func translatedResponse(_ language: String) -> String {
     json([
         "detected_language": language,
@@ -150,14 +157,33 @@ private func expectBadFormat(_ output: String) async {
     }
 
     @Test(arguments: [
-        json(["polished_text": "Hi"]),
-        json(["polished_text": "Hi", "was_translated": 1]),
-        json(["polished_text": "Hi", "was_translated": "true"]),
-        json(["polished_text": "Hi", "was_translated": NSNull()]),
+        responseWithSummary(wasTranslated: true),
+        responseWithSummary(wasTranslated: 1),
+        responseWithSummary(wasTranslated: -0.5),
+        responseWithSummary(wasTranslated: "false"),
+        responseWithSummary(wasTranslated: [0]),
+        responseWithSummary(wasTranslated: ["a": 0]),
     ])
-    func onlyJSONTrueCountsAsTranslated(output: String) async throws {
+    func truthyWasTranslatedDropsSummary(output: String) async throws {
+        let result = try await polish(responding: output)
+        #expect(result.wasTranslated)
+        #expect(result.learningSummary == nil)
+    }
+
+    @Test(arguments: [
+        responseWithSummary(wasTranslated: nil),
+        responseWithSummary(wasTranslated: false),
+        responseWithSummary(wasTranslated: 0),
+        responseWithSummary(wasTranslated: 0.0),
+        responseWithSummary(wasTranslated: ""),
+        responseWithSummary(wasTranslated: [Any]()),
+        responseWithSummary(wasTranslated: [String: Any]()),
+        responseWithSummary(wasTranslated: NSNull()),
+    ])
+    func falsyWasTranslatedKeepsSummary(output: String) async throws {
         let result = try await polish(responding: output)
         #expect(!result.wasTranslated)
+        #expect(result.learningSummary != nil)
     }
 
     @Test(arguments: [
