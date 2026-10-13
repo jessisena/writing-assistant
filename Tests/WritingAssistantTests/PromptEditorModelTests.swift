@@ -188,5 +188,47 @@ import WritingAssistantCore
         let message = try #require(model.errorMessage)
         #expect(message.contains(Channel.slack.displayName))
         #expect(model.draft.isEmpty)
+        #expect(!model.isCurrentFileEditable)
+    }
+
+    @Test func unreadableFileCannotBeEditedOrSaved() throws {
+        let store = FakePromptStore(files: [.global: defaultGlobal])
+        let model = makeModel(store)
+        model.selection = .channel(.slack)
+        let readError = try #require(model.errorMessage)
+
+        model.draft = "typed into the unreadable file"
+        model.save()
+
+        #expect(model.draft.isEmpty)
+        #expect(!model.isDirty(.channel(.slack)))
+        #expect(model.errorMessage == readError)
+        #expect(throws: (any Error).self) { try store.read(.channel(.slack)) }
+    }
+
+    @Test func restoringAnUnreadableFileRecovers() throws {
+        let store = FakePromptStore(files: [.global: defaultGlobal])
+        let model = makeModel(store)
+        model.selection = .channel(.slack)
+
+        model.requestRestore()
+        model.confirmRestore()
+
+        #expect(model.errorMessage == nil)
+        #expect(model.isCurrentFileEditable)
+        #expect(model.draft == "slack guidelines")
+        #expect(try store.read(.channel(.slack)) == "slack guidelines")
+    }
+
+    @Test func editingClearsAnEarlierValidationError() {
+        let model = makeModel()
+        model.draft = "no placeholder"
+        model.save()
+        #expect(model.errorMessage != nil)
+
+        model.draft = "no placeholder, still editing"
+
+        #expect(model.errorMessage == nil)
+        #expect(model.isDirty(.global))
     }
 }
