@@ -71,9 +71,9 @@ public struct PromptStore: PromptStoring {
 
     /// Creates a store rooted at `directoryURL`.
     ///
-    /// Args:
-    ///   directoryURL: Folder holding the editable prompt files.
-    ///   defaultsURL: Folder holding the default prompt files, laid out like `directoryURL`.
+    /// - Parameters:
+    ///   - directoryURL: Folder holding the editable prompt files.
+    ///   - defaultsURL: Folder holding the default prompt files, laid out like `directoryURL`.
     public init(directoryURL: URL, defaultsURL: URL = PromptStore.bundledDefaultsURL) {
         self.directoryURL = directoryURL
         self.defaultsURL = defaultsURL
@@ -85,10 +85,12 @@ public struct PromptStore: PromptStoring {
 
     /// Copies the bundled default for every prompt file that doesn't exist yet.
     ///
-    /// Existing files are never touched, even when empty.
+    /// Existing files are never touched, even when empty. Files are seeded in
+    /// `PromptFile.allCases` order and seeding stops at the first failure: files seeded before it
+    /// stay in place, and calling this again seeds the rest once the cause is fixed.
     ///
-    /// Throws:
-    ///   PromptStoreError: A directory couldn't be created or a default couldn't be copied.
+    /// - Throws: `PromptStoreError` naming the first file whose folder couldn't be created or
+    ///   whose default couldn't be copied.
     public func seedMissingDefaults() throws {
         let fileManager = FileManager.default
         for file in PromptFile.allCases {
@@ -105,8 +107,7 @@ public struct PromptStore: PromptStoring {
 
     /// Reads a prompt file from disk as UTF-8.
     ///
-    /// Throws:
-    ///   PromptStoreError: The file is missing or isn't valid UTF-8.
+    /// - Throws: `PromptStoreError` when the file is missing or isn't valid UTF-8.
     public func read(_ file: PromptFile) throws -> String {
         let url = fileURL(file)
         return try perform("read", url) { try String(contentsOf: url, encoding: .utf8) }
@@ -114,9 +115,8 @@ public struct PromptStore: PromptStoring {
 
     /// Validates `text` and atomically writes it as UTF-8, creating directories as needed.
     ///
-    /// Throws:
-    ///   PromptValidationError: `text` breaks a rule in `PromptFile.validate`; nothing is written.
-    ///   PromptStoreError: The file couldn't be written.
+    /// - Throws: `PromptValidationError` when `text` breaks a rule in `PromptFile.validate`, in
+    ///   which case nothing is written; `PromptStoreError` when the file couldn't be written.
     public func write(_ text: String, to file: PromptFile) throws {
         try file.validate(text)
         try save(text, to: fileURL(file))
@@ -124,8 +124,8 @@ public struct PromptStore: PromptStoring {
 
     /// Overwrites one prompt file with its bundled default.
     ///
-    /// Throws:
-    ///   PromptStoreError: The default couldn't be read or the file couldn't be written.
+    /// - Throws: `PromptStoreError` when the default couldn't be read or the file couldn't be
+    ///   written.
     public func restoreDefault(_ file: PromptFile) throws {
         let source = defaultURL(file)
         let text = try perform("read default", source) {
@@ -139,8 +139,7 @@ public struct PromptStore: PromptStoring {
     /// Returns the trimmed global rules with `PromptFile.channelPlaceholder` replaced by the
     /// trimmed channel guidelines.
     ///
-    /// Throws:
-    ///   PromptStoreError: Either prompt file couldn't be read.
+    /// - Throws: `PromptStoreError` when either prompt file couldn't be read.
     public func assemble(for channel: Channel) throws -> String {
         let global = try read(.global).trimmingCharacters(in: .whitespacesAndNewlines)
         let guidelines = try read(.channel(channel))
