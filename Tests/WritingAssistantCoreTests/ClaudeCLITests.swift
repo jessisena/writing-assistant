@@ -6,19 +6,35 @@ import WritingAssistantCore
 /// to itself (`$DIR`) so tests can inspect what the real process received.
 private struct FakeClaude {
     let directory: URL
+    private let fileContents: String
+    private let executable: Bool
 
     init(script: String, executable: Bool = true) throws {
+        try self.init(
+            contents: "#!/bin/sh\nDIR=\"$(dirname \"$0\")\"\n\(script)\n", executable: executable)
+    }
+
+    /// A `claude` file with exactly `contents`, e.g. a script with a broken shebang.
+    init(contents: String, executable: Bool = true) throws {
         directory = FileManager.default.temporaryDirectory
             .appending(path: "ClaudeCLITests-\(UUID().uuidString)")
+        fileContents = contents
+        self.executable = executable
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let binary = directory.appending(path: "claude")
-        let body = "#!/bin/sh\nDIR=\"$(dirname \"$0\")\"\n\(script)\n"
-        try body.write(to: binary, atomically: true, encoding: .utf8)
+        try install()
+    }
+
+    var binary: URL { directory.appending(path: "claude") }
+
+    func install() throws {
+        try fileContents.write(to: binary, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: executable ? 0o755 : 0o644], ofItemAtPath: binary.path)
     }
 
-    var binary: URL { directory.appending(path: "claude") }
+    func uninstall() throws {
+        try FileManager.default.removeItem(at: binary)
+    }
 
     var cli: ClaudeCLI {
         ClaudeCLI(
@@ -65,6 +81,14 @@ private func withEnvironment(
     defer { previous.forEach(setEnvironment) }
     overrides.forEach(setEnvironment)
     try await body()
+}
+
+private func withEnvironment(_ overrides: [String: String?], body: () throws -> Void) rethrows {
+    let environment = ProcessInfo.processInfo.environment
+    let previous = overrides.keys.map { ($0, environment[$0]) }
+    defer { previous.forEach(setEnvironment) }
+    overrides.forEach(setEnvironment)
+    try body()
 }
 
 /// Resolves every symlink, including `/var` → `/private/var`, to match `pwd -P`.
@@ -273,6 +297,148 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         try await fake.cli.checkAvailable()
+    }
+
+    @Test func foundBinaryIsCachedUntilItStopsBeingExecutable() async throws {
+        let preferred = try FakeClaude(script: "echo preferred")
+        let fallback = try FakeClaude(script: "echo fallback")
+        defer {
+            preferred.remove()
+            fallback.remove()
+        }
+        try preferred.uninstall()
+        let cli = ClaudeCLI(
+            locator: ClaudeBinaryLocator(
+                searchDirectories: [preferred.directory, fallback.directory],
+                useLoginShell: false))
+
+        #expect(try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "fallback")
+        try preferred.install()
+        #expect(try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "fallback")
+        try fallback.uninstall()
+        #expect(
+            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "preferred")
+    }
+
+    @Test func cancellingTheTaskKillsTheProcess() async throws {
+        try await expectStopsSleepingFake { task in task.cancel() }
+    }
+
+    @Test func terminateRunningProcessesKillsTheProcess() async throws {
+        try await expectStopsSleepingFake { _ in ClaudeCLI.terminateRunningProcesses() }
+    }
+
+    private func expectStopsSleepingFake(
+        _ stop: (Task<String, any Error>) -> Void
+    ) async throws {
+        let fake = try FakeClaude(script: #"echo $$ > "$DIR/pid"; exec sleep 10"#)
+        defer { fake.remove() }
+        let cli = fake.cli
+        let task = Task { try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(30)) }
+        let pid = try await waitForPid(of: fake)
+        let clock = ContinuousClock()
+        let stoppedAt = clock.now
+
+        stop(task)
+        let result = await task.result
+
+        #expect(clock.now - stoppedAt < .seconds(3))
+        #expect(throws: PolishError.cliFailed(stderr: "Cancelled")) { try result.get() }
+        #expect(kill(pid, 0) == -1 && errno == ESRCH)
+    }
+
+    private func waitForPid(of fake: FakeClaude) async throws -> pid_t {
+        for _ in 0..<100 {
+            let text = (try? fake.contents(of: "pid"))?.trimmingCharacters(in: .newlines)
+            if let text, let pid = pid_t(text) {
+                return pid
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        Issue.record("fake claude never started")
+        throw CancellationError()
+    }
+
+    @Test func failureDetailIsCapped() async throws {
+        let fake = try FakeClaude(script: "head -c 5000 /dev/zero | tr '\\0' 's' >&2; exit 1")
+        defer { fake.remove() }
+
+        do {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            Issue.record("expected cliFailed")
+        } catch {
+            guard case .cliFailed(let detail) = error else {
+                Issue.record("expected cliFailed, got \(error)")
+                return
+            }
+            #expect(detail.hasPrefix(String(repeating: "s", count: 500)))
+            #expect(detail.count < 520)
+        }
+    }
+
+    @Test func unlaunchableBinaryFailsWithLaunchError() async throws {
+        let fake = try FakeClaude(contents: "#!/nonexistent/interpreter\necho never\n")
+        defer { fake.remove() }
+
+        do {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            Issue.record("expected cliFailed")
+        } catch {
+            guard case .cliFailed(let detail) = error else {
+                Issue.record("expected cliFailed, got \(error)")
+                return
+            }
+            #expect(detail.hasPrefix("Couldn't launch \(fake.binary.path)"))
+        }
+    }
+
+    // The login shell inherits this process's environment, so ZDOTDIR points zsh at a
+    // temporary .zprofile/.zshrc and PATH is reduced so the real claude isn't found.
+
+    @Test func loginShellFindsBinaryOnZprofilePathAndUsesLastLine() throws {
+        let fake = try FakeClaude(script: "echo ok")
+        defer { fake.remove() }
+        let zprofile = "export PATH=\"\(fake.directory.path):$PATH\"\necho 'welcome banner'\n"
+
+        let found = try locateWithLoginShell(dotfiles: [".zprofile": zprofile])
+
+        #expect(found?.path == fake.binary.path)
+    }
+
+    @Test(arguments: ["alias claude='echo hi'", "claude() { :; }"])
+    func loginShellRejectsNonPathOutput(definition: String) throws {
+        let fake = try FakeClaude(script: "echo ok")
+        defer { fake.remove() }
+        // A real binary is on PATH too; the alias/function shadows it in `command -v`.
+        let zprofile = "export PATH=\"\(fake.directory.path):$PATH\"\n\(definition)\n"
+
+        #expect(try locateWithLoginShell(dotfiles: [".zprofile": zprofile]) == nil)
+    }
+
+    @Test func loginShellIgnoresPathSetOnlyInZshrc() throws {
+        let fake = try FakeClaude(script: "echo ok")
+        defer { fake.remove() }
+        let zshrc = "export PATH=\"\(fake.directory.path):$PATH\"\n"
+
+        let found = try locateWithLoginShell(dotfiles: [".zshrc": zshrc])
+
+        #expect(found?.path != fake.binary.path)
+    }
+
+    private func locateWithLoginShell(dotfiles: [String: String]) throws -> URL? {
+        let zdotdir = FileManager.default.temporaryDirectory
+            .appending(path: "ClaudeCLITests-zdotdir-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: zdotdir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: zdotdir) }
+        for (name, contents) in dotfiles {
+            try contents.write(to: zdotdir.appending(path: name), atomically: true, encoding: .utf8)
+        }
+        let locator = ClaudeBinaryLocator(searchDirectories: [], useLoginShell: true)
+        var found: URL?
+        withEnvironment(["ZDOTDIR": zdotdir.path, "PATH": "/usr/bin:/bin"]) {
+            found = locator.locate()
+        }
+        return found
     }
 }
 

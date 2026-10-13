@@ -50,12 +50,13 @@ public struct ClaudeBinaryLocator: Sendable {
         let outcome: SubprocessOutcome
         do {
             outcome = try Subprocess.run(
-                executable: URL(filePath: "/bin/zsh"),
-                arguments: ["-lc", "command -v \(Self.binaryName)"],
-                environment: nil,
-                input: nil,
-                timeout: Self.loginShellTimeout
-            )
+                SubprocessRequest(
+                    executable: URL(filePath: "/bin/zsh"),
+                    arguments: ["-lc", "command -v \(Self.binaryName)"],
+                    environment: nil,
+                    input: nil,
+                    timeout: Self.loginShellTimeout
+                ))
         } catch {
             claudeLogger.warning("Login shell lookup for claude failed: \(error, privacy: .public)")
             return nil
@@ -70,7 +71,7 @@ public struct ClaudeBinaryLocator: Sendable {
         return Self.isExecutableFile(candidate) ? candidate : nil
     }
 
-    private static func isExecutableFile(_ url: URL) -> Bool {
+    static func isExecutableFile(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && !isDirectory.boolValue
