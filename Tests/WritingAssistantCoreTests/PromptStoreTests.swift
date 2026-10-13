@@ -60,6 +60,37 @@ import Testing
         #expect(try diskText(.channel(.formal)) == "Edited formal")
     }
 
+    @Test func seedingIntoAReadOnlyFolderThrowsWithTheFilePath() throws {
+        let fileManager = FileManager.default
+        let folder = store.directoryURL.path(percentEncoded: false)
+        try fileManager.createDirectory(at: store.directoryURL, withIntermediateDirectories: true)
+        try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
+        defer { try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder) }
+
+        let error = #expect(throws: PromptStoreError.self) { try self.store.seedMissingDefaults() }
+
+        #expect(error?.path.hasSuffix("prompts/polish.txt") == true)
+    }
+
+    @Test func seedingStopsAtTheFirstFailureAndResumesOnTheNextCall() throws {
+        let channels = store.directoryURL.appending(path: "channels")
+        try FileManager.default.createDirectory(
+            at: store.directoryURL, withIntermediateDirectories: true)
+        try "not a folder".write(to: channels, atomically: true, encoding: .utf8)
+
+        let error = #expect(throws: PromptStoreError.self) { try self.store.seedMissingDefaults() }
+
+        #expect(error?.path.hasSuffix("channels/slack.txt") == true)
+        #expect(try diskText(.global) == bundledText(.global))
+
+        try FileManager.default.removeItem(at: channels)
+        try store.seedMissingDefaults()
+
+        for file in PromptFile.allCases {
+            #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
+        }
+    }
+
     @Test func readPicksUpExternalEditsImmediately() throws {
         try store.seedMissingDefaults()
         _ = try store.read(.channel(.other))
