@@ -69,7 +69,7 @@ a change applies to the next request with no restart. In Settings:
   and no file can be empty; the editor shows the error and does not save.
 - **Revert** discards unsaved changes.
 - **Restore Default** replaces the selected file with the bundled version, after a confirmation.
-- **Reveal in Finder** opens the prompts folder.
+- **Reveal in Finder** shows the selected file in Finder.
 
 The bundled defaults live in `Sources/WritingAssistantCore/Resources/Prompts/`.
 
@@ -102,7 +102,8 @@ claude --version
 ```
 
 If `claude` is installed somewhere else, make sure that directory is on the `PATH` set by your
-login shell profile (`~/.zprofile` or `~/.zshrc`), then relaunch the app.
+login shell profile, `~/.zprofile`, then try again. The app runs a non-interactive login shell,
+which doesn't read `~/.zshrc`.
 
 ### "Claude returned an error" after a reboot
 

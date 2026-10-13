@@ -83,7 +83,7 @@ Sources/WritingAssistantCore/        library: all logic, no UI
     channels/*.txt                   per-channel rules
 Sources/WritingAssistant/            SwiftUI executable
   WritingAssistantApp.swift          main window + Settings scene (⌘,)
-  AppModel.swift                     @Observable state: input, channel, phase, error
+  AppModel.swift                     @Observable state: input, channel, loading, result, error
   ComposerView.swift                 text input, channel picker, Process (⌘↩)
   ResultsView.swift                  Polished Text and Learning Summary cards
   PromptEditorView.swift             prompt editor (Settings window)
@@ -120,8 +120,11 @@ bundle.
 ### CLI runner
 
 `ClaudeBinaryLocator` checks `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, then runs
-`/bin/zsh -lc 'command -v claude'`, because apps launched from Finder get a minimal `PATH`. The
-result is cached, and those directories are prefixed onto the child's `PATH`.
+`/bin/zsh -lc 'command -v claude'`, because apps launched from Finder get a minimal `PATH`. A
+successful lookup is cached and looked up again if the cached path stops being executable, so
+installing `claude` works without relaunching. Those directories are prefixed onto the child's
+`PATH`. The child runs in the temporary directory, so it never picks up a project's context, and
+`USER`/`HOME` are filled in if missing (the CLI needs `USER` to find its login).
 
 `ClaudeCLI` runs:
 
@@ -132,8 +135,9 @@ claude --print --output-format text --model <model> \
 
 with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
 `MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
-stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. A task terminates
-the process after 120 s. A non-zero exit is retried once; a timeout is never retried.
+stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. After 120 s the
+process gets SIGTERM, then SIGKILL after a 2 s grace. A non-zero exit is retried once; a timeout is
+never retried. Cancelling the request or quitting the app terminates a running `claude` process.
 
 ### Logging
 

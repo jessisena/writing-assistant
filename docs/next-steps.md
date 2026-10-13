@@ -105,7 +105,7 @@ polished text is on the clipboard.
 - Clear a channel file and save: an inline error appears and nothing is saved.
 - Restore Default on an edited file: an inline confirmation appears, and confirming brings back
   the bundled text.
-- Reveal in Finder opens `~/Library/Application Support/Writing Assistant/prompts/`.
+- Reveal in Finder selects the file in `~/Library/Application Support/Writing Assistant/prompts/`.
 - Edit a file in an external editor, then process: the next request uses the edit with no
   relaunch.
 - Delete one file in that folder and relaunch: only that file is re-seeded; your other edits stay.

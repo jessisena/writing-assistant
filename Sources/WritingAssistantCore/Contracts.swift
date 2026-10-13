@@ -1,7 +1,6 @@
 import Foundation
 
 // Shared public API between the Core implementations and the SwiftUI app.
-// Owned by the orchestrator: workers must not change these declarations.
 
 public enum Channel: String, CaseIterable, Sendable, Identifiable {
     case slack
