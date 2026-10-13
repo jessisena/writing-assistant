@@ -44,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        ClaudeCLI.terminateRunningProcesses()
+    }
 }
 
 /// The single stacked column: header, composer, error banner, results.

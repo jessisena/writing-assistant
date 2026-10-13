@@ -114,6 +114,27 @@ import WritingAssistantCore
                 == PolishError.promptUnavailable(detail: "disk full").errorDescription)
     }
 
+    @Test func startupErrorSurvivesSuccessfulReadinessCheck() async {
+        let startup = PolishError.promptUnavailable(detail: "disk full")
+        let model = makeModel(FakePolisher())
+        model.showStartupError(startup)
+
+        await model.checkReadiness()
+
+        #expect(model.errorMessage == startup.errorDescription)
+    }
+
+    @Test func startupErrorAndReadinessFailureAreBothShown() async {
+        let startup = PolishError.promptUnavailable(detail: "disk full")
+        let model = makeModel(FakePolisher(readiness: .claudeNotFound))
+        model.showStartupError(startup)
+
+        await model.checkReadiness()
+
+        let expected = [startup, .claudeNotFound].compactMap(\.errorDescription)
+        #expect(model.errorMessage == expected.joined(separator: "\n"))
+    }
+
     @Test func copyWritesTextAndResetsAfterDelay() async {
         var copiedText: [String] = []
         var copiedDuringDelay: Bool?
