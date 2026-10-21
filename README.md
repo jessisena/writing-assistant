@@ -123,13 +123,30 @@ subscription load. Try again; if it keeps happening, check your Claude subscript
 swift build                        # debug build
 swift run WritingAssistant         # run the app from the terminal
 scripts/test.sh                    # run the test suite
-swift format lint -r Sources Tests # lint
+swift format lint --strict -r Sources Tests # lint
 ```
 
 `scripts/test.sh` wraps `swift test`. With only the Command Line Tools installed, SwiftPM does not
 find the Swift Testing framework on its own, so the script passes its framework and library paths
 to the compiler and linker. Extra arguments go through to `swift test` (for example
 `scripts/test.sh --filter Routing`).
+
+### Checks
+
+Git hooks run through [prek](https://prek.j178.dev), configured in `.pre-commit-config.yaml`:
+`swift format lint --strict`, `shellcheck`, `shfmt`, `actionlint`, `zizmor` and `plutil -lint`.
+They use the tools on your `PATH`.
+
+```sh
+uv tool install prek        # or: brew install prek
+brew install shellcheck shfmt actionlint zizmor
+prek install                # set up the pre-commit hook
+prek run --all-files        # run every check by hand
+```
+
+CI (`.github/workflows/ci.yml`) runs the same checks on every pull request and push to `main`, plus
+a build with warnings treated as errors and the test suite on a macOS 26 runner. Dependabot keeps
+the pinned actions up to date.
 
 The code is split into `WritingAssistantCore` (logic, no UI, unit-tested) and `WritingAssistant`
 (the SwiftUI app). See [docs/architecture.md](docs/architecture.md).
