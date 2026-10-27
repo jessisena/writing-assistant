@@ -208,9 +208,13 @@ struct ClipboardContent: Equatable, Sendable {
 
     /// Adds `error` to the error banner without touching the result, for failures that happen
     /// after a request succeeded, such as a log or history file that couldn't be written.
-    /// A message that is already in the banner isn't repeated.
     func showBanner(_ error: any Error) {
-        let message = error.localizedDescription
+        showBanner(error.localizedDescription)
+    }
+
+    /// Adds `message` to the error banner until the next request starts. A message that is
+    /// already in the banner isn't repeated.
+    func showBanner(_ message: String) {
         guard let current = errorMessage, !current.isEmpty else {
             errorMessage = message
             return

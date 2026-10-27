@@ -22,6 +22,7 @@ struct WritingAssistantApp: App {
         self.store = store
         self.newerDefaults = newerDefaults
         _model = State(initialValue: model)
+        appDelegate.model = model
     }
 
     var body: some Scene {
@@ -54,10 +55,26 @@ struct LearningLogCommands: Commands {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Model the Services menu sends selected text to. Set by `WritingAssistantApp.init`.
+    var model: AppModel?
+    private var serviceProvider: ServiceProvider?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        registerServiceProvider()
+    }
+
+    private func registerServiceProvider() {
+        guard let model else {
+            assertionFailure("AppDelegate.model must be set before the app finishes launching")
+            return
+        }
+        let provider = ServiceProvider(model: model)
+        serviceProvider = provider
+        NSApp.servicesProvider = provider
+        NSUpdateDynamicServices()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
