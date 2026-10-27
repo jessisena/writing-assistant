@@ -220,6 +220,92 @@ import WritingAssistantCore
         #expect(try store.read(.channel(.slack)) == "slack guidelines")
     }
 
+    // MARK: - Newer defaults
+
+    private struct AcknowledgeError: LocalizedError {
+        var errorDescription: String? { "disk full" }
+    }
+
+    private func makeModel(
+        newerDefaults: Set<PromptFile>, store: FakePromptStore? = nil
+    ) -> PromptEditorModel {
+        let store = store ?? FakePromptStore(newerDefaults: newerDefaults)
+        let model = PromptEditorModel(store: store, newerDefaults: newerDefaults)
+        model.reload()
+        return model
+    }
+
+    @Test func reportsNewerDefaultsOnlyForTheGivenFiles() {
+        let model = makeModel(newerDefaults: [.channel(.slack)])
+
+        #expect(model.hasNewerDefault(.channel(.slack)))
+        #expect(!model.hasNewerDefault(.global))
+        #expect(!model.isNewerDefaultAvailable)
+        model.selection = .channel(.slack)
+        #expect(model.isNewerDefaultAvailable)
+    }
+
+    @Test func keepingMineAcknowledgesAndClearsTheBanner() throws {
+        let store = FakePromptStore(newerDefaults: [.channel(.slack)])
+        try store.write("my slack rules", to: .channel(.slack))
+        let model = makeModel(newerDefaults: [.channel(.slack)], store: store)
+        model.selection = .channel(.slack)
+
+        model.keepMine()
+
+        #expect(!model.isNewerDefaultAvailable)
+        #expect(store.newerDefaults.isEmpty)
+        #expect(model.draft == "my slack rules")
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func failedKeepMineShowsAnErrorAndKeepsTheBanner() {
+        let store = FakePromptStore(newerDefaults: [.channel(.slack)])
+        store.acknowledgeFailure = AcknowledgeError()
+        let model = makeModel(newerDefaults: [.channel(.slack)], store: store)
+        model.selection = .channel(.slack)
+
+        model.keepMine()
+
+        #expect(model.isNewerDefaultAvailable)
+        let message = model.errorMessage ?? ""
+        #expect(message.contains(Channel.slack.displayName))
+        #expect(message.contains("disk full"))
+    }
+
+    @Test func restoringTheDefaultClearsTheBanner() {
+        let model = makeModel(newerDefaults: [.channel(.slack), .global])
+        model.selection = .channel(.slack)
+
+        model.requestRestore()
+        model.confirmRestore()
+
+        #expect(!model.isNewerDefaultAvailable)
+        #expect(model.hasNewerDefault(.global))
+    }
+
+    @Test func cancellingRestoreKeepsTheBanner() {
+        let model = makeModel(newerDefaults: [.channel(.slack)])
+        model.selection = .channel(.slack)
+
+        model.requestRestore()
+        model.cancelRestore()
+
+        #expect(model.isNewerDefaultAvailable)
+    }
+
+    @Test func failedRestoreKeepsTheBanner() {
+        let store = FailingRestoreStore()
+        let model = PromptEditorModel(store: store, newerDefaults: [.global])
+        model.reload()
+
+        model.requestRestore()
+        model.confirmRestore()
+
+        #expect(model.isNewerDefaultAvailable)
+        #expect(model.errorMessage?.contains("Couldn't restore") == true)
+    }
+
     @Test func editingClearsAnEarlierValidationError() {
         let model = makeModel()
         model.draft = "no placeholder"
@@ -231,4 +317,19 @@ import WritingAssistantCore
         #expect(model.errorMessage == nil)
         #expect(model.isDirty(.global))
     }
+}
+
+/// A `FakePromptStore` whose `restoreDefault(_:)` always fails.
+private struct FailingRestoreStore: PromptStoring {
+    let base = FakePromptStore()
+
+    var directoryURL: URL { base.directoryURL }
+    func fileURL(_ file: PromptFile) -> URL { base.fileURL(file) }
+    func seedMissingDefaults() throws { try base.seedMissingDefaults() }
+    func read(_ file: PromptFile) throws -> String { try base.read(file) }
+    func write(_ text: String, to file: PromptFile) throws { try base.write(text, to: file) }
+    func restoreDefault(_ file: PromptFile) throws { throw CocoaError(.fileWriteNoPermission) }
+    func syncDefaults() throws -> Set<PromptFile> { try base.syncDefaults() }
+    func acknowledgeDefault(_ file: PromptFile) throws { try base.acknowledgeDefault(file) }
+    func assemble(for channel: Channel) throws -> String { try base.assemble(for: channel) }
 }
