@@ -45,14 +45,16 @@ public struct PolishService: Polishing {
     public func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
         let systemPrompt = try assemblePrompt(for: channel)
-        return try await send(systemPrompt, input: input)
+        let (raw, model) = try await send(systemPrompt, input: input)
+        return try Self.parse(raw, model: model)
     }
 
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
     ///
     /// The prompt is the channel's assembled system prompt plus an "Additional instruction"
-    /// section holding the refinement file. Only the new polished text is returned: the model's
-    /// language and learning summary describe its own output, so they are dropped.
+    /// section holding the refinement file. Only `polished_text` is read from the reply: the
+    /// model's language and learning summary describe its own output, so they are ignored, even
+    /// when malformed.
     ///
     /// - Parameters:
     ///   - text: The current polished text. Leading and trailing whitespace is ignored.
@@ -79,7 +81,8 @@ public struct PolishService: Polishing {
 
             \(Self.refinementNote)
             """
-        return try await send(refinementPrompt, input: input).polishedText
+        let (raw, _) = try await send(refinementPrompt, input: input)
+        return try Self.polishedText(in: Self.decodeObject(raw))
     }
 
     public func checkReady() async throws(PolishError) {
@@ -97,13 +100,14 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
+    /// Runs the prompt on the routed model, returning the raw reply and the model used.
     private func send(_ systemPrompt: String, input: String) async throws(PolishError)
-        -> PolishResult
+        -> (raw: String, model: String)
     {
         let model = ModelRouting.pickModel(for: input)
         let raw = try await runner.run(
             prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout)
-        return try Self.parse(raw, model: model)
+        return (raw, model)
     }
 
     private func assemblePrompt(for channel: Channel) throws(PolishError) -> String {
@@ -125,9 +129,7 @@ public struct PolishService: Polishing {
 
     private static func parse(_ raw: String, model: String) throws(PolishError) -> PolishResult {
         let object = try decodeObject(raw)
-        guard let polishedText = object["polished_text"] as? String else {
-            throw badFormat("missing or non-string polished_text")
-        }
+        let polishedText = try polishedText(in: object)
         let wasTranslated = isTruthy(object["was_translated"])
         let summary = wasTranslated ? nil : try decodeSummary(object["learning_summary"])
         return PolishResult(
@@ -137,6 +139,13 @@ public struct PolishService: Polishing {
             wasTranslated: wasTranslated,
             modelUsed: model
         )
+    }
+
+    private static func polishedText(in object: [String: Any]) throws(PolishError) -> String {
+        guard let polishedText = object["polished_text"] as? String else {
+            throw badFormat("missing or non-string polished_text")
+        }
+        return polishedText
     }
 
     private static func decodeObject(_ raw: String) throws(PolishError) -> [String: Any] {
