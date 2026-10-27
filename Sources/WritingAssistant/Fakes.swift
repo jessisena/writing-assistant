@@ -143,7 +143,11 @@
 
     extension PolishResult {
         static let sample = PolishResult(
-            polishedText: "Thanks for the update. I'll review the doc today.",
+            polishedText: """
+                Thanks for the **update**. I'll review the doc *today*:
+                - Read the summary
+                - Leave comments 👍
+                """,
             learningSummary: LearningSummary(
                 corrections: [
                     Correction(

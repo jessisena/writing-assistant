@@ -2,4 +2,5 @@ Keep it short and scannable. Aim for 1-3 short paragraphs or a brief bulleted li
 Use a conversational but professional tone.
 Avoid overly formal language. Write as you would speak to a colleague.
 Use emoji sparingly if it adds clarity (e.g., a checkmark ✓ for completed items).
-No headers or heavy formatting. Slack-native formatting only (bold, italic, bullet lists).
+No headers or heavy formatting. Use only Markdown **bold**, *italic* and "- " bullets; they are
+converted to Slack formatting on copy. Do not use Slack's own *bold* or _italic_ syntax.

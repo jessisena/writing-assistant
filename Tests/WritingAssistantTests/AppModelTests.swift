@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 import WritingAssistantCore
 
@@ -9,6 +10,14 @@ import WritingAssistantCore
         AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
     }
 
+    private func richText(_ markdown: String) -> NSAttributedString {
+        AppModel.editorText(fromMarkdown: markdown)
+    }
+
+    private func markdown(_ text: NSAttributedString) -> String {
+        RichText.markdown(from: RichTextBridge.attributedString(from: text))
+    }
+
     @Test func defaultChannelIsFormal() {
         #expect(makeModel(FakePolisher()).channel == .formal)
     }
@@ -17,7 +26,7 @@ import WritingAssistantCore
     func blankInputShowsEmptyMessageWithoutCallingPolisher(input: String) async {
         let polisher = FakePolisher()
         let model = makeModel(polisher)
-        model.inputText = input
+        model.input = NSAttributedString(string: input)
 
         await model.process()
 
@@ -33,7 +42,7 @@ import WritingAssistantCore
         await model.process()
         #expect(model.errorMessage != nil)
 
-        model.inputText = "I will to review the doc"
+        model.input = NSAttributedString(string: "I will to review the doc")
         await model.process()
 
         #expect(model.result == .sample)
@@ -45,7 +54,7 @@ import WritingAssistantCore
     func failureClearsEarlierResultAndShowsMessage(error: PolishError) async {
         let polisher = FakePolisher()
         let model = makeModel(polisher)
-        model.inputText = "Hello"
+        model.input = NSAttributedString(string: "Hello")
         await model.process()
         #expect(model.result != nil)
 
@@ -60,7 +69,7 @@ import WritingAssistantCore
     @Test func trimmedTextAndSelectedChannelReachPolisher() async {
         let polisher = FakePolisher()
         let model = makeModel(polisher)
-        model.inputText = "  \n hola equipo \n "
+        model.input = NSAttributedString(string: "  \n hola equipo \n ")
         model.channel = .slackInformal
 
         await model.process()
@@ -73,7 +82,7 @@ import WritingAssistantCore
     @Test func secondProcessWhileLoadingIsIgnored() async {
         let polisher = FakePolisher(delay: .milliseconds(200))
         let model = makeModel(polisher)
-        model.inputText = "Hello"
+        model.input = NSAttributedString(string: "Hello")
 
         let first = Task { await model.process() }
         while !model.isLoading { await Task.yield() }
@@ -136,25 +145,30 @@ import WritingAssistantCore
     }
 
     @Test func copyWritesTextAndResetsAfterDelay() async {
-        var copiedText: [String] = []
+        var copied: [ClipboardContent] = []
         var copiedDuringDelay: Bool?
         var waited: [Duration] = []
         var model: AppModel?
         model = AppModel(
             polisher: FakePolisher(),
-            writeToPasteboard: { copiedText.append($0) },
+            writeToPasteboard: { copied.append($0) },
             sleep: { duration in
                 waited.append(duration)
                 copiedDuringDelay = model?.copied
             }
         )
         guard let model else { return }
-        model.inputText = "Hello"
+        model.input = NSAttributedString(string: "Hello")
         await model.process()
 
         await model.copyResult()
 
-        #expect(copiedText == [PolishResult.sample.polishedText])
+        let expected = RichText.attributedString(fromMarkdown: PolishResult.sample.polishedText)
+        #expect(
+            copied == [
+                ClipboardContent(
+                    html: RichText.html(from: expected), plain: RichText.plainText(from: expected))
+            ])
         #expect(copiedDuringDelay == true)
         #expect(waited == [.seconds(2)])
         #expect(!model.copied)
@@ -167,7 +181,7 @@ import WritingAssistantCore
             writeToPasteboard: { _ in },
             sleep: { _ in await withCheckedContinuation { pending.append($0) } }
         )
-        model.inputText = "Hello"
+        model.input = NSAttributedString(string: "Hello")
         await model.process()
 
         let first = Task { await model.copyResult() }
@@ -185,16 +199,67 @@ import WritingAssistantCore
     }
 
     @Test func copyWithoutResultDoesNothing() async {
-        var copiedText: [String] = []
+        var copied: [ClipboardContent] = []
         let model = AppModel(
             polisher: FakePolisher(),
-            writeToPasteboard: { copiedText.append($0) },
+            writeToPasteboard: { copied.append($0) },
             sleep: { _ in }
         )
 
         await model.copyResult()
 
-        #expect(copiedText.isEmpty)
+        #expect(copied.isEmpty)
         #expect(!model.copied)
+    }
+
+    @Test func formattedInputIsSentAsMarkdown() async {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        model.input = richText("Make it **bold** and *calm* 🙂\n- one\n- two")
+
+        await model.process()
+
+        #expect(polisher.calls.first?.text == "Make it **bold** and *calm* 🙂\n- one\n- two")
+    }
+
+    @Test func outputIsSetFromTheResultMarkdown() async {
+        let model = makeModel(FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+
+        await model.process()
+
+        #expect(markdown(model.output) == PolishResult.sample.polishedText)
+        #expect(model.output.string.contains("• Read the summary"))
+    }
+
+    @Test func failureLeavesOutputEmpty() async {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+
+        polisher.outcome = .failure(.claudeNotFound)
+        await model.process()
+
+        #expect(model.output.length == 0)
+    }
+
+    @Test func copyUsesTheEditedOutput() async {
+        var copied: [ClipboardContent] = []
+        let model = AppModel(
+            polisher: FakePolisher(),
+            writeToPasteboard: { copied.append($0) },
+            sleep: { _ in }
+        )
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+        model.output = richText("My **edit** & more\n- point")
+
+        await model.copyResult()
+
+        #expect(copied.count == 1)
+        #expect(copied.first?.html.contains("<b>edit</b> &amp; more") == true)
+        #expect(copied.first?.html.contains("<ul><li>point</li></ul>") == true)
+        #expect(copied.first?.plain == "My edit & more\n• point")
     }
 }

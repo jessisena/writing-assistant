@@ -2,11 +2,19 @@ import AppKit
 import Observation
 import WritingAssistantCore
 
+/// What Copy puts on the clipboard: HTML for apps that keep formatting (Slack, Docs, Mail) and
+/// plain text for the rest.
+struct ClipboardContent: Equatable, Sendable {
+    let html: String
+    let plain: String
+}
+
 /// State and actions for the main window.
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
 
-    var inputText = ""
+    var input = NSAttributedString()
+    var output = NSAttributedString()
     var channel: Channel = .formal
     private(set) var isLoading = false
     private(set) var result: PolishResult?
@@ -14,7 +22,7 @@ import WritingAssistantCore
     private(set) var copied = false
 
     @ObservationIgnored private let polisher: any Polishing
-    @ObservationIgnored private let writeToPasteboard: @MainActor (String) -> Void
+    @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
     @ObservationIgnored private var copyGeneration = 0
     @ObservationIgnored private var startupErrorMessage: String?
@@ -23,11 +31,12 @@ import WritingAssistantCore
     ///
     /// - Parameters:
     ///   - polisher: Service that polishes text.
-    ///   - writeToPasteboard: Puts text on the clipboard. Defaults to the general pasteboard.
+    ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
+    ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
     init(
         polisher: any Polishing,
-        writeToPasteboard: @escaping @MainActor (String) -> Void =
+        writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
         sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
@@ -36,20 +45,25 @@ import WritingAssistantCore
         self.sleep = sleep
     }
 
-    /// Polishes `inputText` with the selected channel. Ignored while a request is running.
+    /// Polishes `input`, sent as Markdown, with the selected channel. Ignored while a request
+    /// is running.
     func process() async {
         guard !isLoading else { return }
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = RichText.markdown(from: RichTextBridge.attributedString(from: input))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             errorMessage = PolishError.emptyInput.errorDescription
             return
         }
         errorMessage = nil
         result = nil
+        output = NSAttributedString()
         isLoading = true
         defer { isLoading = false }
         do {
-            result = try await polisher.polish(text: text, channel: channel)
+            let polished = try await polisher.polish(text: text, channel: channel)
+            result = polished
+            output = Self.editorText(fromMarkdown: polished.polishedText)
         } catch {
             result = nil
             errorMessage = error.errorDescription
@@ -74,10 +88,13 @@ import WritingAssistantCore
         errorMessage = startupErrorMessage
     }
 
-    /// Copies the polished text and shows "Copied" for `copiedDuration`.
+    /// Copies the edited output as HTML and plain text and shows "Copied" for `copiedDuration`.
     func copyResult() async {
-        guard let text = result?.polishedText else { return }
-        writeToPasteboard(text)
+        guard result != nil else { return }
+        let text = RichTextBridge.attributedString(from: output)
+        writeToPasteboard(
+            ClipboardContent(html: RichText.html(from: text), plain: RichText.plainText(from: text))
+        )
         copied = true
         copyGeneration += 1
         let generation = copyGeneration
@@ -87,9 +104,15 @@ import WritingAssistantCore
         }
     }
 
-    static func writeToGeneralPasteboard(_ text: String) {
+    /// Converts Markdown from Claude into text for the output editor.
+    static func editorText(fromMarkdown markdown: String) -> NSAttributedString {
+        RichTextBridge.nsAttributedString(from: RichText.attributedString(fromMarkdown: markdown))
+    }
+
+    static func writeToGeneralPasteboard(_ content: ClipboardContent) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(content.html, forType: .html)
+        pasteboard.setString(content.plain, forType: .string)
     }
 }
