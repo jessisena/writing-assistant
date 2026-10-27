@@ -93,6 +93,28 @@ import WritingAssistantCore
         #expect(try saved().first?.outputMarkdown == "My **edit**")
     }
 
+    @Test func blankOutputIsNotSavedOnCopy() async throws {
+        let model = makeModel()
+        await process(model, "Hello")
+        model.output = NSAttributedString(string: " \n ")
+
+        await model.copyResult()
+
+        #expect(model.history.first?.outputMarkdown == PolishResult.sample.polishedText)
+        #expect(try saved().first?.outputMarkdown == PolishResult.sample.polishedText)
+    }
+
+    @Test func blankOutputIsNotSavedOnClear() async throws {
+        let model = makeModel()
+        await process(model, "Hello")
+        model.output = NSAttributedString()
+
+        model.clear()
+
+        #expect(try saved().first?.outputMarkdown == PolishResult.sample.polishedText)
+        #expect(model.currentHistoryID == nil)
+    }
+
     @Test func refineSavesTheRefinedOutputToTheSameEntry() async throws {
         let polisher = FakePolisher()
         let model = makeModel(polisher)

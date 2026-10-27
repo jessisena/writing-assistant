@@ -4,7 +4,8 @@ import WritingAssistantCore
 extension AppModel {
     /// Writes the output on screen, as Markdown, into the current history entry, so edits made
     /// in the output editor aren't lost. Does nothing when there is no current entry or the
-    /// output hasn't changed. A save failure goes to the error banner.
+    /// output hasn't changed, and blank output is never saved, so an entry keeps its last
+    /// non-blank output. A save failure goes to the error banner.
     ///
     /// Called on copy, on clear, before a new request and when restoring another entry, so it
     /// doesn't write on every keystroke. Anything else that replaces `output` while an entry is
@@ -84,7 +85,9 @@ extension AppModel {
             let index = history.firstIndex(where: { $0.id == id })
         else { return }
         let markdown = RichText.markdown(from: RichTextBridge.attributedString(from: output))
-        guard history[index].outputMarkdown != markdown else { return }
+        guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            history[index].outputMarkdown != markdown
+        else { return }
         history[index].outputMarkdown = markdown
         try saveHistory()
     }
