@@ -24,6 +24,7 @@ extension AppModel {
         AppModel(
             polisher: polisher,
             learningLog: LearningLog(fileURL: directory.appending(path: "learning-log.md")),
+            historyStore: HistoryStore(fileURL: directory.appending(path: "history.json")),
             writeToPasteboard: writeToPasteboard,
             sleep: sleep
         )

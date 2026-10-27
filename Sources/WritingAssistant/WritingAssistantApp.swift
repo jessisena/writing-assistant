@@ -94,6 +94,9 @@ struct MainWindowView: View {
                 withAnimation { proxy.scrollTo(Self.resultsID, anchor: .bottom) }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { HistoryButton(model: model) }
+        }
     }
 
     private static let resultsID = "results"
