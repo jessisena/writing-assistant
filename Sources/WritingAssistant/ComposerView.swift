@@ -26,8 +26,9 @@ struct ComposerView: View {
             ProcessRow(
                 isLoading: model.isLoading,
                 canClear: model.canClear,
-                onProcess: { Task { await model.process() } },
-                onClear: model.clear
+                onProcess: model.startProcessing,
+                onClear: model.clear,
+                onCancel: model.cancel
             )
         }
     }
@@ -38,6 +39,7 @@ private struct ProcessRow: View {
     let canClear: Bool
     let onProcess: () -> Void
     let onClear: () -> Void
+    let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -60,12 +62,20 @@ private struct ProcessRow: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Spacer()
-            Button("Clear", action: onClear)
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(!canClear)
-                .keyboardShortcut("k", modifiers: .command)
-                .help("Clear the input and results (⌘K)")
+            if isLoading {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+                    .help("Stop the request (Esc)")
+            } else {
+                Button("Clear", action: onClear)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(!canClear)
+                    .keyboardShortcut("k", modifiers: .command)
+                    .help("Clear the input and results (⌘K)")
+            }
         }
     }
 }

@@ -317,4 +317,122 @@ import WritingAssistantCore
         model.input = NSAttributedString()
         #expect(model.canClear)
     }
+
+    private static let newerResult = PolishResult(
+        polishedText: "The newer answer.",
+        learningSummary: nil,
+        detectedLanguage: "English",
+        wasTranslated: false,
+        modelUsed: ModelRouting.haikuModel
+    )
+
+    private func waitUntil(_ polisher: GatedPolisher, hasCalls count: Int) async {
+        while polisher.waitingCount < count { await Task.yield() }
+    }
+
+    @Test func startProcessingShowsLoadingRightAway() async {
+        let polisher = GatedPolisher()
+        let gated = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        gated.input = NSAttributedString(string: "Hello")
+
+        gated.startProcessing()
+        gated.startProcessing()
+
+        #expect(gated.isLoading)
+        await waitUntil(polisher, hasCalls: 1)
+        polisher.resume(0, with: .success(.sample))
+        await gated.requestTask?.value
+        #expect(polisher.waitingCount == 1)
+        #expect(gated.result == .sample)
+        #expect(!gated.isLoading)
+    }
+
+    @Test func cancelEndsLoadingWithoutErrorOrResult() async {
+        let polisher = GatedPolisher()
+        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        model.input = NSAttributedString(string: "Hello")
+        model.startProcessing()
+        await waitUntil(polisher, hasCalls: 1)
+
+        model.cancel()
+
+        #expect(!model.isLoading)
+        #expect(polisher.cancelledCount == 1)
+        polisher.resume(0, with: .failure(.cliFailed(stderr: "Cancelled")))
+        await model.requestTask?.value
+        #expect(model.errorMessage == nil)
+        #expect(model.result == nil)
+        #expect(model.output.length == 0)
+        #expect(model.input.string == "Hello")
+    }
+
+    @Test func cancelledTaskShowsNoErrorEvenWithoutCancelCall() async {
+        let polisher = GatedPolisher()
+        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        model.input = NSAttributedString(string: "Hello")
+        let request = Task { await model.process() }
+        await waitUntil(polisher, hasCalls: 1)
+
+        request.cancel()
+        polisher.resume(0, with: .failure(.cliFailed(stderr: "Cancelled")))
+        await request.value
+
+        #expect(!model.isLoading)
+        #expect(model.errorMessage == nil)
+        #expect(model.result == nil)
+    }
+
+    @Test func newRequestAfterCancelWorksAndIgnoresTheLateAnswer() async {
+        let polisher = GatedPolisher()
+        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        model.input = NSAttributedString(string: "Hello")
+        model.startProcessing()
+        await waitUntil(polisher, hasCalls: 1)
+        let cancelled = model.requestTask
+        model.cancel()
+
+        model.startProcessing()
+        await waitUntil(polisher, hasCalls: 2)
+        polisher.resume(1, with: .success(Self.newerResult))
+        await model.requestTask?.value
+        polisher.resume(0, with: .success(.sample))
+        await cancelled?.value
+
+        #expect(model.result == Self.newerResult)
+        #expect(model.output.string == "The newer answer.")
+        #expect(!model.isLoading)
+    }
+
+    @Test func lateFailureOfACancelledRequestDoesNotTouchTheNewerOne() async {
+        let polisher = GatedPolisher()
+        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        model.input = NSAttributedString(string: "Hello")
+        model.startProcessing()
+        await waitUntil(polisher, hasCalls: 1)
+        let cancelled = model.requestTask
+        model.cancel()
+        model.startProcessing()
+        await waitUntil(polisher, hasCalls: 2)
+        let newer = model.requestTask
+
+        polisher.resume(0, with: .failure(.cliFailed(stderr: "Cancelled")))
+        await cancelled?.value
+
+        #expect(model.isLoading)
+        #expect(model.errorMessage == nil)
+        polisher.resume(1, with: .success(Self.newerResult))
+        await newer?.value
+        #expect(model.result == Self.newerResult)
+    }
+
+    @Test func cancelWhenIdleKeepsTheResult() async {
+        let model = makeModel(FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+
+        model.cancel()
+
+        #expect(model.result == .sample)
+        #expect(model.output.length > 0)
+    }
 }
