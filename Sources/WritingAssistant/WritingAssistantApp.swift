@@ -26,10 +26,11 @@ struct WritingAssistantApp: App {
     }
 
     var body: some Scene {
-        Window("Writing Assistant", id: "main") {
+        Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
                 .task { await model.checkReadiness() }
+                .handsMainWindowOpener(to: appDelegate)
         }
         .defaultSize(width: 820, height: 780)
         .windowResizability(.contentMinSize)
@@ -40,7 +41,28 @@ struct WritingAssistantApp: App {
 
         Settings {
             PromptEditorView(store: store, newerDefaults: newerDefaults)
+                .handsMainWindowOpener(to: appDelegate)
         }
+    }
+}
+
+/// Gives the app delegate a way to open the main window. Only SwiftUI views can open a scene,
+/// and the service needs it after the main window was closed.
+private struct MainWindowOpener: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+    let appDelegate: AppDelegate
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            let openWindow = openWindow
+            appDelegate.openMainWindow = { openWindow(id: ServiceProvider.mainWindowID) }
+        }
+    }
+}
+
+extension View {
+    fileprivate func handsMainWindowOpener(to appDelegate: AppDelegate) -> some View {
+        modifier(MainWindowOpener(appDelegate: appDelegate))
     }
 }
 
@@ -58,6 +80,8 @@ struct LearningLogCommands: Commands {
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Model the Services menu sends selected text to. Set by `WritingAssistantApp.init`.
     var model: AppModel?
+    /// Opens the main window. Set by the main window and the Settings window when they appear.
+    var openMainWindow: (@MainActor () -> Void)?
     private var serviceProvider: ServiceProvider?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -71,7 +95,9 @@ struct LearningLogCommands: Commands {
             assertionFailure("AppDelegate.model must be set before the app finishes launching")
             return
         }
-        let provider = ServiceProvider(model: model)
+        let provider = ServiceProvider(model: model) { [weak self] in
+            ServiceProvider.bringMainWindowForward(openMainWindow: self?.openMainWindow)
+        }
         serviceProvider = provider
         NSApp.servicesProvider = provider
         NSUpdateDynamicServices()

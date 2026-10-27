@@ -124,4 +124,40 @@ import WritingAssistantCore
         polisher.resume(0, with: .success(.sample))
         await model.requestTask?.value
     }
+
+    private func makeWindow(identifier: String) -> NSWindow {
+        let window = NSWindow(
+            contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.identifier = NSUserInterfaceItemIdentifier(identifier)
+        return window
+    }
+
+    @Test func opensTheMainWindowWhenItIsClosed() {
+        var opens = 0
+        let settings = makeWindow(identifier: "com_apple_SwiftUI_Settings_window")
+
+        ServiceProvider.showMainWindow(in: [settings]) { opens += 1 }
+
+        #expect(opens == 1)
+    }
+
+    @Test func missingOpenerLeavesTheWindowsAlone() {
+        let settings = makeWindow(identifier: "com_apple_SwiftUI_Settings_window")
+
+        ServiceProvider.showMainWindow(in: [settings], openMainWindow: nil)
+
+        #expect(!settings.isVisible)
+    }
+
+    @Test func reusesTheOpenMainWindowInsteadOfOpeningAnother() {
+        var opens = 0
+        let main = makeWindow(identifier: ServiceProvider.mainWindowID)
+        defer { main.close() }
+
+        ServiceProvider.showMainWindow(in: [main]) { opens += 1 }
+
+        #expect(opens == 0)
+        #expect(main.isVisible)
+    }
 }
