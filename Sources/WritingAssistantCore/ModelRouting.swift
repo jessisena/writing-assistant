@@ -3,7 +3,7 @@ import Foundation
 /// Chooses the Claude model for a piece of text.
 public enum ModelRouting {
     public static let haikuModel = "claude-haiku-4-5-20251001"
-    public static let sonnetModel = "claude-sonnet-4-6"
+    public static let sonnetModel = "claude-sonnet-5-5"
 
     static let maxHaikuWords = 60
     static let maxNonASCIIRatio = 0.02

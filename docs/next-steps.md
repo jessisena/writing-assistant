@@ -109,16 +109,3 @@ polished text is on the clipboard.
 - Edit a file in an external editor, then process: the next request uses the edit with no
   relaunch.
 - Delete one file in that folder and relaunch: only that file is re-seeded; your other edits stay.
-
----
-
-## Model upgrade check
-
-Check whether a newer Sonnet is available to the CLI:
-
-```sh
-claude --print --model claude-sonnet-5 "hi"
-```
-
-If it succeeds, update `sonnetModel` in `Sources/WritingAssistantCore/ModelRouting.swift` and
-rebuild with `scripts/build_app.sh`.

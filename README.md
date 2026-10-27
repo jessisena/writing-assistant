@@ -162,7 +162,8 @@ The model IDs are constants in `Sources/WritingAssistantCore/ModelRouting.swift`
 
 ```swift
 public static let haikuModel = "claude-haiku-4-5-20251001"
-public static let sonnetModel = "claude-sonnet-4-6"
+public static let sonnetModel = "claude-sonnet-5-5"
 ```
 
-Update `sonnetModel` when a newer Sonnet is available to your CLI, then rebuild.
+To change models, update these constants, check the new ID with
+`claude --print --model <id> "hi"`, then rebuild with `scripts/build_app.sh`.

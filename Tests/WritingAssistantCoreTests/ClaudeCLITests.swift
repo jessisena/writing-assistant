@@ -122,12 +122,12 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: #"printf '%s\n' "$@" > "$DIR/args"; echo ok"#)
         defer { fake.remove() }
 
-        _ = try await fake.cli.run(prompt: "p", model: "claude-sonnet-4-6", timeout: .seconds(10))
+        _ = try await fake.cli.run(prompt: "p", model: "claude-sonnet-5-5", timeout: .seconds(10))
 
         let arguments = try fake.contents(of: "args").split(separator: "\n").map(String.init)
         #expect(
             arguments == [
-                "--print", "--output-format", "text", "--model", "claude-sonnet-4-6",
+                "--print", "--output-format", "text", "--model", "claude-sonnet-5-5",
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--no-session-persistence",
             ])

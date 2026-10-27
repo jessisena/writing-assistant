@@ -220,6 +220,6 @@ the first request.
 Defined as constants in `Sources/WritingAssistantCore/ModelRouting.swift`:
 
 - `haikuModel = "claude-haiku-4-5-20251001"`
-- `sonnetModel = "claude-sonnet-4-6"`
+- `sonnetModel = "claude-sonnet-5-5"`
 
-Update `sonnetModel` here when a newer Sonnet becomes available to the CLI.
+Update these constants when newer models are available to the CLI.
