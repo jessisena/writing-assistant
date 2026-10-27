@@ -319,6 +319,54 @@ import WritingAssistantCore
         #expect(model.result == .sample)
     }
 
+    @Test func deleteThatCantBeSavedShowsBannerAndStillRemovesTheEntry() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        let firstID = try await twoEntriesWithFailingSave(model, polisher)
+        defer { try? setPermissions(0o755, of: directory) }
+
+        model.deleteHistoryEntry(id: firstID)
+
+        #expect(!model.history.contains { $0.id == firstID })
+        #expect(model.history.count == 1)
+        #expect(model.currentHistoryID != nil)
+        #expect(model.errorMessage?.contains("Couldn't save the history") == true)
+        #expect(try saved().contains { $0.id == firstID })
+    }
+
+    @Test func clearHistoryThatCantBeSavedShowsBannerAndStillEmptiesIt() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        _ = try await twoEntriesWithFailingSave(model, polisher)
+        defer { try? setPermissions(0o755, of: directory) }
+
+        model.clearHistory()
+
+        #expect(model.history.isEmpty)
+        #expect(model.currentHistoryID == nil)
+        #expect(model.result == Self.secondResult)
+        #expect(model.errorMessage?.contains("Couldn't save the history") == true)
+        #expect(try saved().count == 2)
+    }
+
+    @Test func refineAfterTheCurrentEntryWasDeletedSavesNowhere() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        await process(model, "Hello")
+        let entryID = try #require(model.currentHistoryID)
+        model.deleteHistoryEntry(id: entryID)
+        polisher.outcome = .success(Self.secondResult)
+
+        model.refine(.shorter)
+        await model.requestTask?.value
+
+        #expect(markdown(model.output) == "Second answer.")
+        #expect(model.history.isEmpty)
+        #expect(model.currentHistoryID == nil)
+        #expect(try saved().isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test func historyKeepsOnlyTheNewestEntriesInMemory() async throws {
         let model = AppModel(
             polisher: FakePolisher(),
