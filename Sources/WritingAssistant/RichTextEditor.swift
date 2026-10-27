@@ -198,19 +198,27 @@ final class FormattingTextView: NSTextView {
         }
     }
 
-    override func paste(_ sender: Any?) {
-        if !pasteNormalized(from: .general) {
-            super.paste(sender)
-        }
-    }
+    /// Pasteboard types that carry another app's formatting, under both the modern names and the
+    /// legacy ones AppKit passes to `readSelection(from:type:)`.
+    private static let richTextTypes: Set<NSPasteboard.PasteboardType> = [
+        .rtf, .rtfd, .html, NSPasteboard.PasteboardType("com.apple.flat-rtfd"),
+        NSPasteboard.PasteboardType("NeXT Rich Text Format v1.0 pasteboard type"),
+        NSPasteboard.PasteboardType("NeXT RTFD pasteboard type"),
+        NSPasteboard.PasteboardType("Apple HTML pasteboard type"),
+    ]
 
-    /// Replaces the selection with the pasteboard's text, keeping only supported formatting.
+    /// Reads pasted or dropped text into the selection. Paste, Paste and Match Style and
+    /// drag-and-drop all come through here. Rich text keeps only the supported formatting;
+    /// plain text and other types are left to `NSTextView`, which uses the typing style.
     ///
-    /// - Parameter pasteboard: The pasteboard to read rich or plain text from.
-    /// - Returns: False when the pasteboard holds no text.
-    @discardableResult
-    func pasteNormalized(from pasteboard: NSPasteboard) -> Bool {
-        let objects = pasteboard.readObjects(forClasses: [NSAttributedString.self])
+    /// - Returns: False when the pasteboard holds no text of `type`.
+    override func readSelection(
+        from pboard: NSPasteboard, type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard Self.richTextTypes.contains(type) else {
+            return super.readSelection(from: pboard, type: type)
+        }
+        let objects = pboard.readObjects(forClasses: [NSAttributedString.self])
         guard let pasted = objects?.first as? NSAttributedString else { return false }
         let text = RichTextBridge.normalized(pasted)
         let range = selectedRange()

@@ -174,7 +174,8 @@ presentation intents, and renders HTML and plain text. `RichTextBridge` (app) co
 monospaced font, links), and normalizes pasted text: bold, italic, strikethrough, code and links
 are kept; foreign fonts, sizes and colors are dropped, and the foreground is `NSColor.textColor`
 so dark mode works. `FormattingTextView` is an `NSTextView` subclass with the toggle actions and a
-normalizing `paste(_:)`. `RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
+`readSelection(from:type:)` override that normalizes rich text read by paste and drag-and-drop.
+`RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
 editor lets each `FormattingToolbar` act on its own editor. The Format menu sends to the first
 responder.
 

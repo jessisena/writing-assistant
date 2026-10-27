@@ -205,34 +205,94 @@ import WritingAssistantCore
         #expect(result.string == expected)
     }
 
-    @Test func pasteKeepsSupportedFormattingAndDropsForeignFonts() throws {
+    private func makePasteboard() -> NSPasteboard {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("RichTextBridgeTests-\(UUID())"))
-        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        return pasteboard
+    }
+
+    private func georgiaText() throws -> NSAttributedString {
         let georgia = try #require(NSFont(name: "Georgia", size: 24))
         let bold = NSFontManager.shared.convert(georgia, toHaveTrait: .boldFontMask)
         let copied = NSMutableAttributedString(string: "pasted ", attributes: [.font: georgia])
         copied.append(NSAttributedString(string: "bold", attributes: [.font: bold]))
-        pasteboard.clearContents()
-        pasteboard.writeObjects([copied])
+        return copied
+    }
+
+    /// Paste and drag-and-drop both read through `readSelection(from:type:)`, with the legacy
+    /// type names AppKit passes as well as the modern ones.
+    @Test(arguments: [
+        NSPasteboard.PasteboardType.rtf,
+        NSPasteboard.PasteboardType("NeXT Rich Text Format v1.0 pasteboard type"),
+    ])
+    func readingRichTextKeepsSupportedFormattingAndDropsForeignFonts(
+        type: NSPasteboard.PasteboardType
+    ) throws {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.writeObjects([try georgiaText()])
         let textView = makeTextView("start ")
         textView.setSelectedRange(NSRange(location: 6, length: 0))
 
-        let pasted = textView.pasteNormalized(from: pasteboard)
+        let read = textView.readSelection(from: pasteboard, type: type)
 
-        #expect(pasted)
+        #expect(read)
         #expect(markdown(textView) == "start pasted **bold**")
         let font = textView.attributedString().attribute(.font, at: 8, effectiveRange: nil)
         #expect((font as? NSFont)?.pointSize == RichTextBridge.bodyFontSize)
         #expect(textView.selectedRange() == NSRange(location: 17, length: 0))
     }
 
-    @Test func pasteWithoutTextReportsNothingPasted() {
-        let pasteboard = NSPasteboard(name: NSPasteboard.Name("RichTextBridgeTests-\(UUID())"))
+    @Test func readingRichTextReplacesTheSelectionAndCanBeUndone() throws {
+        let pasteboard = makePasteboard()
         defer { pasteboard.releaseGlobally() }
-        pasteboard.clearContents()
+        pasteboard.writeObjects([NSAttributedString(string: "\t•\tnew")])
+        let textView = makeTextView("old text")
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        let delegate = UndoDelegate(undoManager: undoManager)
+        textView.delegate = delegate
+        textView.setSelectedRange(NSRange(location: 0, length: 3))
+
+        undoManager.beginUndoGrouping()
+        #expect(textView.readSelection(from: pasteboard, type: .rtf))
+        undoManager.endUndoGrouping()
+        #expect(textView.string == "• new text")
+
+        undoManager.undo()
+        #expect(textView.string == "old text")
+    }
+
+    @Test func readingRichTextFromAnEmptyPasteboardReadsNothing() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
         let textView = makeTextView("keep")
 
-        #expect(!textView.pasteNormalized(from: pasteboard))
+        #expect(!textView.readSelection(from: pasteboard, type: .rtf))
         #expect(textView.string == "keep")
+    }
+
+    @Test func readingPlainTextUsesTheTypingStyle() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("plain", forType: .string)
+        let textView = makeTextView("")
+        textView.toggleBold(nil)
+
+        #expect(textView.readSelection(from: pasteboard, type: .string))
+
+        #expect(markdown(textView) == "**plain**")
+    }
+}
+
+@MainActor private final class UndoDelegate: NSObject, NSTextViewDelegate {
+    let undoManager: UndoManager
+
+    init(undoManager: UndoManager) {
+        self.undoManager = undoManager
+    }
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        undoManager
     }
 }
