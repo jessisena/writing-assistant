@@ -32,7 +32,10 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         ("* one", "- one"),
         ("# Title", "# Title"),
         ("### Sub *heading*", "### Sub *heading*"),
-        ("👨‍👩‍👧 🇵🇹 **ok** 👍🏽", "👨‍👩‍👧 🇵🇹 **ok** 👍🏽"),
+        (
+            "👨‍👩‍👧 🇵🇹 **ok** 👍🏽",
+            "👨‍👩‍👧 🇵🇹 **ok** 👍🏽"
+        ),
         ("你好，**世界**", "你好，**世界**"),
         ("", ""),
         ("first\n\nthird", "first\n\nthird"),
@@ -68,6 +71,66 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         let text = parse("[a](https://a.com)[b](https://b.com)")
         #expect(RichText.markdown(from: text) == "[a](https://a.com)[b](https://b.com)")
     }
+
+    @Test(arguments: [
+        (styled("foo.", .stronglyEmphasized) + plain("bar"), "**foo**.bar"),
+        (styled("Note:", .stronglyEmphasized) + plain("next"), "**Note**:next"),
+        (plain("a") + styled(".b", .emphasized), "a.*b*"),
+        (styled("中文。", .stronglyEmphasized) + plain("后面"), "**中文**。后面"),
+        (plain("a") + styled("-", .stronglyEmphasized) + plain("b"), "a-b"),
+    ])
+    func edgePunctuationNextToAWordMovesOutsideMarkers(text: AttributedString, expected: String) {
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == expected)
+        let reparsed = parse(markdown)
+        #expect(String(reparsed.characters) == String(text.characters))
+        #expect(parse(RichText.markdown(from: reparsed)) == reparsed)
+        let styledWords = intents(of: reparsed).filter { $0.1 != nil }.map(\.0)
+        let expectedWords = intents(of: text).filter { $0.1 != nil }.map(\.0).map(wordPart)
+        #expect(styledWords == expectedWords.filter { !$0.isEmpty })
+    }
+
+    @Test(arguments: ["  ", " ", "   "])
+    func allSpaceCodeKeepsItsLength(spaces: String) {
+        let text = plain("a") + styled(spaces, .code) + plain("b")
+        var current = text
+        for _ in 0..<3 {
+            current = parse(RichText.markdown(from: current))
+        }
+        #expect(current == text)
+    }
+
+    @Test func headingStartingWithABulletStaysAHeading() {
+        var text = AttributedString("• item")
+        text.headingLevel = 2
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == "## • item")
+        #expect(parse(markdown) == text)
+    }
+
+    @Test func exclamationMarkBeforeALinkIsNotAnImage() {
+        var link = AttributedString("a")
+        link.link = URL(string: "https://x.com")
+        let text = plain("!") + link
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == "\\![a](https://x.com)")
+        #expect(parse(markdown) == text)
+    }
+}
+
+private func plain(_ text: String) -> AttributedString {
+    AttributedString(text)
+}
+
+private func styled(_ text: String, _ intent: InlinePresentationIntent) -> AttributedString {
+    var result = AttributedString(text)
+    result.inlinePresentationIntent = intent
+    return result
+}
+
+/// The run text without edge punctuation, which is expected to lose its style.
+private func wordPart(_ text: String) -> String {
+    String(text.drop(while: \.isPunctuation).reversed().drop(while: \.isPunctuation).reversed())
 }
 
 @Suite struct RichTextParsingTests {
@@ -113,6 +176,20 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         let text = parse("<b>hi</b>")
         #expect(String(text.characters) == "<b>hi</b>")
         #expect(text.runs.allSatisfy { $0.inlinePresentationIntent == nil })
+    }
+
+    @Test func imageStaysLiteralWithItsURL() {
+        let text = parse("see ![alt](https://x.com/a.png) now")
+        #expect(String(text.characters) == "see ![alt](https://x.com/a.png) now")
+        #expect(text.runs.allSatisfy { $0.link == nil && $0.imageURL == nil })
+        let reparsed = parse(RichText.markdown(from: text))
+        #expect(String(reparsed.characters) == String(text.characters))
+    }
+
+    @Test func imageInsideCodeStaysCode() {
+        let text = parse("`![a](b)`")
+        #expect(intents(of: text).map(\.0) == ["![a](b)"])
+        #expect(intents(of: text).map(\.1) == [.code])
     }
 
     @Test func carriageReturnLineEndingsSplitLines() {
