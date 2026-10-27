@@ -490,4 +490,18 @@ private func expectBadFormat(_ output: String) async {
             try await service(runner).refine(text: "Hello", channel: .slack, refinement: .shorter)
         }
     }
+
+    @Test(arguments: [
+        json(["polished_text": "Hey there", "learning_summary": [String: Any]()]),
+        json(["polished_text": "Hey there", "learning_summary": 42]),
+        json(["polished_text": "Hey there", "learning_summary": "notes"]),
+        json(["polished_text": "Hey there", "was_translated": "yes"]),
+        json(["polished_text": "Hey there"]),
+    ])
+    func learningSummaryAndOtherFieldsAreIgnored(output: String) async throws {
+        let runner = FakeRunner(output: .success(output))
+        let refined = try await service(runner).refine(
+            text: "Hello", channel: .slack, refinement: .moreCasual)
+        #expect(refined == "Hey there")
+    }
 }

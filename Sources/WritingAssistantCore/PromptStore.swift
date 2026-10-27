@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 
 /// A prompt file operation that failed, with the file it was working on.
 public struct PromptStoreError: LocalizedError, Sendable {
@@ -18,6 +19,7 @@ public struct PromptStoreError: LocalizedError, Sendable {
 /// apply on the next request.
 public struct PromptStore: PromptStoring {
     static let resourceBundleName = "WritingAssistant_WritingAssistantCore.bundle"
+    private static let logger = Logger(subsystem: "local.writing-assistant", category: "prompts")
 
     /// The `Prompts` folder shipped in this module's resource bundle.
     ///
@@ -119,22 +121,36 @@ public struct PromptStore: PromptStoring {
     /// from before the manifest existed) is recorded when it matches the bundled default and
     /// returned otherwise. A manifest that can't be decoded is treated as missing and rewritten.
     ///
+    /// A file that can't be read or updated doesn't stop the others: every file is synced and
+    /// the manifest saved before the first such error is thrown. The failed file keeps its old
+    /// manifest entry, so the next call retries it.
+    ///
     /// - Returns: Edited files whose bundled default is newer than the one the user started from.
-    /// - Throws: `PromptStoreError` when a prompt file, its default or the manifest couldn't be
-    ///   read or written.
+    /// - Throws: `PromptStoreError` for the first prompt file or default that couldn't be read or
+    ///   written (after the rest were synced), or for the manifest when it couldn't be read or
+    ///   written. Edited files with a newer default aren't returned then; the next call reports
+    ///   them.
     public func syncDefaults() throws -> Set<PromptFile> {
         var manifest = try loadManifest()
         var newer = Set<PromptFile>()
+        var firstError: (any Error)?
         for file in PromptFile.allCases {
             let url = fileURL(file)
             guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
                 continue
             }
-            if try !sync(file, manifest: &manifest) {
-                newer.insert(file)
+            do {
+                if try !sync(file, manifest: &manifest) {
+                    newer.insert(file)
+                }
+            } catch {
+                firstError = firstError ?? error
             }
         }
         try saveManifest(manifest)
+        if let firstError {
+            throw firstError
+        }
         return newer
     }
 
@@ -227,14 +243,25 @@ public struct PromptStore: PromptStoring {
         directoryURL.appending(path: ".defaults.json", directoryHint: .notDirectory)
     }
 
-    /// A missing or undecodable manifest reads as empty, so every file is checked afresh.
+    /// A missing or undecodable manifest reads as empty, so every file is checked afresh. An
+    /// undecodable one is logged, since it means something other than the app wrote it.
     private func loadManifest() throws -> [String: String] {
         let url = manifestURL
-        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+        let path = url.path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: path) else {
             return [:]
         }
         let data = try perform("read", url) { try Data(contentsOf: url) }
-        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        do {
+            return try JSONDecoder().decode([String: String].self, from: data)
+        } catch {
+            Self.logger.error(
+                """
+                Ignoring undecodable prompt manifest at \(path, privacy: .public): \
+                \(error.localizedDescription, privacy: .public). It will be rewritten.
+                """)
+            return [:]
+        }
     }
 
     private func saveManifest(_ manifest: [String: String]) throws {

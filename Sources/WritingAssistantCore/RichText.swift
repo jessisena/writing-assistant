@@ -31,7 +31,8 @@ extension AttributeDynamicLookup {
 ///
 /// Supported: bold, italic, strikethrough and inline code (`inlinePresentationIntent`), links
 /// (`link`), bullet lines (a literal `"• "` prefix in the attributed string) and headings
-/// (`headingLevel`). Everything else is kept as literal text.
+/// (`headingLevel`). Images are kept as their literal `![alt](url)` text, and everything else
+/// is kept as literal text too.
 public enum RichText {
     static let bulletPrefix = "• "
     static let supportedIntents: InlinePresentationIntent = [
@@ -59,8 +60,12 @@ public enum RichText {
 
     /// Writes an attributed string as Markdown, escaping literal Markdown characters.
     ///
+    /// Styling Markdown can't express is dropped (see `InlineMarkdown`), and a leading bullet
+    /// prefix is written as an unstyled `- `.
+    ///
     /// - Parameter text: Text using the supported attributes.
-    /// - Returns: Markdown that `attributedString(fromMarkdown:)` parses back to the same text.
+    /// - Returns: Markdown that `attributedString(fromMarkdown:)` parses back to the same
+    ///   characters, with the same styling except what was dropped.
     public static func markdown(from text: AttributedString) -> String {
         lines(of: text).map(markdownLine).joined(separator: "\n")
     }
@@ -130,7 +135,21 @@ extension RichText {
             let kept = run.inlinePresentationIntent?.intersection(supportedIntents)
             parsed[run.range].inlinePresentationIntent = kept?.isEmpty == false ? kept : nil
         }
+        restoreImageSources(in: &parsed)
         return parsed
+    }
+
+    /// Replaces each image, which the parser reduces to its alt text, with its `![alt](url)`
+    /// source so the URL isn't lost.
+    static func restoreImageSources(in text: inout AttributedString) {
+        let images = text.runs[AttributeScopes.FoundationAttributes.ImageURLAttribute.self]
+        for (url, range) in images.reversed() {
+            guard let url else {
+                continue
+            }
+            let alt = String(text[range].characters)
+            text.replaceSubrange(range, with: AttributedString("![\(alt)](\(url.absoluteString))"))
+        }
     }
 }
 
@@ -160,6 +179,10 @@ extension RichText {
             case .strike: "~~"
             }
         }
+
+        var isLink: Bool {
+            if case .link = self { true } else { false }
+        }
     }
 
     /// Markers for a run, outermost first. Links go innermost: Foundation's parser drops
@@ -184,13 +207,13 @@ extension RichText {
 
     static func markdownLine(_ line: AttributedSubstring) -> String {
         let line = RichTextLine(line)
-        var writer = MarkdownLineWriter()
-        for run in line.content.runs {
-            let text = String(line.content[run.range].characters)
-            let isCode = run.inlinePresentationIntent?.contains(.code) == true
-            writer.write(text, markers: markers(of: run), isCode: isCode)
+        let segments = line.content.runs.map { run in
+            InlineSegment(
+                text: String(line.content[run.range].characters),
+                markers: markers(of: run),
+                isCode: run.inlinePresentationIntent?.contains(.code) == true)
         }
-        let inline = escapeLineStart(writer.finish())
+        let inline = escapeLineStart(InlineMarkdown.render(segments))
         switch line.kind {
         case .heading(let level): return String(repeating: "#", count: level) + " " + inline
         case .bullet: return "- " + inline
@@ -224,9 +247,10 @@ extension RichText {
             longestRun = max(longestRun, currentRun)
         }
         let fence = String(repeating: "`", count: longestRun + 1)
+        let allSpaces = text.allSatisfy { $0 == " " }
         let needsPadding =
             text.hasPrefix("`") || text.hasSuffix("`")
-            || (text.hasPrefix(" ") && text.hasSuffix(" "))
+            || (text.hasPrefix(" ") && text.hasSuffix(" ") && !allSpaces)
         let padding = needsPadding ? " " : ""
         return fence + padding + text + padding + fence
     }
@@ -240,50 +264,322 @@ extension RichText {
     }
 }
 
-/// Writes the inline Markdown of one line, keeping markers open across runs that share them.
-///
-/// Whitespace at the edge of a styled run is written outside the markers, because CommonMark
-/// doesn't treat `**` next to inner whitespace as emphasis.
-struct MarkdownLineWriter {
-    private var output = ""
-    private var open: [RichText.Marker] = []
-    private var pendingSpace = ""
+/// One run of a line: its text, its markers outermost first, and whether it is inline code.
+struct InlineSegment: Equatable {
+    var text: String
+    var markers: [RichText.Marker]
+    var isCode: Bool
 
-    mutating func write(_ text: String, markers: [RichText.Marker], isCode: Bool) {
-        if !isCode && text.allSatisfy(\.isWhitespace) {
-            pendingSpace += text
-            return
+    /// Whether the text is written as a code span; inside a link it is plain link text instead.
+    var writesCodeSpan: Bool { isCode && link == nil }
+
+    var isBlank: Bool { !writesCodeSpan && text.allSatisfy(\.isWhitespace) }
+
+    var link: URL? {
+        for case .link(let url) in markers {
+            return url
         }
-        let parts = isCode ? ("", Substring(text), "") : Self.splitWhitespace(text)
-        let kept = open.prefix(while: { markers.contains($0) }).count
-        closeMarkers(downTo: kept)
-        output += pendingSpace + parts.0
-        for marker in markers where !open.contains(marker) {
-            output += marker.open
-            open.append(marker)
-        }
-        let core = String(parts.1)
-        output += isCode ? RichText.codeSpan(core) : RichText.escapeMarkdown(core)
-        pendingSpace = String(parts.2)
+        return nil
     }
 
-    mutating func finish() -> String {
+    /// The intent the written Markdown parses back to.
+    var intent: InlinePresentationIntent {
+        var intent: InlinePresentationIntent = []
+        for marker in markers {
+            switch marker {
+            case .bold: intent.insert(.stronglyEmphasized)
+            case .italic: intent.insert(.emphasized)
+            case .strike: intent.insert(.strikethrough)
+            case .link: break
+            }
+        }
+        if writesCodeSpan {
+            intent.insert(.code)
+        }
+        return intent
+    }
+}
+
+/// Writes the inline Markdown of one line so that it parses back to the same text.
+///
+/// CommonMark only reads `*`, `**` and `~~` as emphasis when they are "flanking": an opening
+/// marker must not be followed by whitespace, nor by punctuation unless whitespace or
+/// punctuation precedes it, and a closing marker mirrors that. Styling that would break these
+/// rules is normalized away, one marker at a time, until every marker flanks:
+///
+/// - Whitespace at the edge of a styled run is written outside its markers, and a run that is
+///   only whitespace takes just the markers its neighbours keep open across it.
+/// - Punctuation at the edge of a styled run is written outside the marker that touches a word
+///   character across it, so bold `"foo."` before `"bar"` becomes `**foo**.bar`.
+/// - When the marker's edge isn't movable text (inline code, a link, or another marker), that
+///   marker is dropped from the run.
+/// - Inline code inside a link is written as plain link text, since Foundation's parser drops
+///   inline styles inside link text.
+///
+/// Flanking alone doesn't settle how CommonMark pairs markers that could both open and close,
+/// such as the `***` in bold `"a"` followed by italic `"b"`. The result is parsed back to check
+/// it; when the pairing came out wrong, the line is written again in strict mode, where a
+/// marker that could both open and close is normalized away like a non-flanking one.
+enum InlineMarkdown {
+    static func render(_ segments: [InlineSegment]) -> String {
+        let relaxed = render(segments, strict: false)
+        if parsesBack(relaxed.markdown, as: relaxed.segments) {
+            return relaxed.markdown
+        }
+        return render(segments, strict: true).markdown
+    }
+
+    private static func render(
+        _ segments: [InlineSegment], strict: Bool
+    ) -> (markdown: String, segments: [InlineSegment]) {
+        var segments = segments
+        while true {
+            segments = coalesced(segments)
+            var writer = MarkdownLineWriter()
+            for (index, segment) in segments.enumerated() {
+                writer.write(segment, index: index)
+            }
+            writer.finish()
+            guard let failure = writer.firstMisplacedDelimiter(strict: strict) else {
+                return (String(writer.output), segments)
+            }
+            segments = normalize(segments, fixing: failure)
+        }
+    }
+
+    /// Joins neighbouring segments with the same styling, so two code spans never touch: their
+    /// backtick fences would merge into one.
+    private static func coalesced(_ segments: [InlineSegment]) -> [InlineSegment] {
+        var result: [InlineSegment] = []
+        for segment in segments {
+            if let last = result.last, last.markers == segment.markers,
+                last.isCode == segment.isCode
+            {
+                result[result.count - 1].text += segment.text
+            } else {
+                result.append(segment)
+            }
+        }
+        return result
+    }
+
+    /// Whether `markdown` parses to the characters of `segments` with their styling. Whitespace
+    /// styling is ignored, as are links the parser adds to bare URLs.
+    private static func parsesBack(_ markdown: String, as segments: [InlineSegment]) -> Bool {
+        let parsed = RichText.parseInline(Substring(markdown))
+        let actual = parsed.runs.flatMap { run in
+            parsed[run.range].characters.map {
+                ($0, run.inlinePresentationIntent ?? [], run.link)
+            }
+        }
+        let expected = segments.flatMap { segment in
+            let intent = segment.intent
+            let link = segment.link
+            return segment.text.map { ($0, intent, link) }
+        }
+        guard actual.count == expected.count else {
+            return false
+        }
+        return zip(actual, expected).allSatisfy { actual, expected in
+            actual.0 == expected.0
+                && (expected.0.isWhitespace
+                    || (actual.1 == expected.1 && (expected.2 == nil || actual.2 == expected.2)))
+        }
+    }
+
+    /// Takes `failure`'s marker off the run edge it sits on: moves edge punctuation outside it
+    /// when there is any, else drops the marker from the run. Either way some character loses a
+    /// marker, so `render` always terminates.
+    static func normalize(
+        _ segments: [InlineSegment], fixing failure: MarkdownLineWriter.Delimiter
+    ) -> [InlineSegment] {
+        var segments = segments
+        let index = failure.segment
+        let segment = segments[index]
+        let split =
+            segment.writesCodeSpan
+            ? nil : splitEdgePunctuation(segment.text, leading: failure.isOpen)
+        guard let split else {
+            segments[index].markers.removeAll { $0 == failure.marker }
+            return segments
+        }
+        let neighbour = neighbourMarkers(of: index, in: segments, before: failure.isOpen)
+        let kept = segment.markers.filter { $0 != failure.marker && neighbour.contains($0) }
+        guard !split.rest.isEmpty else {
+            segments[index].markers = kept
+            return segments
+        }
+        segments[index].text = split.rest
+        let edge = InlineSegment(text: split.edge, markers: kept, isCode: false)
+        segments.insert(edge, at: failure.isOpen ? index : index + 1)
+        return segments
+    }
+
+    /// Splits whitespace plus a run of punctuation off one edge of `text`, or returns nil when
+    /// that edge has no punctuation.
+    static func splitEdgePunctuation(
+        _ text: String, leading: Bool
+    ) -> (edge: String, rest: String)? {
+        let characters = leading ? Array(text) : Array(text.reversed())
+        let spaces = characters.prefix(while: \.isWhitespace).count
+        let marks = characters.dropFirst(spaces).prefix(while: Flanking.isPunctuation).count
+        guard marks > 0 else {
+            return nil
+        }
+        let edge = String(characters.prefix(spaces + marks))
+        let rest = String(characters.dropFirst(spaces + marks))
+        return leading ? (edge, rest) : (String(edge.reversed()), String(rest.reversed()))
+    }
+
+    private static func neighbourMarkers(
+        of index: Int, in segments: [InlineSegment], before: Bool
+    ) -> [RichText.Marker] {
+        let candidates =
+            before ? Array(segments[..<index].reversed()) : Array(segments[(index + 1)...])
+        return candidates.first { !$0.isBlank }?.markers ?? []
+    }
+}
+
+/// CommonMark's character classes for deciding whether a delimiter run can open or close.
+enum Flanking {
+    case space
+    case punctuation
+    case word
+
+    init(_ character: Character?) {
+        guard let character, !character.isWhitespace else {
+            self = .space
+            return
+        }
+        self = Self.isPunctuation(character) ? .punctuation : .word
+    }
+
+    /// ASCII punctuation and symbols, plus Unicode punctuation (not other Unicode symbols).
+    static func isPunctuation(_ character: Character) -> Bool {
+        character.isPunctuation || (character.isASCII && character.isSymbol)
+    }
+
+    static func canOpen(before: Flanking, after: Flanking) -> Bool {
+        after != .space && (after != .punctuation || before != .word)
+    }
+
+    static func canClose(before: Flanking, after: Flanking) -> Bool {
+        before != .space && (before != .punctuation || after != .word)
+    }
+}
+
+/// Writes the inline Markdown of one line, keeping markers open across runs that share them,
+/// and records where each emphasis marker went so `InlineMarkdown` can check it.
+struct MarkdownLineWriter {
+    struct Delimiter {
+        let start: Int
+        let end: Int
+        let character: Character
+        let isOpen: Bool
+        let marker: RichText.Marker
+        /// The segment whose edge the marker sits on.
+        let segment: Int
+    }
+
+    private(set) var output: [Character] = []
+    private var delimiters: [Delimiter] = []
+    private var open: [RichText.Marker] = []
+    private var pendingSpace = ""
+    private var lastSegment = 0
+
+    mutating func write(_ segment: InlineSegment, index: Int) {
+        if segment.isBlank {
+            pendingSpace += segment.text
+            return
+        }
+        let parts =
+            segment.writesCodeSpan
+            ? ("", segment.text, "") : Self.splitWhitespace(segment.text)
+        closeMarkers(downTo: keptCount(for: segment.markers))
+        output += pendingSpace + parts.0
+        for marker in segment.markers where !open.contains(marker) {
+            emit(marker, isOpen: true, segment: index)
+            open.append(marker)
+        }
+        let core = parts.1
+        output += segment.writesCodeSpan ? RichText.codeSpan(core) : RichText.escapeMarkdown(core)
+        pendingSpace = parts.2
+        lastSegment = index
+    }
+
+    /// How many open markers stay open for a run with `markers`: the bottom of the stack that
+    /// the run shares, cut below any link when the run opens emphasis, because Foundation's
+    /// parser drops emphasis inside link text.
+    private func keptCount(for markers: [RichText.Marker]) -> Int {
+        let kept = open.prefix(while: { markers.contains($0) })
+        let opensEmphasis = markers.contains { !$0.isLink && !kept.contains($0) }
+        if opensEmphasis, let link = kept.firstIndex(where: \.isLink) {
+            return link
+        }
+        return kept.count
+    }
+
+    mutating func finish() {
         closeMarkers(downTo: 0)
         output += pendingSpace
         pendingSpace = ""
-        return output
+    }
+
+    /// The first emphasis marker whose delimiter run can't do its job: open or close. In strict
+    /// mode, a run that could also do the opposite counts as misplaced too.
+    func firstMisplacedDelimiter(strict: Bool) -> Delimiter? {
+        var first = 0
+        while first < delimiters.count {
+            var last = first
+            while last + 1 < delimiters.count, delimiters[last + 1].start == delimiters[last].end,
+                delimiters[last + 1].character == delimiters[first].character
+            {
+                last += 1
+            }
+            let start = delimiters[first].start
+            let end = delimiters[last].end
+            let before = Flanking(start > 0 ? output[start - 1] : nil)
+            let after = Flanking(end < output.count ? output[end] : nil)
+            let canOpen = Flanking.canOpen(before: before, after: after)
+            let canClose = Flanking.canClose(before: before, after: after)
+            let failure = delimiters[first...last].first {
+                $0.isOpen ? !canOpen || (strict && canClose) : !canClose || (strict && canOpen)
+            }
+            if let failure {
+                return failure
+            }
+            first = last + 1
+        }
+        return nil
+    }
+
+    private mutating func emit(_ marker: RichText.Marker, isOpen: Bool, segment: Int) {
+        let text = isOpen ? marker.open : marker.close
+        if marker.isLink {
+            if isOpen, output.last == "!" {
+                output.insert("\\", at: output.count - 1)
+            }
+            output += text
+            return
+        }
+        let start = output.count
+        output += text
+        delimiters.append(
+            Delimiter(
+                start: start, end: output.count, character: text.first ?? "*", isOpen: isOpen,
+                marker: marker, segment: segment))
     }
 
     private mutating func closeMarkers(downTo count: Int) {
         while open.count > count {
-            output += open.removeLast().close
+            emit(open.removeLast(), isOpen: false, segment: lastSegment)
         }
     }
 
-    private static func splitWhitespace(_ text: String) -> (Substring, Substring, Substring) {
+    private static func splitWhitespace(_ text: String) -> (String, String, String) {
         let start = text.firstIndex(where: { !$0.isWhitespace }) ?? text.endIndex
         let end = text.lastIndex(where: { !$0.isWhitespace }).map(text.index(after:)) ?? start
-        return (text[..<start], text[start..<end], text[end...])
+        return (String(text[..<start]), String(text[start..<end]), String(text[end...]))
     }
 }
 
@@ -301,14 +597,14 @@ struct RichTextLine {
     let content: AttributedSubstring
 
     init(_ line: AttributedSubstring) {
-        if line.characters.starts(with: RichText.bulletPrefix) {
+        if let level = line.runs.first?.headingLevel {
+            kind = .heading(level)
+            content = line
+        } else if line.characters.starts(with: RichText.bulletPrefix) {
             let start = line.characters.index(
                 line.startIndex, offsetBy: RichText.bulletPrefix.count)
             kind = .bullet
             content = line[start..<line.endIndex]
-        } else if let level = line.runs.first?.headingLevel {
-            kind = .heading(level)
-            content = line
         } else {
             kind = .plain
             content = line
