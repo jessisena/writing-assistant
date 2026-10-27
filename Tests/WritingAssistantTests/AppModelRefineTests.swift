@@ -45,7 +45,7 @@ import WritingAssistantCore
         return (model, polisher)
     }
 
-    @Test func editedOutputIsSentAsMarkdownWithRefinementAndChannel() async {
+    @Test func editedOutputIsSentAsMarkdownWithRefinementAndTheEntrysChannel() async {
         let polisher = FakePolisher()
         let model = await polishedModel(polisher)
         model.channel = .slack
@@ -56,8 +56,21 @@ import WritingAssistantCore
 
         #expect(polisher.refineCalls.count == 1)
         #expect(polisher.refineCalls.first?.text == "My **edited** *text* 🙂\n- one")
-        #expect(polisher.refineCalls.first?.channel == .slack)
+        #expect(polisher.refineCalls.first?.channel == .formal)
         #expect(polisher.refineCalls.first?.refinement == .shorter)
+    }
+
+    @Test func withoutACurrentEntryRefineUsesTheSelectedChannel() async throws {
+        let polisher = FakePolisher()
+        let model = await polishedModel(polisher)
+        let entryID = try #require(model.currentHistoryID)
+        model.deleteHistoryEntry(id: entryID)
+        model.channel = .slack
+
+        model.refine(.moreCasual)
+        await model.requestTask?.value
+
+        #expect(polisher.refineCalls.first?.channel == .slack)
     }
 
     @Test func refinedTextReplacesOutputAndKeepsSummaryAndLanguage() async {

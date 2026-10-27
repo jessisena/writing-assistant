@@ -16,9 +16,11 @@ enum RichTextBridge {
     /// Attributes for unformatted text.
     static var baseAttributes: [NSAttributedString.Key: Any] { RichTextStyle().applied(to: [:]) }
 
-    /// Bullet markers that rich text from other apps puts at the start of list lines.
-    private static let foreignListMarker = try? NSRegularExpression(
-        pattern: "^[\\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\\t))[\\t ]+", options: [.anchorsMatchLines])
+    /// Bullet markers that rich text from other apps puts at the start of list lines. A literal,
+    /// so the compiler checks the pattern; computed because `Regex` isn't `Sendable`.
+    private static var foreignListMarker: Regex<Substring> {
+        #/^[\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\t))[\t ]+/#.anchorsMatchLineEndings()
+    }
 
     /// Reads the supported formatting from editor text. Attachments are dropped.
     ///
@@ -66,12 +68,10 @@ enum RichTextBridge {
     }
 
     private static func replacingListMarkers(in text: NSAttributedString) -> NSAttributedString {
-        guard let foreignListMarker else { return text }
         let result = NSMutableAttributedString(attributedString: text)
-        let matches = foreignListMarker.matches(
-            in: text.string, range: NSRange(location: 0, length: text.length))
-        for match in matches.reversed() {
-            result.replaceCharacters(in: match.range, with: bulletPrefix)
+        let string = text.string
+        for match in string.matches(of: foreignListMarker).reversed() {
+            result.replaceCharacters(in: NSRange(match.range, in: string), with: bulletPrefix)
         }
         return result
     }
@@ -198,19 +198,27 @@ final class FormattingTextView: NSTextView {
         }
     }
 
-    override func paste(_ sender: Any?) {
-        if !pasteNormalized(from: .general) {
-            super.paste(sender)
-        }
-    }
+    /// Pasteboard types that carry another app's formatting, under both the modern names and the
+    /// legacy ones AppKit passes to `readSelection(from:type:)`.
+    private static let richTextTypes: Set<NSPasteboard.PasteboardType> = [
+        .rtf, .rtfd, .html, NSPasteboard.PasteboardType("com.apple.flat-rtfd"),
+        NSPasteboard.PasteboardType("NeXT Rich Text Format v1.0 pasteboard type"),
+        NSPasteboard.PasteboardType("NeXT RTFD pasteboard type"),
+        NSPasteboard.PasteboardType("Apple HTML pasteboard type"),
+    ]
 
-    /// Replaces the selection with the pasteboard's text, keeping only supported formatting.
+    /// Reads pasted or dropped text into the selection. Paste, Paste and Match Style and
+    /// drag-and-drop all come through here. Rich text keeps only the supported formatting;
+    /// plain text and other types are left to `NSTextView`, which uses the typing style.
     ///
-    /// - Parameter pasteboard: The pasteboard to read rich or plain text from.
-    /// - Returns: False when the pasteboard holds no text.
-    @discardableResult
-    func pasteNormalized(from pasteboard: NSPasteboard) -> Bool {
-        let objects = pasteboard.readObjects(forClasses: [NSAttributedString.self])
+    /// - Returns: False when the pasteboard holds no text of `type`.
+    override func readSelection(
+        from pboard: NSPasteboard, type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard Self.richTextTypes.contains(type) else {
+            return super.readSelection(from: pboard, type: type)
+        }
+        let objects = pboard.readObjects(forClasses: [NSAttributedString.self])
         guard let pasted = objects?.first as? NSAttributedString else { return false }
         let text = RichTextBridge.normalized(pasted)
         let range = selectedRange()
@@ -221,6 +229,49 @@ final class FormattingTextView: NSTextView {
         setSelectedRange(NSRange(location: range.location + text.length, length: 0))
         scrollRangeToVisible(selectedRange())
         return true
+    }
+
+    /// Actions of context menu items that apply formatting the editors don't keep, such as
+    /// underline, colors, kerning, ligatures and vertical layout.
+    private static let unsupportedMenuActions: Set<String> = [
+        "orderFrontFontPanel:", "addFontTrait:", "underline:", "outline:", "highlight:",
+        "orderFrontStylesPanel:", "orderFrontColorPanel:", "copyFont:", "pasteFont:",
+        "useStandardKerning:", "turnOffKerning:", "tightenKerning:", "loosenKerning:",
+        "useStandardLigatures:", "turnOffLigatures:", "useAllLigatures:",
+        "changeLayoutOrientation:",
+    ]
+
+    /// The standard context menu without its Font, Styles and Layout Orientation items. Spelling,
+    /// Substitutions, Transformations, Speech and the edit commands stay.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let menu = super.menu(for: event)?.copy() as? NSMenu else { return nil }
+        Self.removeUnsupportedItems(from: menu)
+        return menu
+    }
+
+    /// Removes every item of `menu` whose action, or any action in whose submenu, is in
+    /// `unsupportedMenuActions`, then the separators left at the ends or next to each other.
+    static func removeUnsupportedItems(from menu: NSMenu) {
+        for item in menu.items where hasUnsupportedAction(item) {
+            menu.removeItem(item)
+        }
+        var previousIsSeparator = true
+        for item in menu.items {
+            if item.isSeparatorItem && previousIsSeparator {
+                menu.removeItem(item)
+            }
+            previousIsSeparator = item.isSeparatorItem
+        }
+        if let last = menu.items.last, last.isSeparatorItem {
+            menu.removeItem(last)
+        }
+    }
+
+    private static func hasUnsupportedAction(_ item: NSMenuItem) -> Bool {
+        if let action = item.action, unsupportedMenuActions.contains(NSStringFromSelector(action)) {
+            return true
+        }
+        return item.submenu?.items.contains(where: hasUnsupportedAction) ?? false
     }
 
     /// Shows `text` unless it is already shown. Undo history is dropped, since it refers to the

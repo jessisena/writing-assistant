@@ -169,12 +169,15 @@ A corrupt manifest is logged, treated as missing and rewritten.
 ### Rich text
 
 `RichText` (Core) converts between the Markdown subset and `AttributedString` with inline
-presentation intents, and renders HTML and plain text. `RichTextBridge` (app) converts between
+presentation intents, and renders HTML and plain text. `plainText(from:)` drops link targets, for
+the diff and history previews; `clipboardText(from:)` writes them as `label (url)` for the plain
+clipboard flavor. `RichTextBridge` (app) converts between
 `AttributedString` and the `NSAttributedString` the editors use (font traits, strikethrough,
 monospaced font, links), and normalizes pasted text: bold, italic, strikethrough, code and links
 are kept; foreign fonts, sizes and colors are dropped, and the foreground is `NSColor.textColor`
 so dark mode works. `FormattingTextView` is an `NSTextView` subclass with the toggle actions and a
-normalizing `paste(_:)`. `RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
+`readSelection(from:type:)` override that normalizes rich text read by paste and drag-and-drop.
+`RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
 editor lets each `FormattingToolbar` act on its own editor. The Format menu sends to the first
 responder.
 
@@ -188,7 +191,9 @@ After a successful Process, `AppModel` appends the learning summary to `Learning
 it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`. The
 edited output is saved into the current entry on copy, refine, clear and before the next request,
 not on every keystroke. A history file that doesn't decode is renamed to `history.corrupt.json`,
-the store starts empty, and the app shows a banner.
+the store starts empty, and the app shows a banner. A file that can't be read, or a damaged one
+that can't be moved aside, is left alone: the banner says so and `AppModel.savesHistory` stays
+false until the next launch, so the first new entry never overwrites it.
 
 ### Service
 

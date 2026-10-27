@@ -35,6 +35,8 @@ extension AttributeDynamicLookup {
 /// is kept as literal text too.
 public enum RichText {
     static let bulletPrefix = "• "
+    /// Link schemes written to the clipboard; other links are kept as their label only.
+    static let safeSchemes: Set<String> = ["http", "https", "mailto"]
     static let supportedIntents: InlinePresentationIntent = [
         .stronglyEmphasized, .emphasized, .strikethrough, .code,
     ]
@@ -82,12 +84,33 @@ public enum RichText {
         HTMLWriter.document(lines: lines(of: text).map(RichTextLine.init))
     }
 
-    /// Returns the text without formatting; bullets keep their `"• "` prefix.
+    /// Returns the text without formatting; bullets keep their `"• "` prefix. Link targets are
+    /// left out, so the diff and history previews show only what the reader sees.
     ///
     /// - Parameter text: Text using the supported attributes.
     /// - Returns: The characters of `text`.
     public static func plainText(from text: AttributedString) -> String {
         String(text.characters)
+    }
+
+    /// Returns the plain text for the clipboard: like `plainText(from:)`, but a link keeps its
+    /// target as `label (url)`, or only the label when it already is the target (`mailto:` is
+    /// ignored for that comparison). Targets with a scheme the HTML leaves out are dropped too.
+    ///
+    /// - Parameter text: Text using the supported attributes.
+    /// - Returns: Text for apps that don't read HTML.
+    public static func clipboardText(from text: AttributedString) -> String {
+        var result = ""
+        for (link, range) in text.runs[\.link] {
+            let label = String(text[range].characters)
+            result += label
+            guard let link, safeSchemes.contains(link.scheme?.lowercased() ?? "") else { continue }
+            let target = link.absoluteString
+            if label != target && "mailto:" + label != target {
+                result += " (\(target))"
+            }
+        }
+        return result
     }
 
     static func lines(of text: AttributedString) -> [AttributedSubstring] {
@@ -616,7 +639,6 @@ struct RichTextLine {
 
 enum HTMLWriter {
     static let prefix = "<meta charset=\"utf-8\">"
-    static let safeSchemes: Set<String> = ["http", "https", "mailto"]
 
     static func document(lines: [RichTextLine]) -> String {
         var output = prefix
@@ -656,7 +678,7 @@ enum HTMLWriter {
             for (flag, tag) in tags where intent.contains(flag) {
                 html = "<\(tag)>\(html)</\(tag)>"
             }
-            if let url = run.link, safeSchemes.contains(url.scheme?.lowercased() ?? "") {
+            if let url = run.link, RichText.safeSchemes.contains(url.scheme?.lowercased() ?? "") {
                 html = "<a href=\"\(escape(url.absoluteString))\">\(html)</a>"
             }
             output += html

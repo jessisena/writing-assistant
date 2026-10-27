@@ -264,4 +264,22 @@ private func wordPart(_ text: String) -> String {
     @Test func emptyTextGivesEmptyString() {
         #expect(RichText.plainText(from: AttributedString()) == "")
     }
+
+    @Test func plainTextLeavesLinkTargetsOut() {
+        #expect(RichText.plainText(from: parse("[docs](https://x.com)")) == "docs")
+    }
+
+    @Test(arguments: [
+        ("see [the **docs**](https://x.com/a) now", "see the docs (https://x.com/a) now"),
+        ("[https://x.com](https://x.com)", "https://x.com"),
+        ("mail [me@x.com](mailto:me@x.com)", "mail me@x.com"),
+        ("[write](mailto:me@x.com)", "write (mailto:me@x.com)"),
+        ("[a](https://a.com) and [b](https://b.com)", "a (https://a.com) and b (https://b.com)"),
+        ("[run](javascript:void)", "run"),
+        ("- **Hi** [x](https://x.com)\n# Title", "• Hi x (https://x.com)\nTitle"),
+        ("", ""),
+    ])
+    func clipboardTextAddsLinkTargets(markdown: String, expected: String) {
+        #expect(RichText.clipboardText(from: parse(markdown)) == expected)
+    }
 }

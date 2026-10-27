@@ -167,7 +167,8 @@ import WritingAssistantCore
         #expect(
             copied == [
                 ClipboardContent(
-                    html: RichText.html(from: expected), plain: RichText.plainText(from: expected))
+                    html: RichText.html(from: expected),
+                    plain: RichText.clipboardText(from: expected))
             ])
         #expect(copiedDuringDelay == true)
         #expect(waited == [.seconds(2)])
@@ -253,14 +254,14 @@ import WritingAssistantCore
         )
         model.input = NSAttributedString(string: "Hello")
         await model.process()
-        model.output = richText("My **edit** & more\n- point")
+        model.output = richText("My **edit** & [more](https://x.com)\n- point")
 
         await model.copyResult()
 
         #expect(copied.count == 1)
-        #expect(copied.first?.html.contains("<b>edit</b> &amp; more") == true)
+        #expect(copied.first?.html.contains("<b>edit</b> &amp; ") == true)
         #expect(copied.first?.html.contains("<ul><li>point</li></ul>") == true)
-        #expect(copied.first?.plain == "My edit & more\n• point")
+        #expect(copied.first?.plain == "My edit & more (https://x.com)\n• point")
     }
 
     @Test func clearEmptiesInputOutputResultAndError() async {

@@ -51,9 +51,10 @@ vocabulary. Translated input has no learning summary.
   emoji, from the toolbar above each editor or the Format menu. Pasted text keeps bold, italic,
   strikethrough, code and links, and drops fonts, sizes and colors.
 - **Editable output:** edit the polished text in place. **Copy** puts HTML and plain text on the
-  clipboard, so pasting into Slack keeps the formatting and emoji.
+  clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
+  targets as `label (url)`.
 - **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
-  output and keep the learning summary.
+  output for the channel it was polished for, and keep the learning summary.
 - **Show changes:** highlights what changed between your input and the output (hidden for
   translated input).
 - **Clear** empties the input and the results; **Cancel** stops a running request.
@@ -93,8 +94,9 @@ after installing, log out and back in (the build script already runs `pbs -updat
   learning-log.md      learning summaries
 ```
 
-If `history.json` can't be read, the app moves it to `history.corrupt.json`, starts with empty
-history and shows a banner.
+If `history.json` is damaged, the app moves it to `history.corrupt.json`, starts with empty
+history and shows a banner. If the file can't be read at all (or can't be moved aside), the app
+leaves it as it is and doesn't save new history until you relaunch.
 
 ---
 

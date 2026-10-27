@@ -3,7 +3,7 @@ import Observation
 import WritingAssistantCore
 
 /// What Copy puts on the clipboard: HTML for apps that keep formatting (Slack, Docs, Mail) and
-/// plain text for the rest.
+/// plain text, with link targets written out, for the rest.
 struct ClipboardContent: Equatable, Sendable {
     let html: String
     let plain: String
@@ -48,6 +48,9 @@ struct ClipboardContent: Equatable, Sendable {
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
     @ObservationIgnored private var copyGeneration = 0
     @ObservationIgnored private var startupErrorMessage: String?
+    /// False when the history file exists but couldn't be read or moved aside at launch. Saving
+    /// is then skipped until the next launch, so the unread file is never overwritten.
+    @ObservationIgnored private(set) var savesHistory = true
 
     /// Creates the model.
     ///
@@ -55,7 +58,9 @@ struct ClipboardContent: Equatable, Sendable {
     ///   - polisher: Service that polishes text.
     ///   - learningLog: The Markdown file learning summaries are appended to.
     ///   - historyStore: Where past requests are kept. It is read here; a damaged file is shown
-    ///     in the error banner and the history starts empty.
+    ///     in the error banner and the history starts empty. When the file can't be read (or a
+    ///     damaged one can't be moved aside), the banner says so and history isn't saved until
+    ///     the next launch.
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
@@ -72,11 +77,23 @@ struct ClipboardContent: Equatable, Sendable {
         self.historyStore = historyStore
         self.writeToPasteboard = writeToPasteboard
         self.sleep = sleep
+        loadHistory()
+    }
+
+    private func loadHistory() {
         do {
             history = try historyStore.load()
+        } catch HistoryStoreError.corrupted(let backup) {
+            showStartupError(HistoryStoreError.corrupted(backup: backup))
         } catch {
-            showStartupError(error)
+            savesHistory = false
+            showStartupError(Self.historyNotSavedMessage(error))
         }
+    }
+
+    private static func historyNotSavedMessage(_ error: any Error) -> String {
+        error.localizedDescription
+            + " New history won't be saved until you relaunch the app, so the file isn't replaced."
     }
 
     /// Starts polishing `input` in a task that `cancel()` can stop. Ignored while a request is
@@ -226,7 +243,12 @@ struct ClipboardContent: Equatable, Sendable {
     /// Shows a startup failure, such as prompts that couldn't be seeded, in the error banner.
     /// Earlier startup failures stay in the banner.
     func showStartupError(_ error: any Error) {
-        startupErrorMessage = [startupErrorMessage, error.localizedDescription]
+        showStartupError(error.localizedDescription)
+    }
+
+    /// Shows a startup failure message in the error banner. Earlier startup failures stay in it.
+    func showStartupError(_ message: String) {
+        startupErrorMessage = [startupErrorMessage, message]
             .compactMap { $0 }
             .joined(separator: "\n")
         errorMessage = startupErrorMessage
@@ -239,7 +261,8 @@ struct ClipboardContent: Equatable, Sendable {
         saveOutputToHistory()
         let text = RichTextBridge.attributedString(from: output)
         writeToPasteboard(
-            ClipboardContent(html: RichText.html(from: text), plain: RichText.plainText(from: text))
+            ClipboardContent(
+                html: RichText.html(from: text), plain: RichText.clipboardText(from: text))
         )
         copied = true
         copyGeneration += 1
