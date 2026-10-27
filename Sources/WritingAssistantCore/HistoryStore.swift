@@ -86,10 +86,10 @@ public enum HistoryStoreError: LocalizedError, Equatable, Sendable {
             "The history file was damaged, so history starts empty. The old file was moved to "
                 + "\(backup.path); open it to recover past texts or delete it."
         case .readFailed(let path, let reason):
-            "Couldn't read the history at \(path): \(reason). "
+            "Couldn't read the history at \(path): \(reason.withoutTrailingPeriod). "
                 + "Check that the file is readable, or move it away to start a new history."
         case .writeFailed(let path, let reason):
-            "Couldn't save the history to \(path): \(reason). "
+            "Couldn't save the history to \(path): \(reason.withoutTrailingPeriod). "
                 + "Check that the folder exists and is writable."
         }
     }

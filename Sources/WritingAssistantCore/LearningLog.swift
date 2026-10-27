@@ -6,7 +6,7 @@ public struct LearningLogError: LocalizedError, Sendable {
     public let reason: String
 
     public var errorDescription: String? {
-        "Couldn't write the learning log at \(path): \(reason). "
+        "Couldn't write the learning log at \(path): \(reason.withoutTrailingPeriod). "
             + "Check that the folder exists and is writable."
     }
 }
