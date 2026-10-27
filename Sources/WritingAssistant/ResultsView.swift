@@ -77,6 +77,13 @@ private struct PolishedCard: View {
     @State private var outputController = RichTextController()
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            card
+            RefinementRow(model: model)
+        }
+    }
+
+    private var card: some View {
         Card(title: "Polished Text") {
             HStack(spacing: 10) {
                 LanguageLabel(result: result)
@@ -101,6 +108,27 @@ private struct PolishedCard: View {
                 )
             }
         }
+    }
+}
+
+private struct RefinementRow: View {
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Refine:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            ForEach(Refinement.allCases) { refinement in
+                Button(refinement.displayName) { model.refine(refinement) }
+                    .accessibilityLabel("Refine: \(refinement.displayName)")
+                    .help("Rewrites the polished text, including your edits")
+            }
+        }
+        .disabled(!model.canRefine)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Refine polished text")
     }
 }
 
