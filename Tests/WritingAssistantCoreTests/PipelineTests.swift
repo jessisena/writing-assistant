@@ -40,6 +40,8 @@ private struct StubPromptStore: PromptStoring {
     func read(_ file: PromptFile) throws -> String { try assembled.get() }
     func write(_ text: String, to file: PromptFile) throws {}
     func restoreDefault(_ file: PromptFile) throws {}
+    func syncDefaults() throws -> Set<PromptFile> { [] }
+    func acknowledgeDefault(_ file: PromptFile) throws {}
     func assemble(for channel: Channel) throws -> String { try assembled.get() }
 }
 

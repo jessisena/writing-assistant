@@ -194,6 +194,11 @@ public protocol PromptStoring: Sendable {
     /// Validates with `PromptFile.validate` before writing.
     func write(_ text: String, to file: PromptFile) throws
     func restoreDefault(_ file: PromptFile) throws
+    /// Updates unedited files to changed bundled defaults. Returns the edited files that have a
+    /// newer default the user hasn't taken.
+    func syncDefaults() throws -> Set<PromptFile>
+    /// Marks the current bundled default as seen without changing the file ("Keep mine").
+    func acknowledgeDefault(_ file: PromptFile) throws
     /// `polish.txt` with the placeholder replaced by the channel file (both trimmed).
     func assemble(for channel: Channel) throws -> String
 }
