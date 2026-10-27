@@ -94,8 +94,9 @@ after installing, log out and back in (the build script already runs `pbs -updat
   learning-log.md      learning summaries
 ```
 
-If `history.json` can't be read, the app moves it to `history.corrupt.json`, starts with empty
-history and shows a banner.
+If `history.json` is damaged, the app moves it to `history.corrupt.json`, starts with empty
+history and shows a banner. If the file can't be read at all (or can't be moved aside), the app
+leaves it as it is and doesn't save new history until you relaunch.
 
 ---
 

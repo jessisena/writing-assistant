@@ -281,6 +281,66 @@ import WritingAssistantCore
         #expect(message.contains(PolishError.claudeNotFound.errorDescription ?? "missing"))
     }
 
+    private func setPermissions(_ permissions: Int, of url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.posixPermissions: permissions], ofItemAtPath: url.path)
+    }
+
+    private static let notSavedNotice = "New history won't be saved until you relaunch the app"
+
+    @Test func unreadableFileIsNeverOverwritten() async throws {
+        let original = Data("[]  ".utf8)
+        try original.write(to: store.fileURL)
+        try setPermissions(0o000, of: store.fileURL)
+        defer { try? setPermissions(0o644, of: store.fileURL) }
+        let model = makeModel()
+        let startup = try #require(model.errorMessage)
+        #expect(startup.contains("Couldn't read the history"))
+        #expect(startup.contains(Self.notSavedNotice))
+
+        await process(model, "Hello")
+        model.output = AppModel.editorText(fromMarkdown: "Edited")
+        await model.copyResult()
+
+        #expect(model.result == .sample)
+        #expect(model.history.count == 1)
+        try setPermissions(0o644, of: store.fileURL)
+        #expect(try Data(contentsOf: store.fileURL) == original)
+    }
+
+    @Test func folderInPlaceOfTheFileShowsBannerAndSkipsSaving() async throws {
+        try FileManager.default.createDirectory(
+            at: store.fileURL, withIntermediateDirectories: true)
+        let model = makeModel()
+        #expect(model.errorMessage?.contains(Self.notSavedNotice) == true)
+
+        await process(model, "Hello")
+
+        #expect(model.errorMessage == nil)
+        #expect(model.history.count == 1)
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(
+            atPath: store.fileURL.path, isDirectory: &isDirectory)
+        #expect(exists && isDirectory.boolValue)
+    }
+
+    @Test func damagedFileThatCantBeMovedAsideIsNeverOverwritten() async throws {
+        let original = Data("not json".utf8)
+        try original.write(to: store.fileURL)
+        try setPermissions(0o555, of: directory)
+        let model = makeModel()
+        try setPermissions(0o755, of: directory)
+        let startup = try #require(model.errorMessage)
+        #expect(startup.contains("couldn't be moved aside"))
+        #expect(startup.contains(Self.notSavedNotice))
+
+        await process(model, "Hello")
+        model.clearHistory()
+
+        #expect(try Data(contentsOf: store.fileURL) == original)
+        #expect(!FileManager.default.fileExists(atPath: store.backupURL.path))
+    }
+
     @Test func saveFailureShowsBannerAndKeepsResult() async throws {
         let blocker = directory.appending(path: "not-a-folder")
         try Data("x".utf8).write(to: blocker)

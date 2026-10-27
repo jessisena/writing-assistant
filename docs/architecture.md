@@ -191,7 +191,9 @@ After a successful Process, `AppModel` appends the learning summary to `Learning
 it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`. The
 edited output is saved into the current entry on copy, refine, clear and before the next request,
 not on every keystroke. A history file that doesn't decode is renamed to `history.corrupt.json`,
-the store starts empty, and the app shows a banner.
+the store starts empty, and the app shows a banner. A file that can't be read, or a damaged one
+that can't be moved aside, is left alone: the banner says so and `AppModel.savesHistory` stays
+false until the next launch, so the first new entry never overwrites it.
 
 ### Service
 

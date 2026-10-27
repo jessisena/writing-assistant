@@ -86,15 +86,21 @@ extension AppModel {
         let markdown = RichText.markdown(from: RichTextBridge.attributedString(from: output))
         guard history[index].outputMarkdown != markdown else { return }
         history[index].outputMarkdown = markdown
-        try historyStore.save(history)
+        try saveHistory()
     }
 
     private func persistHistory() {
         do {
-            try historyStore.save(history)
+            try saveHistory()
         } catch {
             showBanner(error)
         }
+    }
+
+    /// Writes `history` to the store, unless saving is off for this session (see `savesHistory`).
+    private func saveHistory() throws {
+        guard savesHistory else { return }
+        try historyStore.save(history)
     }
 
     private static func result(for entry: HistoryEntry) -> PolishResult {
