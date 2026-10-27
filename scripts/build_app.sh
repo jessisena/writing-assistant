@@ -59,4 +59,13 @@ fi
 ditto "$APP" "$INSTALLED"
 
 echo "Installed: $INSTALLED"
+
+echo "Refreshing the Services menu..."
+if ! /System/Library/CoreServices/pbs -update; then
+  echo "warning: pbs -update failed, so \"Polish with Writing Assistant\" may not appear in" \
+    "the Services menu until you log out and back in." >&2
+fi
+
 echo "Drag it to the Dock to pin it."
+echo "To polish selected text from any app, use Services → Polish with Writing Assistant." \
+  "Assign a shortcut in System Settings → Keyboard → Keyboard Shortcuts → Services."

@@ -174,6 +174,11 @@ struct ClipboardContent: Equatable, Sendable {
         errorMessage = startupErrorMessage
     }
 
+    /// Shows `message` in the error banner until the next request starts.
+    func showBanner(_ message: String) {
+        errorMessage = message
+    }
+
     /// Copies the edited output as HTML and plain text and shows "Copied" for `copiedDuration`.
     func copyResult() async {
         guard result != nil else { return }
