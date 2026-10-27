@@ -25,28 +25,57 @@ struct PromptEditorView: View {
 private struct PromptFileSidebar: View {
     @Bindable var model: PromptEditorModel
 
+    private var promptFiles: [PromptFile] {
+        PromptFile.allCases.filter { !$0.isRefinement }
+    }
+
+    private var refinementFiles: [PromptFile] {
+        PromptFile.allCases.filter(\.isRefinement)
+    }
+
     var body: some View {
-        List(PromptFile.allCases, selection: $model.selection) { file in
-            HStack {
-                Text(file.displayName)
-                Spacer()
-                if model.hasNewerDefault(file) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .foregroundStyle(.orange)
-                        .help("A newer default is available")
-                        .accessibilityLabel("Newer default available")
-                }
-                if model.isDirty(file) {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel("Unsaved changes")
-                }
+        List(selection: $model.selection) {
+            Section("Prompts") {
+                ForEach(promptFiles) { PromptFileRow(model: model, file: $0) }
             }
-            .tag(file)
+            Section("Refinements") {
+                ForEach(refinementFiles) { PromptFileRow(model: model, file: $0) }
+            }
         }
         .listStyle(.sidebar)
         .accessibilityLabel("Prompt files")
+    }
+}
+
+private struct PromptFileRow: View {
+    let model: PromptEditorModel
+    let file: PromptFile
+
+    var body: some View {
+        HStack {
+            Text(file.displayName)
+            Spacer()
+            if model.hasNewerDefault(file) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.orange)
+                    .help("A newer default is available")
+                    .accessibilityLabel("Newer default available")
+            }
+            if model.isDirty(file) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Unsaved changes")
+            }
+        }
+        .tag(file)
+    }
+}
+
+extension PromptFile {
+    fileprivate var isRefinement: Bool {
+        if case .refinement = self { return true }
+        return false
     }
 }
 

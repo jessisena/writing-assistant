@@ -77,6 +77,13 @@ private struct PolishedCard: View {
     @State private var outputController = RichTextController()
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            card
+            RefinementRow(model: model)
+        }
+    }
+
+    private var card: some View {
         Card(title: "Polished Text") {
             HStack(spacing: 10) {
                 LanguageLabel(result: result)
@@ -84,23 +91,53 @@ private struct PolishedCard: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Model \(result.modelUsed)")
+                if !result.wasTranslated {
+                    Toggle("Show changes", isOn: $model.showsChanges)
+                        .toggleStyle(.button)
+                        .help("Highlights what changed between your input and the polished text")
+                }
                 Button(model.copied ? "Copied" : "Copy") {
                     Task { await model.copyResult() }
                 }
                 .tint(model.copied ? .green : nil)
             }
         } content: {
-            VStack(alignment: .leading, spacing: 6) {
-                FormattingToolbar(controller: outputController)
-                RichTextEditor(
-                    text: $model.output,
-                    controller: outputController,
-                    accessibilityLabel: "Polished text",
-                    minHeight: 80,
-                    maxHeight: 480
-                )
+            if model.showsChanges && !result.wasTranslated {
+                DiffView(input: model.input, output: model.output)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    FormattingToolbar(controller: outputController)
+                    RichTextEditor(
+                        text: $model.output,
+                        controller: outputController,
+                        accessibilityLabel: "Polished text",
+                        minHeight: 80,
+                        maxHeight: 480
+                    )
+                }
             }
         }
+    }
+}
+
+private struct RefinementRow: View {
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Refine:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            ForEach(Refinement.allCases) { refinement in
+                Button(refinement.displayName) { model.refine(refinement) }
+                    .accessibilityLabel("Refine: \(refinement.displayName)")
+                    .help("Rewrites the polished text, including your edits")
+            }
+        }
+        .disabled(!model.canRefine)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Refine polished text")
     }
 }
 

@@ -1,0 +1,35 @@
+import Foundation
+import WritingAssistantCore
+
+extension AppModel {
+    /// True when there is a polished result with non-blank output and no request is running.
+    var canRefine: Bool {
+        !isLoading && result != nil && !outputMarkdown.isEmpty
+    }
+
+    /// Asks Claude to apply `refinement` to the current, possibly edited, output.
+    ///
+    /// The output is sent as Markdown with the selected channel and replaced by the answer. The
+    /// result keeps its learning summary and language, since a summary of the model's own text
+    /// means nothing. Runs in `requestTask`, so `cancel()` stops it. Ignored unless `canRefine`.
+    func refine(_ refinement: Refinement) {
+        guard canRefine else { return }
+        let text = outputMarkdown
+        let channel = channel
+        guard let generation = beginRequest() else { return }
+        let polisher = polisher
+        requestTask = Task {
+            let refined = await finishRequest(generation) { () async throws(PolishError) in
+                try await polisher.refine(text: text, channel: channel, refinement: refinement)
+            }
+            if let refined {
+                output = AppModel.editorText(fromMarkdown: refined)
+            }
+        }
+    }
+
+    private var outputMarkdown: String {
+        RichText.markdown(from: RichTextBridge.attributedString(from: output))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
