@@ -88,6 +88,27 @@ import Testing
         #expect(text.contains("- a b → a b: one two\n"))
     }
 
+    @Test(arguments: [
+        "# Use the past simple", "## Use the past simple", "- Use the past simple",
+        "* Use the past simple", "+ Use the past simple", "> Use the past simple",
+        "1. Use the past simple", "2) Use the past simple", "```Use the past simple",
+        "    # Use the past simple",
+    ])
+    func grammarInsightStaysAParagraph(insight: String) throws {
+        let entry = LearningLog.entry(
+            for: LearningSummary(corrections: [], grammarInsight: insight, vocabulary: []),
+            channel: .slack, date: date, timeZone: utc)
+
+        let parsed = try AttributedString(markdown: entry)
+        let insightRuns = parsed.runs.filter {
+            String(parsed[$0.range].characters).contains("Use the past simple")
+        }
+        let kinds = insightRuns.flatMap { $0.presentationIntent?.components.map(\.kind) ?? [] }
+        #expect(kinds == [.paragraph], "\(entry)")
+        let text = insightRuns.map { String(parsed[$0.range].characters) }.joined()
+        #expect(text == insight.trimmingCharacters(in: .whitespaces), "\(entry)")
+    }
+
     @Test func appendingAnEmptySummaryWritesNothing() throws {
         let empty = LearningSummary(corrections: [], grammarInsight: "", vocabulary: [])
 

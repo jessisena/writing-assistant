@@ -32,7 +32,8 @@ public struct LearningLog: Sendable {
     /// The heading holds the local date and time (ISO 8601, `yyyy-MM-dd HH:mm:ss`) and the
     /// channel name. Corrections, the grammar insight and vocabulary each get a section, which is
     /// left out when it has no content. Line breaks inside a field are folded into spaces so
-    /// every list item stays on one line.
+    /// every list item stays on one line, and the grammar insight is escaped so it always reads
+    /// as a paragraph, never as a heading, list or quote.
     ///
     /// - Parameters:
     ///   - summary: The learning summary to format.
@@ -54,7 +55,7 @@ public struct LearningLog: Sendable {
             sections.append((["### Corrections"] + items).joined(separator: "\n"))
         }
         if !summary.grammarInsight.isEmpty {
-            sections.append("### Grammar insight\n\(oneLine(summary.grammarInsight))")
+            sections.append("### Grammar insight\n\(paragraph(summary.grammarInsight))")
         }
         if !summary.vocabulary.isEmpty {
             let items = summary.vocabulary.map(vocabularyItem)
@@ -67,8 +68,11 @@ public struct LearningLog: Sendable {
     ///
     /// Creates the parent folder and the file when they don't exist. Entries are separated by a
     /// blank line. The whole file is rewritten atomically, so a failed write never leaves a
-    /// half-written entry. An empty summary (`LearningSummary.isEmpty`) writes nothing, so the log only
-    /// holds entries with something to learn.
+    /// half-written entry. An empty summary (`LearningSummary.isEmpty`) writes nothing, so the
+    /// log only holds entries with something to learn.
+    ///
+    /// Call from one actor: appending reads the file and writes it back, so concurrent appends
+    /// to the same file can lose an entry.
     ///
     /// - Throws: `LearningLogError` naming the file when the folder or file can't be written.
     public func append(_ summary: LearningSummary, channel: Channel, date: Date) throws {
@@ -112,5 +116,23 @@ public struct LearningLog: Sendable {
 
     private static func oneLine(_ text: String) -> String {
         text.split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    /// Folds `text` onto one line that Markdown reads as a plain paragraph: leading spaces are
+    /// dropped and a leading heading, list, quote or code fence marker is backslash-escaped.
+    private static func paragraph(_ text: String) -> String {
+        let line = String(oneLine(text).drop(while: \.isWhitespace))
+        guard let first = line.first else {
+            return line
+        }
+        if "#-+*>`~<".contains(first) {
+            return "\\" + line
+        }
+        let digits = String(line.prefix(while: { $0.isASCII && $0.isNumber }))
+        let rest = String(line.dropFirst(digits.count))
+        if !digits.isEmpty, let marker = rest.first, ".)".contains(marker) {
+            return digits + "\\" + rest
+        }
+        return line
     }
 }
