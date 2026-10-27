@@ -20,20 +20,23 @@ extension AppModel {
 
     /// Restores the entry with `id`: its input, output, channel and result (learning summary,
     /// language, translation flag and model) come back, and it becomes the current entry. The
-    /// output on screen is saved to its own entry first. Ignored while a request is running.
+    /// output on screen is saved to its own entry first, and a failure to save it is shown in the
+    /// error banner even when `id` is unknown. An unknown `id` leaves the screen as it is.
+    /// Ignored while a request is running.
     func restoreHistoryEntry(id: UUID) {
         guard !isLoading else { return }
-        let saveError: (any Error)?
+        var saveError: (any Error)?
         do {
             try writeOutputToCurrentEntry()
-            saveError = nil
         } catch {
             saveError = error
         }
-        guard let entry = history.first(where: { $0.id == id }) else { return }
-        channel = entry.channel
-        show(Self.result(for: entry), input: Self.editorText(fromMarkdown: entry.inputMarkdown))
-        currentHistoryID = entry.id
+        if let entry = history.first(where: { $0.id == id }) {
+            channel = entry.channel
+            show(
+                Self.result(for: entry), input: Self.editorText(fromMarkdown: entry.inputMarkdown))
+            currentHistoryID = entry.id
+        }
         if let saveError {
             showBanner(saveError)
         }

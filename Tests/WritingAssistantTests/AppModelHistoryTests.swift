@@ -210,6 +210,59 @@ import WritingAssistantCore
         #expect(try saved().first { $0.id == second.id }?.outputMarkdown == "Edited second")
     }
 
+    /// Processes two texts, then edits the output and makes the history folder read-only, so the
+    /// next save fails. Returns the first entry's id.
+    private func twoEntriesWithFailingSave(_ model: AppModel, _ polisher: FakePolisher)
+        async throws -> UUID
+    {
+        await process(model, "First")
+        let first = try #require(model.history.first)
+        polisher.outcome = .success(Self.secondResult)
+        await process(model, "Second")
+        model.output = AppModel.editorText(fromMarkdown: "Unsaved edit")
+        try setPermissions(0o555, of: directory)
+        return first.id
+    }
+
+    @Test func restoreShowsTheSaveFailureAndStillRestores() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        let firstID = try await twoEntriesWithFailingSave(model, polisher)
+        defer { try? setPermissions(0o755, of: directory) }
+
+        model.restoreHistoryEntry(id: firstID)
+
+        #expect(model.currentHistoryID == firstID)
+        #expect(markdown(model.output) == PolishResult.sample.polishedText)
+        #expect(model.errorMessage?.contains("Couldn't save the history") == true)
+    }
+
+    @Test func restoreOfAMissingEntryStillShowsTheSaveFailure() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        _ = try await twoEntriesWithFailingSave(model, polisher)
+        defer { try? setPermissions(0o755, of: directory) }
+        let current = model.currentHistoryID
+
+        model.restoreHistoryEntry(id: UUID())
+
+        #expect(model.currentHistoryID == current)
+        #expect(markdown(model.output) == "Unsaved edit")
+        #expect(model.errorMessage?.contains("Couldn't save the history") == true)
+    }
+
+    @Test func restoreOfAMissingEntryChangesNothing() async throws {
+        let model = makeModel()
+        await process(model, "Hello")
+        let current = model.currentHistoryID
+
+        model.restoreHistoryEntry(id: UUID())
+
+        #expect(model.currentHistoryID == current)
+        #expect(model.result == .sample)
+        #expect(model.errorMessage == nil)
+    }
+
     @Test func historyIsLoadedAtLaunch() async throws {
         let first = makeModel()
         await process(first, "Hello")
