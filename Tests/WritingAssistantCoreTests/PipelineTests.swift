@@ -28,16 +28,24 @@ private actor FakeRunner: ClaudeRunning {
 }
 
 private struct StubPromptError: LocalizedError {
-    var errorDescription: String? { "polish.txt is missing" }
+    var message = "polish.txt is missing"
+    var errorDescription: String? { message }
 }
 
 private struct StubPromptStore: PromptStoring {
     var assembled: Result<String, StubPromptError> = .success("SYSTEM PROMPT")
+    var refinements: Result<String, StubPromptError> = .success("  REFINE INSTRUCTION \n")
 
     var directoryURL: URL { URL(filePath: "/nonexistent/prompts") }
     func fileURL(_ file: PromptFile) -> URL { directoryURL.appending(path: file.relativePath) }
     func seedMissingDefaults() throws {}
-    func read(_ file: PromptFile) throws -> String { try assembled.get() }
+    func read(_ file: PromptFile) throws -> String {
+        if case .refinement(let refinement) = file {
+            return try refinements.get().replacingOccurrences(
+                of: "REFINE", with: refinement.rawValue.uppercased())
+        }
+        return try assembled.get()
+    }
     func write(_ text: String, to file: PromptFile) throws {}
     func restoreDefault(_ file: PromptFile) throws {}
     func assemble(for channel: Channel) throws -> String { try assembled.get() }
@@ -372,5 +380,112 @@ private func expectBadFormat(_ output: String) async {
         let result = try await service(runner).polish(text: text, channel: .slack)
         #expect(await runner.calls.first?.model == ModelRouting.sonnetModel)
         #expect(result.modelUsed == ModelRouting.sonnetModel)
+    }
+}
+
+@Suite struct RefinePipelineTests {
+    private let refinedResponse = json([
+        "detected_language": "English",
+        "was_translated": false,
+        "polished_text": "Send the report today.",
+        "learning_summary": summaryObject(),
+    ])
+
+    private func service(
+        _ runner: FakeRunner, prompts: StubPromptStore = StubPromptStore()
+    ) -> PolishService {
+        PolishService(runner: runner, prompts: prompts, timeout: .seconds(9))
+    }
+
+    @Test(arguments: Refinement.allCases)
+    func promptAppendsTheRefinementInstructionBeforeTheInput(refinement: Refinement) async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        _ = try await service(runner).refine(
+            text: "  Please send me the report.\n", channel: .formal, refinement: refinement)
+
+        let prompt = try #require(await runner.calls.first?.prompt)
+        let instruction = "\(refinement.rawValue.uppercased()) INSTRUCTION"
+        #expect(prompt.hasPrefix("SYSTEM PROMPT\n\n## Additional instruction\n\n\(instruction)\n"))
+        #expect(prompt.hasSuffix("\n\n---\n\nPlease send me the report."))
+        #expect(prompt.contains("already-polished English"))
+        #expect(prompt.contains("learning_summary to null"))
+    }
+
+    @Test func returnsOnlyThePolishedText() async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let refined = try await service(runner).refine(
+            text: "Please send me the report.", channel: .slack, refinement: .shorter)
+        #expect(refined == "Send the report today.")
+    }
+
+    @Test func runnerReceivesRoutedModelAndTimeout() async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        _ = try await service(runner).refine(text: "Hi", channel: .slack, refinement: .shorter)
+        let long = String(repeating: "word ", count: 100)
+        _ = try await service(runner).refine(text: long, channel: .slack, refinement: .shorter)
+
+        let calls = await runner.calls
+        #expect(calls.map(\.model) == [ModelRouting.haikuModel, ModelRouting.sonnetModel])
+        #expect(calls.allSatisfy { $0.timeout == .seconds(9) })
+    }
+
+    @Test(arguments: ["", " \n\t "])
+    func emptyInputIsRejected(text: String) async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        await #expect(throws: PolishError.emptyInput) {
+            try await service(runner).refine(text: text, channel: .slack, refinement: .shorter)
+        }
+        #expect(await runner.calls.isEmpty)
+    }
+
+    @Test func inputOverLimitIsRejected() async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let text = String(repeating: "a", count: PolishService.maxInputLength + 1)
+        await #expect(throws: PolishError.inputTooLong(limit: PolishService.maxInputLength)) {
+            try await service(runner).refine(text: text, channel: .slack, refinement: .moreFormal)
+        }
+        #expect(await runner.calls.isEmpty)
+    }
+
+    @Test func missingRefinementFileIsPromptUnavailable() async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let missing = StubPromptError(message: "shorter.txt is missing")
+        let prompts = StubPromptStore(refinements: .failure(missing))
+        await #expect(throws: PolishError.promptUnavailable(detail: "shorter.txt is missing")) {
+            try await service(runner, prompts: prompts).refine(
+                text: "Hello", channel: .slack, refinement: .shorter)
+        }
+        #expect(await runner.calls.isEmpty)
+    }
+
+    @Test func missingChannelPromptIsPromptUnavailable() async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let prompts = StubPromptStore(assembled: .failure(StubPromptError()))
+        await #expect(throws: PolishError.promptUnavailable(detail: "polish.txt is missing")) {
+            try await service(runner, prompts: prompts).refine(
+                text: "Hello", channel: .slack, refinement: .moreCasual)
+        }
+        #expect(await runner.calls.isEmpty)
+    }
+
+    @Test(arguments: [
+        "not json", "[1]", json(["was_translated": false]), json(["polished_text": 3]),
+    ])
+    func unusableResponseIsBadFormat(output: String) async {
+        let runner = FakeRunner(output: .success(output))
+        await #expect {
+            _ = try await service(runner).refine(
+                text: "Hello", channel: .slack, refinement: .moreCasual)
+        } throws: { error in
+            guard case .badFormat = error as? PolishError else { return false }
+            return true
+        }
+    }
+
+    @Test func runnerErrorPropagatesUnchanged() async {
+        let runner = FakeRunner(output: .failure(.cliFailed(stderr: "boom")))
+        await #expect(throws: PolishError.cliFailed(stderr: "boom")) {
+            try await service(runner).refine(text: "Hello", channel: .slack, refinement: .shorter)
+        }
     }
 }

@@ -2,12 +2,14 @@
     import Foundation
     import WritingAssistantCore
 
-    /// In-memory `Polishing` for previews and tests. Returns `outcome` after `delay`.
+    /// In-memory `Polishing` for previews and tests. Returns `outcome` after `delay`; `refine`
+    /// returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
         private var _calls: [(text: String, channel: Channel)] = []
+        private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
         let delay: Duration
 
         init(
@@ -32,12 +34,26 @@
 
         var calls: [(text: String, channel: Channel)] { lock.withLock { _calls } }
 
+        var refineCalls: [(text: String, channel: Channel, refinement: Refinement)] {
+            lock.withLock { _refineCalls }
+        }
+
         func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
             lock.withLock { _calls.append((text, channel)) }
             if delay > .zero {
                 try? await Task.sleep(for: delay)
             }
             return try outcome.get()
+        }
+
+        func refine(
+            text: String, channel: Channel, refinement: Refinement
+        ) async throws(PolishError) -> String {
+            lock.withLock { _refineCalls.append((text, channel, refinement)) }
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
+            return try outcome.get().polishedText
         }
 
         func checkReady() async throws(PolishError) {
@@ -56,6 +72,9 @@
             var seeded: [PromptFile: String] = [.global: "Rules\n\(PromptFile.channelPlaceholder)"]
             for channel in Channel.allCases {
                 seeded[.channel(channel)] = "\(channel.rawValue) guidelines"
+            }
+            for refinement in Refinement.allCases {
+                seeded[.refinement(refinement)] = "\(refinement.rawValue) instruction"
             }
             defaults = seeded
             self.files = files ?? seeded

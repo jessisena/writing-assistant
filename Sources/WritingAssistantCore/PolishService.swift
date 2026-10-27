@@ -7,6 +7,9 @@ public struct PolishService: Polishing {
     public static let defaultTimeout: Duration = .seconds(120)
 
     private static let logger = Logger(subsystem: "local.writing-assistant", category: "pipeline")
+    private static let refinementNote =
+        "The input is already-polished English: apply the additional instruction on top of the "
+        + "rules above, set was_translated to false and set learning_summary to null."
 
     private let runner: any ClaudeRunning
     private let prompts: any PromptStoring
@@ -42,10 +45,41 @@ public struct PolishService: Polishing {
     public func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
         let systemPrompt = try assemblePrompt(for: channel)
-        let model = ModelRouting.pickModel(for: input)
-        let raw = try await runner.run(
-            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout)
-        return try Self.parse(raw, model: model)
+        return try await send(systemPrompt, input: input)
+    }
+
+    /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
+    ///
+    /// The prompt is the channel's assembled system prompt plus an "Additional instruction"
+    /// section holding the refinement file. Only the new polished text is returned: the model's
+    /// language and learning summary describe its own output, so they are dropped.
+    ///
+    /// - Parameters:
+    ///   - text: The current polished text. Leading and trailing whitespace is ignored.
+    ///   - channel: Selects the channel guidelines inserted into the prompt.
+    ///   - refinement: Selects the instruction file appended to the prompt.
+    /// - Returns: The refined text.
+    /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
+    ///   error thrown by the runner, unchanged.
+    public func refine(
+        text: String, channel: Channel, refinement: Refinement
+    ) async throws(PolishError) -> String {
+        let input = try Self.validatedInput(text)
+        let systemPrompt = try assemblePrompt(for: channel)
+        let instruction = try loadPrompt(named: refinement.rawValue) {
+            try prompts.read(.refinement(refinement))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let refinementPrompt = """
+            \(systemPrompt)
+
+            ## Additional instruction
+
+            \(instruction)
+
+            \(Self.refinementNote)
+            """
+        return try await send(refinementPrompt, input: input).polishedText
     }
 
     public func checkReady() async throws(PolishError) {
@@ -63,12 +97,26 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
+    private func send(_ systemPrompt: String, input: String) async throws(PolishError)
+        -> PolishResult
+    {
+        let model = ModelRouting.pickModel(for: input)
+        let raw = try await runner.run(
+            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout)
+        return try Self.parse(raw, model: model)
+    }
+
     private func assemblePrompt(for channel: Channel) throws(PolishError) -> String {
+        try loadPrompt(named: channel.rawValue) { try prompts.assemble(for: channel) }
+    }
+
+    private func loadPrompt(
+        named name: String, _ body: () throws -> String
+    ) throws(PolishError) -> String {
         do {
-            return try prompts.assemble(for: channel)
+            return try body()
         } catch {
             let detail = error.localizedDescription
-            let name = channel.rawValue
             Self.logger.error(
                 "Prompt unavailable for \(name, privacy: .public): \(detail, privacy: .public)")
             throw .promptUnavailable(detail: detail)
