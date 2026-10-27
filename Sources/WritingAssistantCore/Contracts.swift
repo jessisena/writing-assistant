@@ -24,6 +24,23 @@ public enum Channel: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// A quick follow-up edit applied to text that was already polished.
+public enum Refinement: String, CaseIterable, Sendable, Identifiable {
+    case shorter
+    case moreCasual = "more_casual"
+    case moreFormal = "more_formal"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .shorter: "Shorter"
+        case .moreCasual: "More casual"
+        case .moreFormal: "More formal"
+        }
+    }
+}
+
 public struct Correction: Codable, Sendable, Equatable {
     public var original: String
     public var corrected: String
@@ -126,20 +143,24 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
 public enum PromptFile: Hashable, Sendable, Identifiable {
     case global
     case channel(Channel)
+    case refinement(Refinement)
 
     public static let channelPlaceholder = "{{CHANNEL_GUIDELINES}}"
 
     public static var allCases: [PromptFile] {
         [.global] + Channel.allCases.map { .channel($0) }
+            + Refinement.allCases.map { .refinement($0) }
     }
 
     public var id: String { relativePath }
 
-    /// Path relative to the prompts directory, e.g. `polish.txt` or `channels/slack.txt`.
+    /// Path relative to the prompts directory, e.g. `polish.txt`, `channels/slack.txt` or
+    /// `refinements/shorter.txt`.
     public var relativePath: String {
         switch self {
         case .global: "polish.txt"
         case .channel(let channel): "channels/\(channel.rawValue).txt"
+        case .refinement(let refinement): "refinements/\(refinement.rawValue).txt"
         }
     }
 
@@ -147,6 +168,7 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
         switch self {
         case .global: "Global rules"
         case .channel(let channel): channel.displayName
+        case .refinement(let refinement): refinement.displayName
         }
     }
 
@@ -205,6 +227,10 @@ public protocol PromptStoring: Sendable {
 
 public protocol Polishing: Sendable {
     func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult
+    /// Rewrites already-polished `text` for `channel` with one extra instruction and returns
+    /// only the new polished text.
+    func refine(text: String, channel: Channel, refinement: Refinement) async throws(PolishError)
+        -> String
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
     func checkReady() async throws(PolishError)
 }
