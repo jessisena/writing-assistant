@@ -22,6 +22,16 @@ import WritingAssistantCore
         return model
     }
 
+    @Test func refineDoesNotAppend() async throws {
+        let model = await process(.success(.sample))
+        let before = try #require(logText())
+
+        model.refine(.moreFormal)
+        await model.requestTask?.value
+
+        #expect(logText() == before)
+    }
+
     @Test func successWithSummaryAppendsOneEntry() async throws {
         let model = await process(.success(.sample))
 

@@ -93,6 +93,22 @@ import WritingAssistantCore
         #expect(try saved().first?.outputMarkdown == "My **edit**")
     }
 
+    @Test func refineSavesTheRefinedOutputToTheSameEntry() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        await process(model, "Hello")
+        let entryID = try #require(model.currentHistoryID)
+        polisher.outcome = .success(Self.secondResult)
+
+        model.refine(.shorter)
+        await model.requestTask?.value
+
+        #expect(model.history.count == 1)
+        #expect(model.currentHistoryID == entryID)
+        #expect(model.history.first?.outputMarkdown == "Second answer.")
+        #expect(try saved().first?.outputMarkdown == "Second answer.")
+    }
+
     @Test func clearSavesTheEditedOutputAndLeavesTheEntry() async throws {
         let model = makeModel()
         await process(model, "Hello")

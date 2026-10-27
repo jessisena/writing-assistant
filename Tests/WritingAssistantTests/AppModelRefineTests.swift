@@ -15,7 +15,7 @@ import WritingAssistantCore
     )
 
     private func makeModel(_ polisher: any Polishing) -> AppModel {
-        AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        AppModel.testing(polisher: polisher)
     }
 
     private func markdown(_ text: NSAttributedString) -> String {

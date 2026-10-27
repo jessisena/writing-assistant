@@ -94,14 +94,14 @@ import WritingAssistantCore
 @MainActor
 @Suite struct AppModelShowChangesTests {
     private func polishedModel() async -> AppModel {
-        let model = AppModel(polisher: FakePolisher(), writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: FakePolisher())
         model.input = NSAttributedString(string: "I will to review the doc")
         await model.process()
         return model
     }
 
     @Test func showChangesStartsOff() {
-        let model = AppModel(polisher: FakePolisher(), writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: FakePolisher())
         #expect(!model.showsChanges)
     }
 

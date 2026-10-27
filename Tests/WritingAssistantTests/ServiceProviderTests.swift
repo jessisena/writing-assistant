@@ -15,7 +15,7 @@ import WritingAssistantCore
     private func makeProvider(
         _ polisher: any Polishing, activations: @escaping @MainActor () -> Void = {}
     ) -> (ServiceProvider, AppModel) {
-        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: polisher)
         return (ServiceProvider(model: model, activate: activations), model)
     }
 

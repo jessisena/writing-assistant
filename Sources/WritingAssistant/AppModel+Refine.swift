@@ -11,7 +11,8 @@ extension AppModel {
     ///
     /// The output is sent as Markdown with the selected channel and replaced by the answer. The
     /// result keeps its learning summary and language, since a summary of the model's own text
-    /// means nothing. Runs in `requestTask`, so `cancel()` stops it. Ignored unless `canRefine`.
+    /// means nothing. The refined output is saved to the current history entry; the learning log
+    /// is left alone. Runs in `requestTask`, so `cancel()` stops it. Ignored unless `canRefine`.
     func refine(_ refinement: Refinement) {
         guard canRefine else { return }
         let text = outputMarkdown
@@ -24,6 +25,7 @@ extension AppModel {
             }
             if let refined {
                 output = AppModel.editorText(fromMarkdown: refined)
+                saveOutputToHistory()
             }
         }
     }
