@@ -16,9 +16,11 @@ enum RichTextBridge {
     /// Attributes for unformatted text.
     static var baseAttributes: [NSAttributedString.Key: Any] { RichTextStyle().applied(to: [:]) }
 
-    /// Bullet markers that rich text from other apps puts at the start of list lines.
-    private static let foreignListMarker = try? NSRegularExpression(
-        pattern: "^[\\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\\t))[\\t ]+", options: [.anchorsMatchLines])
+    /// Bullet markers that rich text from other apps puts at the start of list lines. A literal,
+    /// so the compiler checks the pattern; computed because `Regex` isn't `Sendable`.
+    private static var foreignListMarker: Regex<Substring> {
+        #/^[\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\t))[\t ]+/#.anchorsMatchLineEndings()
+    }
 
     /// Reads the supported formatting from editor text. Attachments are dropped.
     ///
@@ -66,12 +68,10 @@ enum RichTextBridge {
     }
 
     private static func replacingListMarkers(in text: NSAttributedString) -> NSAttributedString {
-        guard let foreignListMarker else { return text }
         let result = NSMutableAttributedString(attributedString: text)
-        let matches = foreignListMarker.matches(
-            in: text.string, range: NSRange(location: 0, length: text.length))
-        for match in matches.reversed() {
-            result.replaceCharacters(in: match.range, with: bulletPrefix)
+        let string = text.string
+        for match in string.matches(of: foreignListMarker).reversed() {
+            result.replaceCharacters(in: NSRange(match.range, in: string), with: bulletPrefix)
         }
         return result
     }
