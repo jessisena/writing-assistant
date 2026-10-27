@@ -28,6 +28,8 @@ struct ClipboardContent: Equatable, Sendable {
     }
 
     @ObservationIgnored let polisher: any Polishing
+    /// Where `process()` writes each learning summary. Append only from the main actor.
+    @ObservationIgnored let learningLog: LearningLog
     /// The request started by `startProcessing()`, which `cancel()` stops.
     @ObservationIgnored var requestTask: Task<Void, Never>?
     @ObservationIgnored private var requestGeneration = 0
@@ -40,16 +42,19 @@ struct ClipboardContent: Equatable, Sendable {
     ///
     /// - Parameters:
     ///   - polisher: Service that polishes text.
+    ///   - learningLog: The Markdown file learning summaries are appended to.
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
     init(
         polisher: any Polishing,
+        learningLog: LearningLog = .standard(),
         writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
         sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
         self.polisher = polisher
+        self.learningLog = learningLog
         self.writeToPasteboard = writeToPasteboard
         self.sleep = sleep
     }
@@ -144,6 +149,7 @@ struct ClipboardContent: Equatable, Sendable {
         guard let polished else { return }
         result = polished
         output = Self.editorText(fromMarkdown: polished.polishedText)
+        appendToLearningLog(polished, channel: request.channel)
     }
 
     /// Empties the input, the output, the result and the error banner. Ignored while a request
@@ -166,6 +172,19 @@ struct ClipboardContent: Equatable, Sendable {
                 .compactMap { $0 }
                 .joined(separator: "\n")
         }
+    }
+
+    /// Adds `error` to the error banner without touching the result, for failures that happen
+    /// after a request succeeded, such as a log or history file that couldn't be written.
+    /// A message that is already in the banner isn't repeated.
+    func showBanner(_ error: any Error) {
+        let message = error.localizedDescription
+        guard let current = errorMessage, !current.isEmpty else {
+            errorMessage = message
+            return
+        }
+        guard !current.components(separatedBy: "\n").contains(message) else { return }
+        errorMessage = current + "\n" + message
     }
 
     /// Shows a startup failure, such as prompts that couldn't be seeded, in the error banner.

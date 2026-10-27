@@ -32,10 +32,24 @@ struct WritingAssistantApp: App {
         }
         .defaultSize(width: 820, height: 780)
         .windowResizability(.contentMinSize)
-        .commands { FormatCommands() }
+        .commands {
+            FormatCommands()
+            LearningLogCommands(model: model)
+        }
 
         Settings {
             PromptEditorView(store: store, newerDefaults: newerDefaults)
+        }
+    }
+}
+
+/// "Open Learning Log" in the app menu, below Settings.
+struct LearningLogCommands: Commands {
+    let model: AppModel
+
+    var body: some Commands {
+        CommandGroup(after: .appSettings) {
+            Button("Open Learning Log") { model.openLearningLog() }
         }
     }
 }
