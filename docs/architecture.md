@@ -169,7 +169,9 @@ A corrupt manifest is logged, treated as missing and rewritten.
 ### Rich text
 
 `RichText` (Core) converts between the Markdown subset and `AttributedString` with inline
-presentation intents, and renders HTML and plain text. `RichTextBridge` (app) converts between
+presentation intents, and renders HTML and plain text. `plainText(from:)` drops link targets, for
+the diff and history previews; `clipboardText(from:)` writes them as `label (url)` for the plain
+clipboard flavor. `RichTextBridge` (app) converts between
 `AttributedString` and the `NSAttributedString` the editors use (font traits, strikethrough,
 monospaced font, links), and normalizes pasted text: bold, italic, strikethrough, code and links
 are kept; foreign fonts, sizes and colors are dropped, and the foreground is `NSColor.textColor`

@@ -3,7 +3,7 @@ import Observation
 import WritingAssistantCore
 
 /// What Copy puts on the clipboard: HTML for apps that keep formatting (Slack, Docs, Mail) and
-/// plain text for the rest.
+/// plain text, with link targets written out, for the rest.
 struct ClipboardContent: Equatable, Sendable {
     let html: String
     let plain: String
@@ -239,7 +239,8 @@ struct ClipboardContent: Equatable, Sendable {
         saveOutputToHistory()
         let text = RichTextBridge.attributedString(from: output)
         writeToPasteboard(
-            ClipboardContent(html: RichText.html(from: text), plain: RichText.plainText(from: text))
+            ClipboardContent(
+                html: RichText.html(from: text), plain: RichText.clipboardText(from: text))
         )
         copied = true
         copyGeneration += 1

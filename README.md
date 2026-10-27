@@ -51,7 +51,8 @@ vocabulary. Translated input has no learning summary.
   emoji, from the toolbar above each editor or the Format menu. Pasted text keeps bold, italic,
   strikethrough, code and links, and drops fonts, sizes and colors.
 - **Editable output:** edit the polished text in place. **Copy** puts HTML and plain text on the
-  clipboard, so pasting into Slack keeps the formatting and emoji.
+  clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
+  targets as `label (url)`.
 - **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
   output and keep the learning summary.
 - **Show changes:** highlights what changed between your input and the output (hidden for
