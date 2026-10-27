@@ -54,7 +54,7 @@ vocabulary. Translated input has no learning summary.
   clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
   targets as `label (url)`.
 - **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
-  output and keep the learning summary.
+  output for the channel it was polished for, and keep the learning summary.
 - **Show changes:** highlights what changed between your input and the output (hidden for
   translated input).
 - **Clear** empties the input and the results; **Cancel** stops a running request.
