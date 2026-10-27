@@ -23,20 +23,25 @@ struct ComposerView: View {
                 }
             }
             .pickerStyle(.radioGroup)
-            ProcessRow(isLoading: model.isLoading) {
-                Task { await model.process() }
-            }
+            ProcessRow(
+                isLoading: model.isLoading,
+                canClear: model.canClear,
+                onProcess: { Task { await model.process() } },
+                onClear: model.clear
+            )
         }
     }
 }
 
 private struct ProcessRow: View {
     let isLoading: Bool
-    let action: () -> Void
+    let canClear: Bool
+    let onProcess: () -> Void
+    let onClear: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: action) {
+            Button(action: onProcess) {
                 ZStack {
                     Text("Process").opacity(isLoading ? 0 : 1)
                     if isLoading {
@@ -54,6 +59,13 @@ private struct ProcessRow: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
+            Spacer()
+            Button("Clear", action: onClear)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(!canClear)
+                .keyboardShortcut("k", modifiers: .command)
+                .help("Clear the input and results (⌘K)")
         }
     }
 }

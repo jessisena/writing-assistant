@@ -262,4 +262,59 @@ import WritingAssistantCore
         #expect(copied.first?.html.contains("<ul><li>point</li></ul>") == true)
         #expect(copied.first?.plain == "My edit & more\n• point")
     }
+
+    @Test func clearEmptiesInputOutputResultAndError() async {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+        model.showStartupError(PolishError.claudeNotFound)
+
+        model.clear()
+
+        #expect(model.input.length == 0)
+        #expect(model.output.length == 0)
+        #expect(model.result == nil)
+        #expect(model.errorMessage == nil)
+        #expect(!model.canClear)
+    }
+
+    @Test func clearWhileLoadingDoesNothing() async {
+        let model = makeModel(FakePolisher(delay: .milliseconds(200)))
+        model.input = NSAttributedString(string: "Hello")
+        let request = Task { await model.process() }
+        while !model.isLoading { await Task.yield() }
+
+        #expect(!model.canClear)
+        model.clear()
+
+        #expect(model.input.string == "Hello")
+        await request.value
+        #expect(model.result == .sample)
+    }
+
+    @Test func canClearIsFalseWhenEverythingIsEmpty() {
+        #expect(!makeModel(FakePolisher()).canClear)
+    }
+
+    @Test func canClearWithOnlyInput() {
+        let model = makeModel(FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+        #expect(model.canClear)
+    }
+
+    @Test func canClearWithOnlyAnError() async {
+        let model = makeModel(FakePolisher())
+        await model.process()
+        #expect(model.errorMessage != nil)
+        #expect(model.canClear)
+    }
+
+    @Test func canClearAfterAResultEvenWithEmptyInput() async {
+        let model = makeModel(FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+        model.input = NSAttributedString()
+        #expect(model.canClear)
+    }
 }

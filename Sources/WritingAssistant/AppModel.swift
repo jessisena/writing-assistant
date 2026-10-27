@@ -21,6 +21,12 @@ struct ClipboardContent: Equatable, Sendable {
     private(set) var errorMessage: String?
     private(set) var copied = false
 
+    /// True when there is something to clear and no request is running.
+    var canClear: Bool {
+        !isLoading
+            && (input.length > 0 || output.length > 0 || result != nil || errorMessage != nil)
+    }
+
     @ObservationIgnored private let polisher: any Polishing
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
@@ -68,6 +74,16 @@ struct ClipboardContent: Equatable, Sendable {
             result = nil
             errorMessage = error.errorDescription
         }
+    }
+
+    /// Empties the input, the output, the result and the error banner. Ignored while a request
+    /// is running.
+    func clear() {
+        guard !isLoading else { return }
+        input = NSAttributedString()
+        output = NSAttributedString()
+        result = nil
+        errorMessage = nil
     }
 
     /// Shows a banner when the polisher can't run (for example, the claude CLI is missing).
