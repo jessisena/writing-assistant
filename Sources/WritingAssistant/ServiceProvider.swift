@@ -19,12 +19,9 @@ import AppKit
     ///
     /// - Parameters:
     ///   - model: Model that receives the selected text.
-    ///   - activate: Brings the app and its main window forward. Defaults to
-    ///     `bringMainWindowForward()`.
-    init(
-        model: AppModel,
-        activate: @escaping @MainActor () -> Void = ServiceProvider.bringMainWindowForward
-    ) {
+    ///   - activate: Brings the app and its main window forward, usually by calling
+    ///     `bringMainWindowForward(openMainWindow:)`.
+    init(model: AppModel, activate: @escaping @MainActor () -> Void) {
         self.model = model
         self.activate = activate
     }
@@ -81,11 +78,29 @@ import AppKit
         return isBlank ? nil : text
     }
 
-    /// Activates the app and brings the main window to the front. When the service launched the
-    /// app, SwiftUI opens the main window on its own.
-    static func bringMainWindowForward() {
+    /// Activates the app and brings the main window to the front, reopening it when it was closed
+    /// (for example while the Settings window kept the app running). When the service launched
+    /// the app, SwiftUI opens the main window on its own.
+    ///
+    /// - Parameter openMainWindow: Opens the main window; nil until a SwiftUI view has handed
+    ///   one over.
+    static func bringMainWindowForward(openMainWindow: (@MainActor () -> Void)?) {
         NSApp.activate()
-        let window = NSApp.windows.first { $0.identifier?.rawValue == mainWindowID }
-        window?.makeKeyAndOrderFront(nil)
+        showMainWindow(in: NSApp.windows, openMainWindow: openMainWindow)
+    }
+
+    /// Brings the main window to the front when it is among `windows`, otherwise opens it.
+    ///
+    /// SwiftUI gives the NSWindow of `Window(id:)` that id as its identifier.
+    ///
+    /// - Parameters:
+    ///   - windows: The app's windows.
+    ///   - openMainWindow: Opens the main window when it isn't among `windows`.
+    static func showMainWindow(in windows: [NSWindow], openMainWindow: (@MainActor () -> Void)?) {
+        if let window = windows.first(where: { $0.identifier?.rawValue == mainWindowID }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindow?()
+        }
     }
 }
