@@ -7,7 +7,7 @@ import WritingAssistantCore
 @MainActor
 @Suite struct AppModelTests {
     private func makeModel(_ polisher: FakePolisher) -> AppModel {
-        AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        AppModel.testing(polisher: polisher)
     }
 
     private func richText(_ markdown: String) -> NSAttributedString {
@@ -149,7 +149,7 @@ import WritingAssistantCore
         var copiedDuringDelay: Bool?
         var waited: [Duration] = []
         var model: AppModel?
-        model = AppModel(
+        model = AppModel.testing(
             polisher: FakePolisher(),
             writeToPasteboard: { copied.append($0) },
             sleep: { duration in
@@ -176,7 +176,7 @@ import WritingAssistantCore
 
     @Test func overlappingCopiesKeepCopiedUntilTheLastDelayEnds() async {
         var pending: [CheckedContinuation<Void, Never>] = []
-        let model = AppModel(
+        let model = AppModel.testing(
             polisher: FakePolisher(),
             writeToPasteboard: { _ in },
             sleep: { _ in await withCheckedContinuation { pending.append($0) } }
@@ -200,7 +200,7 @@ import WritingAssistantCore
 
     @Test func copyWithoutResultDoesNothing() async {
         var copied: [ClipboardContent] = []
-        let model = AppModel(
+        let model = AppModel.testing(
             polisher: FakePolisher(),
             writeToPasteboard: { copied.append($0) },
             sleep: { _ in }
@@ -246,7 +246,7 @@ import WritingAssistantCore
 
     @Test func copyUsesTheEditedOutput() async {
         var copied: [ClipboardContent] = []
-        let model = AppModel(
+        let model = AppModel.testing(
             polisher: FakePolisher(),
             writeToPasteboard: { copied.append($0) },
             sleep: { _ in }
@@ -332,7 +332,7 @@ import WritingAssistantCore
 
     @Test func startProcessingShowsLoadingRightAway() async {
         let polisher = GatedPolisher()
-        let gated = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let gated = AppModel.testing(polisher: polisher)
         gated.input = NSAttributedString(string: "Hello")
 
         gated.startProcessing()
@@ -349,7 +349,7 @@ import WritingAssistantCore
 
     @Test func cancelEndsLoadingWithoutErrorOrResult() async {
         let polisher = GatedPolisher()
-        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: polisher)
         model.input = NSAttributedString(string: "Hello")
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
@@ -368,7 +368,7 @@ import WritingAssistantCore
 
     @Test func cancelledTaskShowsNoErrorEvenWithoutCancelCall() async {
         let polisher = GatedPolisher()
-        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: polisher)
         model.input = NSAttributedString(string: "Hello")
         let request = Task { await model.process() }
         await waitUntil(polisher, hasCalls: 1)
@@ -384,7 +384,7 @@ import WritingAssistantCore
 
     @Test func newRequestAfterCancelWorksAndIgnoresTheLateAnswer() async {
         let polisher = GatedPolisher()
-        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: polisher)
         model.input = NSAttributedString(string: "Hello")
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
@@ -405,7 +405,7 @@ import WritingAssistantCore
 
     @Test func lateFailureOfACancelledRequestDoesNotTouchTheNewerOne() async {
         let polisher = GatedPolisher()
-        let model = AppModel(polisher: polisher, writeToPasteboard: { _ in }, sleep: { _ in })
+        let model = AppModel.testing(polisher: polisher)
         model.input = NSAttributedString(string: "Hello")
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
