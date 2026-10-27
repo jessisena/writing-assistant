@@ -6,8 +6,8 @@ import WritingAssistantCore
 struct PromptEditorView: View {
     @State private var model: PromptEditorModel
 
-    init(store: any PromptStoring) {
-        _model = State(initialValue: PromptEditorModel(store: store))
+    init(store: any PromptStoring, newerDefaults: Set<PromptFile> = []) {
+        _model = State(initialValue: PromptEditorModel(store: store, newerDefaults: newerDefaults))
     }
 
     var body: some View {
@@ -30,6 +30,12 @@ private struct PromptFileSidebar: View {
             HStack {
                 Text(file.displayName)
                 Spacer()
+                if model.hasNewerDefault(file) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(.orange)
+                        .help("A newer default is available")
+                        .accessibilityLabel("Newer default available")
+                }
                 if model.isDirty(file) {
                     Circle()
                         .fill(Color.accentColor)
@@ -51,6 +57,9 @@ private struct PromptEditorDetail: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(model.selection.displayName)
                 .font(.title3.weight(.semibold))
+            if model.isNewerDefaultAvailable && !model.isConfirmingRestore {
+                NewerDefaultBanner(model: model)
+            }
             TextEditor(text: $model.draft)
                 .font(.system(.body, design: .monospaced))
                 .scrollContentBackground(.hidden)
@@ -105,6 +114,29 @@ private struct PromptEditorActions: View {
             }
             .accessibilityHint("Shows this prompt file in Finder")
         }
+    }
+}
+
+private struct NewerDefaultBanner: View {
+    let model: PromptEditorModel
+
+    var body: some View {
+        HStack {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundStyle(.blue)
+                .accessibilityHidden(true)
+            Text("A newer default is available. You've edited this file, so it wasn't updated.")
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Keep mine") { model.keepMine() }
+                .accessibilityHint("Keeps your version and hides this message")
+            Button("Restore Default…") { model.requestRestore() }
+                .accessibilityHint("Replaces this prompt file with the newer default text")
+        }
+        .padding(8)
+        .background(Color.blue.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .contain)
     }
 }
 

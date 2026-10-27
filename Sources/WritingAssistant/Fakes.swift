@@ -46,19 +46,32 @@
     }
 
     /// In-memory `PromptStoring` that applies the same validation as the real store.
+    ///
+    /// `syncDefaults()` returns the files in `newerDefaults`; acknowledging or restoring a file
+    /// removes it. Set `acknowledgeFailure` to make `acknowledgeDefault(_:)` throw.
     final class FakePromptStore: PromptStoring, @unchecked Sendable {
         private let lock = NSLock()
         private var files: [PromptFile: String]
         private let defaults: [PromptFile: String]
+        private var _newerDefaults: Set<PromptFile>
+        private var _acknowledgeFailure: (any Error)?
         let directoryURL = URL(fileURLWithPath: "/tmp/fake-prompts")
 
-        init(files: [PromptFile: String]? = nil) {
+        init(files: [PromptFile: String]? = nil, newerDefaults: Set<PromptFile> = []) {
             var seeded: [PromptFile: String] = [.global: "Rules\n\(PromptFile.channelPlaceholder)"]
             for channel in Channel.allCases {
                 seeded[.channel(channel)] = "\(channel.rawValue) guidelines"
             }
             defaults = seeded
             self.files = files ?? seeded
+            _newerDefaults = newerDefaults
+        }
+
+        var newerDefaults: Set<PromptFile> { lock.withLock { _newerDefaults } }
+
+        var acknowledgeFailure: (any Error)? {
+            get { lock.withLock { _acknowledgeFailure } }
+            set { lock.withLock { _acknowledgeFailure = newValue } }
         }
 
         func fileURL(_ file: PromptFile) -> URL {
@@ -85,7 +98,21 @@
         }
 
         func restoreDefault(_ file: PromptFile) throws {
-            lock.withLock { files[file] = defaults[file] }
+            lock.withLock {
+                files[file] = defaults[file]
+                _newerDefaults.remove(file)
+            }
+        }
+
+        func syncDefaults() throws -> Set<PromptFile> {
+            newerDefaults
+        }
+
+        func acknowledgeDefault(_ file: PromptFile) throws {
+            try lock.withLock {
+                if let _acknowledgeFailure { throw _acknowledgeFailure }
+                _newerDefaults.remove(file)
+            }
         }
 
         func assemble(for channel: Channel) throws -> String {

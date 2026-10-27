@@ -7,16 +7,20 @@ struct WritingAssistantApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
     private let store: PromptStore
+    private let newerDefaults: Set<PromptFile>
 
     init() {
         let store = PromptStore.standard()
         let model = AppModel(polisher: PolishService(runner: ClaudeCLI(), prompts: store))
+        var newerDefaults: Set<PromptFile> = []
         do {
             try store.seedMissingDefaults()
+            newerDefaults = try store.syncDefaults()
         } catch {
             model.showStartupError(error)
         }
         self.store = store
+        self.newerDefaults = newerDefaults
         _model = State(initialValue: model)
     }
 
@@ -30,7 +34,7 @@ struct WritingAssistantApp: App {
         .windowResizability(.contentMinSize)
 
         Settings {
-            PromptEditorView(store: store)
+            PromptEditorView(store: store, newerDefaults: newerDefaults)
         }
     }
 }

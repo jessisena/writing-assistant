@@ -8,12 +8,16 @@ import WritingAssistantCore
 /// dirty exactly when it has a draft. Drafts are kept per file, so switching files never loses
 /// unsaved edits. A file that couldn't be read has no saved text and is read-only until it
 /// reads successfully or is restored, so an empty editor can never overwrite it.
+///
+/// Files in `newerDefaults` were edited by the user and have a newer bundled default. A file
+/// leaves the set once the user restores the default or keeps their version.
 @Observable @MainActor
 final class PromptEditorModel {
     private let store: any PromptStoring
     private var savedTexts: [PromptFile: String] = [:]
     private var drafts: [PromptFile: String] = [:]
     private var errors: [PromptFile: String] = [:]
+    private var newerDefaults: Set<PromptFile>
 
     var selection: PromptFile = .global {
         didSet { isConfirmingRestore = false }
@@ -21,8 +25,33 @@ final class PromptEditorModel {
 
     private(set) var isConfirmingRestore = false
 
-    init(store: any PromptStoring) {
+    /// - Parameters:
+    ///   - store: Where the prompt files are read from and written to.
+    ///   - newerDefaults: Files `PromptStoring.syncDefaults()` reported at launch.
+    init(store: any PromptStoring, newerDefaults: Set<PromptFile> = []) {
         self.store = store
+        self.newerDefaults = newerDefaults
+    }
+
+    func hasNewerDefault(_ file: PromptFile) -> Bool {
+        newerDefaults.contains(file)
+    }
+
+    /// True when the selected file has a newer bundled default the user hasn't taken.
+    var isNewerDefaultAvailable: Bool { hasNewerDefault(selection) }
+
+    /// Keeps the user's version of the selected file and stops offering the newer default.
+    func keepMine() {
+        let file = selection
+        do {
+            try store.acknowledgeDefault(file)
+        } catch {
+            errors[file] =
+                "Couldn't keep your version of \(file.displayName): \(error.localizedDescription)"
+            return
+        }
+        newerDefaults.remove(file)
+        errors[file] = nil
     }
 
     /// Text shown in the editor for the selected file. Editing clears the file's error message;
@@ -93,6 +122,7 @@ final class PromptEditorModel {
             return
         }
         drafts[file] = nil
+        newerDefaults.remove(file)
         load(file)
     }
 
