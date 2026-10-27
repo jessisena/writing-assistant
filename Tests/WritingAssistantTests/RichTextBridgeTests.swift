@@ -283,6 +283,64 @@ import WritingAssistantCore
 
         #expect(markdown(textView) == "**plain**")
     }
+
+    private func actions(in menu: NSMenu) -> [String] {
+        menu.items.flatMap { item in
+            let own = item.action.map(NSStringFromSelector).map { [$0] } ?? []
+            return own + (item.submenu.map(actions) ?? [])
+        }
+    }
+
+    @Test func contextMenuOffersNoFormattingOutsideTheSupportedSubset() throws {
+        let textView = makeTextView("hello")
+        textView.usesFontPanel = true
+        textView.setSelectedRange(NSRange(location: 0, length: 5))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.contentView = textView
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: NSPoint(x: 10, y: 10), modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: 1))
+
+        let menu = try #require(textView.menu(for: event))
+
+        let found = actions(in: menu)
+        for unsupported in [
+            "orderFrontFontPanel:", "underline:", "orderFrontColorPanel:",
+            "orderFrontStylesPanel:", "changeLayoutOrientation:",
+        ] {
+            #expect(!found.contains(unsupported), "\(unsupported) is still in the menu")
+        }
+        for kept in [
+            "cut:", "copy:", "paste:", "pasteAsPlainText:", "toggleContinuousSpellChecking:",
+            "toggleAutomaticQuoteSubstitution:", "startSpeaking:", "uppercaseWord:",
+        ] {
+            #expect(found.contains(kept), "\(kept) is missing from the menu")
+        }
+    }
+
+    @Test func removingUnsupportedItemsDropsFormattingSubmenusAndStraySeparators() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        let font = NSMenuItem(title: "Font", action: nil, keyEquivalent: "")
+        font.submenu = NSMenu()
+        font.submenu?.addItem(
+            withTitle: "Kern", action: #selector(NSTextView.useStandardKerning(_:)),
+            keyEquivalent: "")
+        menu.addItem(font)
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: "Ligatures", action: #selector(NSTextView.useStandardLigatures(_:)),
+            keyEquivalent: "")
+
+        FormattingTextView.removeUnsupportedItems(from: menu)
+
+        #expect(menu.items.map(\.title) == ["Copy"])
+    }
 }
 
 @MainActor private final class UndoDelegate: NSObject, NSTextViewDelegate {

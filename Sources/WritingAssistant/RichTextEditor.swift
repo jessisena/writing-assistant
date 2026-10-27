@@ -231,6 +231,49 @@ final class FormattingTextView: NSTextView {
         return true
     }
 
+    /// Actions of context menu items that apply formatting the editors don't keep, such as
+    /// underline, colors, kerning, ligatures and vertical layout.
+    private static let unsupportedMenuActions: Set<String> = [
+        "orderFrontFontPanel:", "addFontTrait:", "underline:", "outline:", "highlight:",
+        "orderFrontStylesPanel:", "orderFrontColorPanel:", "copyFont:", "pasteFont:",
+        "useStandardKerning:", "turnOffKerning:", "tightenKerning:", "loosenKerning:",
+        "useStandardLigatures:", "turnOffLigatures:", "useAllLigatures:",
+        "changeLayoutOrientation:",
+    ]
+
+    /// The standard context menu without its Font, Styles and Layout Orientation items. Spelling,
+    /// Substitutions, Transformations, Speech and the edit commands stay.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let menu = super.menu(for: event)?.copy() as? NSMenu else { return nil }
+        Self.removeUnsupportedItems(from: menu)
+        return menu
+    }
+
+    /// Removes every item of `menu` whose action, or any action in whose submenu, is in
+    /// `unsupportedMenuActions`, then the separators left at the ends or next to each other.
+    static func removeUnsupportedItems(from menu: NSMenu) {
+        for item in menu.items where hasUnsupportedAction(item) {
+            menu.removeItem(item)
+        }
+        var previousIsSeparator = true
+        for item in menu.items {
+            if item.isSeparatorItem && previousIsSeparator {
+                menu.removeItem(item)
+            }
+            previousIsSeparator = item.isSeparatorItem
+        }
+        if let last = menu.items.last, last.isSeparatorItem {
+            menu.removeItem(last)
+        }
+    }
+
+    private static func hasUnsupportedAction(_ item: NSMenuItem) -> Bool {
+        if let action = item.action, unsupportedMenuActions.contains(NSStringFromSelector(action)) {
+            return true
+        }
+        return item.submenu?.items.contains(where: hasUnsupportedAction) ?? false
+    }
+
     /// Shows `text` unless it is already shown. Undo history is dropped, since it refers to the
     /// replaced text.
     func setContents(_ text: NSAttributedString) {
