@@ -56,7 +56,7 @@ private struct ProcessRow: View {
             .controlSize(.large)
             .disabled(isLoading)
             .keyboardShortcut(.return, modifiers: .command)
-            .accessibilityLabel(isLoading ? "Processing" : "Process")
+            .accessibilityLabel(isLoading ? "Working" : "Process")
             Text("or ⌘↵")
                 .font(.callout)
                 .foregroundStyle(.secondary)

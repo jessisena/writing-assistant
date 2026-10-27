@@ -22,7 +22,8 @@ struct HistoryButton: View {
     }
 }
 
-/// Lists past requests, newest first. Selecting one restores it and closes the popover.
+/// Lists past requests, newest first. Selecting one restores it and closes the popover. Rows and
+/// Clear History are disabled while a request runs.
 struct HistoryView: View {
     let model: AppModel
     let onRestore: () -> Void
@@ -39,6 +40,7 @@ struct HistoryView: View {
                     .frame(maxWidth: .infinity, minHeight: 60)
             } else {
                 HistoryList(model: model, onRestore: onRestore)
+                    .disabled(model.isLoading)
             }
             Divider()
             if isConfirmingClear {
@@ -53,7 +55,7 @@ struct HistoryView: View {
                 HStack {
                     Spacer()
                     Button("Clear History…") { isConfirmingClear = true }
-                        .disabled(model.history.isEmpty)
+                        .disabled(model.history.isEmpty || model.isLoading)
                         .accessibilityHint("Asks before deleting every past request")
                 }
             }

@@ -29,7 +29,7 @@ private struct SkeletonCards: View {
         }
         .redacted(reason: .placeholder)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Processing your text")
+        .accessibilityLabel("Working on your text")
     }
 }
 
