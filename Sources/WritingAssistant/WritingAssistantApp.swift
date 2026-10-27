@@ -32,6 +32,7 @@ struct WritingAssistantApp: App {
         }
         .defaultSize(width: 820, height: 780)
         .windowResizability(.contentMinSize)
+        .commands { FormatCommands() }
 
         Settings {
             PromptEditorView(store: store, newerDefaults: newerDefaults)
@@ -67,13 +68,8 @@ struct MainWindowView: View {
                     if let message = model.errorMessage {
                         ErrorBanner(message: message)
                     }
-                    ResultsView(
-                        result: model.result,
-                        isLoading: model.isLoading,
-                        copied: model.copied,
-                        onCopy: { Task { await model.copyResult() } }
-                    )
-                    .id(Self.resultsID)
+                    ResultsView(model: model)
+                        .id(Self.resultsID)
                 }
                 .frame(maxWidth: 720)
                 .padding(32)

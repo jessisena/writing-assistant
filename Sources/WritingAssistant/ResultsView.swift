@@ -3,17 +3,14 @@ import WritingAssistantCore
 
 /// Polished text and learning summary cards, or skeleton cards while loading.
 struct ResultsView: View {
-    let result: PolishResult?
-    let isLoading: Bool
-    let copied: Bool
-    let onCopy: () -> Void
+    @Bindable var model: AppModel
 
     var body: some View {
-        if isLoading {
+        if model.isLoading {
             SkeletonCards()
-        } else if let result {
+        } else if let result = model.result {
             VStack(spacing: 16) {
-                PolishedCard(result: result, copied: copied, onCopy: onCopy)
+                PolishedCard(model: model, result: result)
                 LearningSummaryCard(result: result)
             }
         }
@@ -75,9 +72,9 @@ private struct Card<Accessory: View, Content: View>: View {
 }
 
 private struct PolishedCard: View {
+    @Bindable var model: AppModel
     let result: PolishResult
-    let copied: Bool
-    let onCopy: () -> Void
+    @State private var outputController = RichTextController()
 
     var body: some View {
         Card(title: "Polished Text") {
@@ -87,14 +84,22 @@ private struct PolishedCard: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Model \(result.modelUsed)")
-                Button(copied ? "Copied" : "Copy", action: onCopy)
-                    .tint(copied ? .green : nil)
+                Button(model.copied ? "Copied" : "Copy") {
+                    Task { await model.copyResult() }
+                }
+                .tint(model.copied ? .green : nil)
             }
         } content: {
-            Text(result.polishedText)
-                .font(.body)
-                .lineSpacing(4)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 6) {
+                FormattingToolbar(controller: outputController)
+                RichTextEditor(
+                    text: $model.output,
+                    controller: outputController,
+                    accessibilityLabel: "Polished text",
+                    minHeight: 80,
+                    maxHeight: 480
+                )
+            }
         }
     }
 }

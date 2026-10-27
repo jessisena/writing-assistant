@@ -61,6 +61,49 @@
         }
     }
 
+    /// `Polishing` whose calls wait until `resume(_:with:)` answers them, for tests that need a
+    /// request to stay in flight.
+    ///
+    /// Like a `claude` child that hasn't exited yet, a waiting call ignores task cancellation;
+    /// it only counts it in `cancelledCount`.
+    final class GatedPolisher: Polishing, @unchecked Sendable {
+        private typealias Gate = CheckedContinuation<Result<PolishResult, PolishError>, Never>
+
+        private let lock = NSLock()
+        private var gates: [Gate] = []
+        private var _cancelledCount = 0
+
+        /// Calls made so far, each waiting until resumed.
+        var waitingCount: Int { lock.withLock { gates.count } }
+
+        var cancelledCount: Int { lock.withLock { _cancelledCount } }
+
+        /// Answers the call at `index`, in call order. Each call must be answered once.
+        func resume(_ index: Int, with outcome: Result<PolishResult, PolishError>) {
+            let gate = lock.withLock { gates[index] }
+            gate.resume(returning: outcome)
+        }
+
+        func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
+            let outcome = await withTaskCancellationHandler {
+                await withCheckedContinuation { gate in
+                    lock.withLock { gates.append(gate) }
+                }
+            } onCancel: {
+                lock.withLock { _cancelledCount += 1 }
+            }
+            return try outcome.get()
+        }
+
+        func refine(
+            text: String, channel: Channel, refinement: Refinement
+        ) async throws(PolishError) -> String {
+            try await polish(text: text, channel: channel).polishedText
+        }
+
+        func checkReady() async throws(PolishError) {}
+    }
+
     /// In-memory `PromptStoring` that applies the same validation as the real store.
     ///
     /// `syncDefaults()` returns the files in `newerDefaults`; acknowledging or restoring a file
@@ -143,7 +186,11 @@
 
     extension PolishResult {
         static let sample = PolishResult(
-            polishedText: "Thanks for the update. I'll review the doc today.",
+            polishedText: """
+                Thanks for the **update**. I'll review the doc *today*:
+                - Read the summary
+                - Leave comments 👍
+                """,
             learningSummary: LearningSummary(
                 corrections: [
                     Correction(
