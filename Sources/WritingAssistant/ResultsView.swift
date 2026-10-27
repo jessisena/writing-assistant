@@ -91,21 +91,30 @@ private struct PolishedCard: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Model \(result.modelUsed)")
+                if !result.wasTranslated {
+                    Toggle("Show changes", isOn: $model.showsChanges)
+                        .toggleStyle(.button)
+                        .help("Highlights what changed between your input and the polished text")
+                }
                 Button(model.copied ? "Copied" : "Copy") {
                     Task { await model.copyResult() }
                 }
                 .tint(model.copied ? .green : nil)
             }
         } content: {
-            VStack(alignment: .leading, spacing: 6) {
-                FormattingToolbar(controller: outputController)
-                RichTextEditor(
-                    text: $model.output,
-                    controller: outputController,
-                    accessibilityLabel: "Polished text",
-                    minHeight: 80,
-                    maxHeight: 480
-                )
+            if model.showsChanges && !result.wasTranslated {
+                DiffView(input: model.input, output: model.output)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    FormattingToolbar(controller: outputController)
+                    RichTextEditor(
+                        text: $model.output,
+                        controller: outputController,
+                        accessibilityLabel: "Polished text",
+                        minHeight: 80,
+                        maxHeight: 480
+                    )
+                }
             }
         }
     }

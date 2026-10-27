@@ -17,7 +17,13 @@ struct ClipboardContent: Equatable, Sendable {
     var output = NSAttributedString()
     var channel: Channel = .formal
     private(set) var isLoading = false
-    private(set) var result: PolishResult?
+    private(set) var result: PolishResult? {
+        didSet { showsChanges = false }
+    }
+    /// Whether the Polished Text card shows the diff instead of the editor. It lives here rather
+    /// than in view state because the card is rebuilt after every request. Any change to
+    /// `result` turns it off; a refinement only changes `output`, so it keeps it on.
+    var showsChanges = false
     private(set) var errorMessage: String?
     private(set) var copied = false
 
