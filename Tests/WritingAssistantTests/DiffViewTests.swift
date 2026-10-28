@@ -19,22 +19,26 @@ import WritingAssistantCore
         #expect(String(text.characters) == "I will to review'll review the doc 👍")
     }
 
-    @Test func removedTextIsRedAndStruckThrough() throws {
+    @Test func removedTextIsRedPencilStruckThroughOnATint() throws {
         let text = DiffDisplay.attributedText(replacement)
 
         let removed = try #require(text.range(of: "will to review"))
         let run = try #require(text[removed].runs.first)
-        #expect(run.foregroundColor == DiffDisplay.removedColor)
+        #expect(run.foregroundColor == Theme.redPencil)
+        #expect(run.backgroundColor == Theme.redPencil.opacity(0.12))
         #expect(run.strikethroughStyle == .single)
+        #expect(run.underlineStyle == nil)
         #expect(text[removed].runs.count == 1)
     }
 
-    @Test func addedTextIsGreenWithoutStrikethrough() throws {
+    @Test func addedTextIsMarginGreenUnderlinedOnATint() throws {
         let text = DiffDisplay.attributedText(replacement)
 
         let added = try #require(text.range(of: "'ll review"))
         let run = try #require(text[added].runs.first)
-        #expect(run.foregroundColor == DiffDisplay.addedColor)
+        #expect(run.foregroundColor == Theme.marginGreen)
+        #expect(run.backgroundColor == Theme.marginGreen.opacity(0.14))
+        #expect(run.underlineStyle == .single)
         #expect(run.strikethroughStyle == nil)
     }
 
@@ -44,7 +48,20 @@ import WritingAssistantCore
         let same = try #require(text.range(of: " the doc 👍"))
         let run = try #require(text[same].runs.first)
         #expect(run.foregroundColor == nil)
+        #expect(run.backgroundColor == nil)
         #expect(run.strikethroughStyle == nil)
+        #expect(run.underlineStyle == nil)
+    }
+
+    @Test func changeSummaryNamesZeroOneAndManyChanges() {
+        #expect(DiffDisplay.changeSummary(0) == "No changes")
+        #expect(DiffDisplay.changeSummary(1) == "1 change")
+        #expect(DiffDisplay.changeSummary(6) == "6 changes")
+    }
+
+    @Test func lineSpacingMatchesTheEditorsLineHeight() {
+        let editorLine = RichTextBridge.bodyFontSize * RichTextBridge.lineHeightMultiple
+        #expect(abs(RichTextBridge.bodyFontSize + DiffDisplay.lineSpacing - editorLine) < 0.001)
     }
 
     @Test func noSegmentsHaveNoChanges() {
