@@ -27,7 +27,7 @@ import WritingAssistantCore
         let before = try #require(logText())
 
         model.refine(.moreFormal)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(logText() == before)
     }
