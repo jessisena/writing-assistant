@@ -96,6 +96,8 @@ added that were not in the original.
 - Paste into a Slack DM to yourself: bold, italic, strikethrough, code, bullets and emoji show
   natively, and your edit is included.
 - Paste into TextEdit (formatted) and Terminal (plain text, bullets as `•`).
+- Bold a word with an emoji in it (`ship it 🚀`) and a plain URL, then Process and Copy: the
+  emoji stays bold and the URL comes back as plain text (Slack links it on paste).
 
 ## 7. Clear and Cancel
 
@@ -196,7 +198,9 @@ added that were not in the original.
 - Drag and drop and Edit → Paste and Match Style skip paste normalization, so dropped text can
   keep foreign fonts and colors.
 - Return on a bullet line doesn't continue the list.
-- Bold emoji may lose the bold in the Markdown sent to Claude.
-- Bare URLs become links after a round trip through Claude.
+- An emoji that starts with punctuation (`‼️`, `#️⃣`) written right after a word, with no space,
+  loses its bold or italic; CommonMark can't place a marker there.
+- The editor reads bold from font traits; if AppKit draws an emoji in Apple Color Emoji, the
+  emoji may lose its bold before conversion. Not verified.
 - Refinements use the currently selected channel, not the channel of the original request.
 - Image titles aren't kept.
