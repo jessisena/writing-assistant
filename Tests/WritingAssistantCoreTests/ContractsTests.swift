@@ -9,10 +9,43 @@ import WritingAssistantCore
             ])
     }
 
-    @Test func promptFilesListGlobalFirstThenEveryChannel() {
-        #expect(PromptFile.allCases.first == .global)
-        #expect(PromptFile.allCases.count == Channel.allCases.count + 1)
+    @Test func promptFilesListGlobalThenChannelsThenRefinements() {
+        let expected: [PromptFile] =
+            [.global] + Channel.allCases.map { .channel($0) }
+            + Refinement.allCases.map { .refinement($0) }
+        #expect(PromptFile.allCases == expected)
         #expect(PromptFile.channel(.slackInformal).relativePath == "channels/slack_informal.txt")
+    }
+
+    @Test func refinementsMatchPromptFileNames() {
+        #expect(Refinement.allCases.map(\.rawValue) == ["shorter", "more_casual", "more_formal"])
+        #expect(Refinement.allCases.map(\.id) == Refinement.allCases.map(\.rawValue))
+        #expect(
+            Refinement.allCases.map { PromptFile.refinement($0).relativePath } == [
+                "refinements/shorter.txt", "refinements/more_casual.txt",
+                "refinements/more_formal.txt",
+            ])
+    }
+
+    @Test func refinementDisplayNamesAreUsedByPromptFiles() {
+        #expect(
+            Refinement.allCases.map(\.displayName) == ["Shorter", "More casual", "More formal"])
+        #expect(PromptFile.refinement(.moreFormal).displayName == "More formal")
+    }
+
+    @Test func promptFileIdsAreUnique() {
+        #expect(Set(PromptFile.allCases.map(\.id)).count == PromptFile.allCases.count)
+    }
+
+    @Test(arguments: ["", "  \n\t"])
+    func blankRefinementPromptIsRejected(text: String) {
+        #expect(throws: PromptValidationError.empty) {
+            try PromptFile.refinement(.shorter).validate(text)
+        }
+    }
+
+    @Test func refinementPromptDoesNotNeedPlaceholder() throws {
+        try PromptFile.refinement(.moreCasual).validate("Make it friendlier.")
     }
 
     @Test(arguments: ["", "   \n\t"])

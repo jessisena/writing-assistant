@@ -1,0 +1,5 @@
+Make the tone more formal and polished, suitable for leadership or external readers.
+Avoid slang, contractions, and filler. Use complete sentences and precise wording.
+Keep the same structure and meaning. Do not add facts that are not in the text.
+Never use em dashes.
+Keep any emoji and Markdown formatting (bold, italic, lists, links).

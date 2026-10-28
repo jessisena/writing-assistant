@@ -33,7 +33,7 @@ import Testing
     @Test func seedingCreatesEveryFileWithTheBundledContents() throws {
         try store.seedMissingDefaults()
 
-        #expect(PromptFile.allCases.count == 7)
+        #expect(PromptFile.allCases.count == 10)
         for file in PromptFile.allCases {
             #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
         }
@@ -195,5 +195,261 @@ import Testing
         #expect(PromptStore.resolveDefaultsURL(mainResourcesURL: resources) { module } == module)
         #expect(PromptStore.resolveDefaultsURL(mainResourcesURL: nil) { module } == module)
         #expect(PromptStore.resolveDefaultsURL(mainResourcesURL: nil) { nil } == nil)
+    }
+
+    // MARK: - Default sync
+
+    private var manifestURL: URL { store.directoryURL.appending(path: ".defaults.json") }
+
+    private func readManifest() throws -> [String: String] {
+        try JSONDecoder().decode([String: String].self, from: Data(contentsOf: manifestURL))
+    }
+
+    /// A store whose bundled defaults are a writable copy, so a test can "ship" a new default.
+    private func makeStoreWithEditableDefaults() throws -> (store: PromptStore, defaults: URL) {
+        let defaults = root.appending(path: "defaults", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: PromptStore.bundledDefaultsURL, to: defaults)
+        return (PromptStore(directoryURL: store.directoryURL, defaultsURL: defaults), defaults)
+    }
+
+    private func shipNewDefault(_ text: String, _ file: PromptFile, in defaults: URL) throws {
+        try text.write(
+            to: defaults.appending(path: file.relativePath), atomically: true, encoding: .utf8)
+    }
+
+    @Test func seedingRecordsTheHashOfEverySeededDefault() throws {
+        try store.seedMissingDefaults()
+
+        let manifest = try readManifest()
+        #expect(Set(manifest.keys) == Set(PromptFile.allCases.map(\.relativePath)))
+        #expect(manifest["polish.txt"]?.count == 64)
+    }
+
+    @Test func syncWithUnchangedDefaultsReportsNothingAndKeepsFiles() throws {
+        try store.seedMissingDefaults()
+
+        #expect(try store.syncDefaults().isEmpty)
+
+        for file in PromptFile.allCases {
+            #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
+        }
+    }
+
+    @Test func syncSilentlyUpdatesAnUneditedFileWhenTheDefaultChanges() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        let before = try readManifest()
+        try shipNewDefault("New slack default", .channel(.slack), in: defaults)
+
+        let newer = try store.syncDefaults()
+
+        #expect(newer.isEmpty)
+        #expect(try diskText(.channel(.slack)) == "New slack default")
+        #expect(try readManifest()["channels/slack.txt"] != before["channels/slack.txt"])
+
+        #expect(try store.syncDefaults().isEmpty)
+    }
+
+    @Test func syncKeepsAnEditedFileAndReportsTheNewerDefault() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("My own slack rules", .channel(.slack))
+        try shipNewDefault("New slack default", .channel(.slack), in: defaults)
+
+        #expect(try store.syncDefaults() == [.channel(.slack)])
+        #expect(try diskText(.channel(.slack)) == "My own slack rules")
+
+        #expect(try store.syncDefaults() == [.channel(.slack)])
+    }
+
+    @Test func syncLeavesAnEditedFileAloneWhileTheDefaultIsUnchanged() throws {
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("My own formal rules", .channel(.formal))
+
+        #expect(try store.syncDefaults().isEmpty)
+        #expect(try diskText(.channel(.formal)) == "My own formal rules")
+    }
+
+    @Test func syncRecordsAMatchingFileWhenThereIsNoManifest() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: manifestURL)
+
+        #expect(try store.syncDefaults().isEmpty)
+
+        #expect(Set(try readManifest().keys) == Set(PromptFile.allCases.map(\.relativePath)))
+    }
+
+    @Test func syncReportsADifferingFileWhenThereIsNoManifest() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: manifestURL)
+        try overwriteOnDisk("Edited before the manifest existed", .channel(.aiPrompt))
+
+        #expect(try store.syncDefaults() == [.channel(.aiPrompt)])
+
+        #expect(try diskText(.channel(.aiPrompt)) == "Edited before the manifest existed")
+        #expect(try readManifest()["channels/ai_prompt.txt"] == nil)
+    }
+
+    @Test(arguments: ["{not json", "[1, 2, 3]", ""])
+    func corruptManifestIsTreatedAsMissingAndRewritten(contents: String) throws {
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("Edited by the user", .channel(.other))
+        try contents.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        #expect(try store.syncDefaults() == [.channel(.other)])
+
+        let manifest = try readManifest()
+        #expect(manifest["polish.txt"] != nil)
+        #expect(manifest["channels/other.txt"] == nil)
+    }
+
+    @Test func seedingRecoversFromACorruptManifest() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: store.fileURL(.channel(.slack)))
+        try "{not json".write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        try store.seedMissingDefaults()
+
+        #expect(try diskText(.channel(.slack)) == bundledText(.channel(.slack)))
+        #expect(try readManifest()["channels/slack.txt"]?.count == 64)
+    }
+
+    /// Makes `url` read-only until the returned closure runs.
+    private func makeReadOnly(_ url: URL) throws -> () -> Void {
+        let path = url.path(percentEncoded: false)
+        let fileManager = FileManager.default
+        try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path)
+        return { try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path) }
+    }
+
+    @Test func syncKeepsGoingPastAnUnreadableFileAndThrowsAfterSavingTheManifest() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        let formal = store.fileURL(.channel(.formal))
+        try FileManager.default.removeItem(at: formal)
+        try FileManager.default.createDirectory(at: formal, withIntermediateDirectories: true)
+        try shipNewDefault("New formal default", .channel(.formal), in: defaults)
+        try shipNewDefault("New other default", .channel(.other), in: defaults)
+        try overwriteOnDisk("My own shorter rules", .refinement(.shorter))
+        try shipNewDefault("New shorter default", .refinement(.shorter), in: defaults)
+        let before = try readManifest()
+
+        let error = #expect(throws: PromptStoreError.self) { try store.syncDefaults() }
+
+        #expect(error?.path.hasSuffix("prompts/channels/formal.txt") == true)
+        #expect(try diskText(.channel(.other)) == "New other default")
+        #expect(try readManifest()["channels/other.txt"] != before["channels/other.txt"])
+        try FileManager.default.removeItem(at: formal)
+        #expect(try store.syncDefaults() == [.refinement(.shorter)])
+    }
+
+    @Test func syncKeepsGoingPastAFailedUpdate() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        try shipNewDefault("New slack default", .channel(.slack), in: defaults)
+        try shipNewDefault("New global default", .global, in: defaults)
+        let before = try readManifest()
+        let restorePermissions = try makeReadOnly(store.directoryURL.appending(path: "channels"))
+        defer { restorePermissions() }
+
+        let error = #expect(throws: PromptStoreError.self) { try store.syncDefaults() }
+
+        #expect(error?.operation == "update")
+        #expect(error?.path.hasSuffix("prompts/channels/slack.txt") == true)
+        #expect(try diskText(.global) == "New global default")
+        let manifest = try readManifest()
+        #expect(manifest["polish.txt"] != before["polish.txt"])
+        #expect(manifest["channels/slack.txt"] == before["channels/slack.txt"])
+
+        restorePermissions()
+        #expect(try store.syncDefaults().isEmpty)
+        #expect(try diskText(.channel(.slack)) == "New slack default")
+    }
+
+    @Test func seedingThrowsWithTheManifestPathWhenTheManifestCannotBeSaved() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: store.fileURL(.channel(.slack)))
+        let restorePermissions = try makeReadOnly(store.directoryURL)
+        defer { restorePermissions() }
+
+        let error = #expect(throws: PromptStoreError.self) { try self.store.seedMissingDefaults() }
+
+        #expect(error?.path.hasSuffix("prompts/.defaults.json") == true)
+        #expect(try diskText(.channel(.slack)) == bundledText(.channel(.slack)))
+    }
+
+    @Test func restoringThrowsWithTheManifestPathWhenTheManifestCannotBeSaved() throws {
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("My own slack rules", .channel(.slack))
+        let restorePermissions = try makeReadOnly(store.directoryURL)
+        defer { restorePermissions() }
+
+        let error = #expect(throws: PromptStoreError.self) {
+            try self.store.restoreDefault(.channel(.slack))
+        }
+
+        #expect(error?.path.hasSuffix("prompts/.defaults.json") == true)
+        #expect(try diskText(.channel(.slack)) == bundledText(.channel(.slack)))
+    }
+
+    @Test func syncSkipsFilesThatDoNotExist() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: store.fileURL(.channel(.slack)))
+
+        #expect(try store.syncDefaults().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: store.fileURL(.channel(.slack)).path))
+    }
+
+    @Test func syncThrowsWithThePathWhenAPromptFileCannotBeRead() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: manifestURL)
+        let url = store.fileURL(.global)
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+
+        let error = #expect(throws: PromptStoreError.self) { try self.store.syncDefaults() }
+
+        #expect(error?.path.hasSuffix("prompts/polish.txt") == true)
+    }
+
+    @Test func acknowledgingStopsReportingWithoutTouchingTheFile() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("My own slack rules", .channel(.slack))
+        try shipNewDefault("New slack default", .channel(.slack), in: defaults)
+        #expect(try store.syncDefaults() == [.channel(.slack)])
+
+        try store.acknowledgeDefault(.channel(.slack))
+
+        #expect(try store.syncDefaults().isEmpty)
+        #expect(try diskText(.channel(.slack)) == "My own slack rules")
+    }
+
+    @Test func acknowledgingThrowsWhenTheManifestCannotBeWritten() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: manifestURL)
+        try FileManager.default.createDirectory(at: manifestURL, withIntermediateDirectories: true)
+
+        let error = #expect(throws: PromptStoreError.self) {
+            try self.store.acknowledgeDefault(.channel(.slack))
+        }
+
+        #expect(error?.path.hasSuffix("prompts/.defaults.json") == true)
+    }
+
+    @Test func restoreDefaultRecordsTheRestoredHash() throws {
+        let (store, defaults) = try makeStoreWithEditableDefaults()
+        try store.seedMissingDefaults()
+        try overwriteOnDisk("My own slack rules", .channel(.slack))
+        try shipNewDefault("New slack default", .channel(.slack), in: defaults)
+
+        try store.restoreDefault(.channel(.slack))
+
+        #expect(try diskText(.channel(.slack)) == "New slack default")
+        #expect(try store.syncDefaults().isEmpty)
+        try shipNewDefault("Newest slack default", .channel(.slack), in: defaults)
+        #expect(try store.syncDefaults().isEmpty)
+        #expect(try diskText(.channel(.slack)) == "Newest slack default")
     }
 }

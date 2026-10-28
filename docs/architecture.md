@@ -54,8 +54,24 @@ call, and failures come back as typed `PolishError` values that the UI shows as 
 
 The prompts are plain text in `~/Library/Application Support/Writing Assistant/prompts/`, not
 compiled into the binary. The app reads them on every request, so edits from the in-app editor or
-any external editor apply to the next request. Bundled defaults are copied there only when a file
-is missing, so an upgrade never overwrites edits.
+any external editor apply to the next request. Bundled defaults are copied there when a file is
+missing. When a bundled default changes, files the user hasn't edited are updated and edited files
+are left alone, with a notice in Settings, so an upgrade never overwrites edits.
+
+### Markdown between the app and Claude
+
+The editors hold rich text (`NSAttributedString`). Requests send it to Claude as a small Markdown
+subset (bold, italic, strikethrough, inline code, links, bullets, headings), and Claude returns
+`polished_text` in the same subset, which is parsed back into rich text for the editable output.
+Copy turns the edited output into HTML plus a plain-text fallback, so pasting into Slack keeps
+the formatting. Emoji are plain Unicode and need no conversion. Model output is untrusted, so
+parsing never throws: a line that fails to parse stays plain text, and HTML output is escaped.
+
+### Service instead of in-place replacement
+
+"Polish with Writing Assistant" in the Services menu sends the selection to the app and returns
+nothing. Replacing the selection in place would block the calling app for the 8–20 s a request
+takes, and services time out.
 
 ### No App Sandbox
 
@@ -69,28 +85,48 @@ allow. It is signed ad hoc and installed locally; it is not distributed.
 ```
 Package.swift                        swift-tools 6.0, macOS 14
 Sources/WritingAssistantCore/        library: all logic, no UI
-  Contracts.swift                    Channel, PolishResult + summary types, PolishError,
-                                     PromptFile, and the ClaudeRunning / PromptStoring /
-                                     Polishing protocols
+  Contracts.swift                    Channel, Refinement, PolishResult + summary types,
+                                     PolishError, PromptFile, and the ClaudeRunning /
+                                     PromptStoring / Polishing protocols
   ModelRouting.swift                 pickModel(for:) + model ID constants
   JSONExtraction.swift               extract the JSON object from CLI output
-  PromptStore.swift                  PromptStoring: seed, read, write, restore, assemble
+  PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore,
+                                     assemble
   ClaudeBinaryLocator.swift          find the claude binary
   ClaudeCLI.swift                    ClaudeRunning backed by Process
-  PolishService.swift                Polishing: validate, route, assemble, run, parse, invariant
+  PolishService.swift                Polishing: validate, route, assemble, run, parse, invariant;
+                                     polish and refine
+  RichText.swift                     Markdown subset ↔ AttributedString, HTML and plain text
+  TextDiff.swift                     word-level diff (DiffSegment: same / added / removed)
+  LearningLog.swift                  format and append learning summaries to learning-log.md
+  HistoryStore.swift                 HistoryEntry + history.json, newest 50, corrupt-file backup
   Resources/Prompts/                 bundled default prompts
     polish.txt                       4-step instructions + global rules
     channels/*.txt                   per-channel rules
+    refinements/*.txt                shorter, more_casual, more_formal instructions
 Sources/WritingAssistant/            SwiftUI executable
-  WritingAssistantApp.swift          main window + Settings scene (⌘,)
-  AppModel.swift                     @Observable state: input, channel, loading, result, error
-  ComposerView.swift                 text input, channel picker, Process (⌘↩)
-  ResultsView.swift                  Polished Text and Learning Summary cards
+  WritingAssistantApp.swift          main window + Settings scene (⌘,), app delegate, menus
+  AppModel.swift                     @Observable state: input, output, channel, loading,
+                                     result, error, history; process, cancel, clear, copy
+  AppModel+Refine.swift              quick refinements of the edited output
+  AppModel+LearningLog.swift         append to and open the learning log
+  AppModel+History.swift             record, save, restore and delete history entries
+  RichTextEditor.swift               RichTextBridge (NSAttributedString ↔ AttributedString,
+                                     paste normalization), FormattingTextView, RichTextEditor
+  FormattingToolbar.swift            formatting buttons, emoji picker, Format menu
+  ComposerView.swift                 input editor, channel picker, Process (⌘↩), Clear / Cancel
+  ResultsView.swift                  Polished Text card (editor, Copy, diff toggle, Refine) and
+                                     Learning Summary card
+  DiffView.swift                     read-only diff of input against output
+  HistoryView.swift                  History button (⌘Y) and popover
+  ServiceProvider.swift              "Polish with Writing Assistant" service
   PromptEditorView.swift             prompt editor (Settings window)
-  PromptEditorModel.swift            editor state: selection, dirty tracking, validation
+  PromptEditorModel.swift            editor state: selection, dirty tracking, validation,
+                                     newer-default notices
 Tests/WritingAssistantCoreTests/     Swift Testing, Core logic
-Tests/WritingAssistantTests/         Swift Testing, AppModel and PromptEditorModel
-Resources/                           Info.plist, AppIcon.icns, icon-1024.png
+Tests/WritingAssistantTests/         Swift Testing, AppModel, PromptEditorModel, RichTextBridge,
+                                     DiffView and ServiceProvider
+Resources/                           Info.plist (with NSServices), AppIcon.icns, icon-1024.png
 scripts/build_app.sh                 build, assemble, sign, install
 scripts/test.sh                      swift test with Command Line Tools framework paths
 ```
@@ -115,7 +151,69 @@ On launch, `seedMissingDefaults()` copies any missing file from the bundled defa
 `assemble(for:)` reads `polish.txt` and `channels/<channel>.txt` from disk, trims both, and
 replaces `{{CHANNEL_GUIDELINES}}` with the channel file. `write` validates first: no file may be
 empty, and `polish.txt` must contain the placeholder. `restoreDefault` overwrites one file from the
-bundle.
+bundle. Refinements append `refinements/<name>.txt` to the assembled prompt as an extra
+instruction.
+
+`prompts/.defaults.json` maps each file's relative path to the SHA-256 of the bundled default it
+was last seeded or restored from. `syncDefaults()` runs at launch after seeding:
+
+- File unchanged from its recorded default, bundled default changed: overwritten, manifest
+  updated.
+- File edited, bundled default changed: left alone and returned as "newer default available".
+  Settings shows a badge and a banner with Restore Default and Keep mine
+  (`acknowledgeDefault(_:)`, which records the new hash without touching the file).
+- No manifest entry: recorded if the file matches the bundled default, otherwise reported.
+
+A corrupt manifest is logged, treated as missing and rewritten.
+
+### Rich text
+
+`RichText` (Core) converts between the Markdown subset and `AttributedString` with inline
+presentation intents, and renders HTML and plain text. `plainText(from:)` drops link targets, for
+the diff and history previews; `clipboardText(from:)` writes them as `label (url)` for the plain
+clipboard flavor. `RichTextBridge` (app) converts between
+`AttributedString` and the `NSAttributedString` the editors use (font traits, strikethrough,
+monospaced font, links), and normalizes pasted text: bold, italic, strikethrough, code and links
+are kept; foreign fonts, sizes and colors are dropped, and the foreground is `NSColor.textColor`
+so dark mode works. `FormattingTextView` is an `NSTextView` subclass with the toggle actions and a
+`readSelection(from:type:)` override that normalizes rich text read by paste and drag-and-drop.
+`RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
+editor lets each `FormattingToolbar` act on its own editor. The Format menu sends to the first
+responder.
+
+### Diff, learning log and history
+
+`TextDiff.words(from:to:)` tokenizes both sides' plain text into words and whitespace and uses
+the standard library's `difference(from:)`. `DiffView` colors the segments and gives VoiceOver a
+text version ("removed: …, added: …").
+
+After a successful Process, `AppModel` appends the learning summary to `LearningLog` (skipped when
+it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`. The
+edited output is saved into the current entry on copy, refine, clear and before the next request,
+not on every keystroke. A history file that doesn't decode is renamed to `history.corrupt.json`,
+the store starts empty, and the app shows a banner. A file that can't be read, or a damaged one
+that can't be moved aside, is left alone: the banner says so and `AppModel.savesHistory` stays
+false until the next launch, so the first new entry never overwrites it.
+
+### Service
+
+`ServiceProvider` is `NSApp.servicesProvider`. It reads the pasteboard (RTF through
+`RichTextBridge.normalized`, else plain text), loads the text into the input and starts a request
+with the current channel. If a request is already running it shows a banner and keeps the input.
+It then brings the main window forward. SwiftUI gives the `Window(id: "main")` NSWindow the
+identifier `main`; when no such window exists (it was closed while Settings kept the app running),
+the provider calls an `openWindow` action that the main window and Settings views hand to the app
+delegate when they appear. The activation step is injected, so tests run without a window server.
+
+### Data files
+
+```
+~/Library/Application Support/Writing Assistant/
+  prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
+  history.json             the newest 50 requests
+  history.corrupt.json     a history file that couldn't be read, moved aside
+  learning-log.md          learning summaries, newest last
+```
 
 ### CLI runner
 
@@ -155,6 +253,9 @@ Contents/
   Resources/AppIcon.icns
   Resources/WritingAssistant_WritingAssistantCore.bundle/Prompts/...
 ```
+
+After installing, the script runs `/System/Library/CoreServices/pbs -update` so the service shows
+up in the Services menu without logging out.
 
 The SwiftPM resource bundle goes in `Contents/Resources` because `codesign` rejects extra files at
 the `.app` root. The generated `Bundle.module` accessor only looks at the `.app` root and at the

@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import os
 
 /// A prompt file operation that failed, with the file it was working on.
 public struct PromptStoreError: LocalizedError, Sendable {
@@ -17,6 +19,7 @@ public struct PromptStoreError: LocalizedError, Sendable {
 /// apply on the next request.
 public struct PromptStore: PromptStoring {
     static let resourceBundleName = "WritingAssistant_WritingAssistantCore.bundle"
+    private static let logger = Logger(subsystem: "local.writing-assistant", category: "prompts")
 
     /// The `Prompts` folder shipped in this module's resource bundle.
     ///
@@ -87,22 +90,78 @@ public struct PromptStore: PromptStoring {
     ///
     /// Existing files are never touched, even when empty. Files are seeded in
     /// `PromptFile.allCases` order and seeding stops at the first failure: files seeded before it
-    /// stay in place, and calling this again seeds the rest once the cause is fixed.
+    /// stay in place, and calling this again seeds the rest once the cause is fixed. Each seeded
+    /// file's default hash is recorded in the manifest that `syncDefaults()` compares against.
     ///
     /// - Throws: `PromptStoreError` naming the first file whose folder couldn't be created or
-    ///   whose default couldn't be copied.
+    ///   whose default couldn't be copied, or the manifest when it couldn't be read or written.
     public func seedMissingDefaults() throws {
         let fileManager = FileManager.default
+        var manifest: [String: String]?
         for file in PromptFile.allCases {
             let destination = fileURL(file)
             guard !fileManager.fileExists(atPath: destination.path(percentEncoded: false)) else {
                 continue
             }
+            var entries = try manifest ?? loadManifest()
+            let data = try readDefault(file)
             try createParentDirectory(of: destination)
-            try perform("seed", destination) {
-                try fileManager.copyItem(at: defaultURL(file), to: destination)
+            try perform("seed", destination) { try data.write(to: destination, options: .atomic) }
+            entries[file.relativePath] = Self.hash(data)
+            try saveManifest(entries)
+            manifest = entries
+        }
+    }
+
+    /// Brings changed bundled defaults to the prompt files on disk.
+    ///
+    /// For each existing file whose bundled default differs from the one recorded in the
+    /// manifest, a file still matching its recorded default is overwritten with the new default,
+    /// and an edited file is left alone and returned. A file with no manifest entry (installs
+    /// from before the manifest existed) is recorded when it matches the bundled default and
+    /// returned otherwise. A manifest that can't be decoded is treated as missing and rewritten.
+    ///
+    /// A file that can't be read or updated doesn't stop the others: every file is synced and
+    /// the manifest saved before the first such error is thrown. The failed file keeps its old
+    /// manifest entry, so the next call retries it.
+    ///
+    /// - Returns: Edited files whose bundled default is newer than the one the user started from.
+    /// - Throws: `PromptStoreError` for the first prompt file or default that couldn't be read or
+    ///   written (after the rest were synced), or for the manifest when it couldn't be read or
+    ///   written. Edited files with a newer default aren't returned then; the next call reports
+    ///   them.
+    public func syncDefaults() throws -> Set<PromptFile> {
+        var manifest = try loadManifest()
+        var newer = Set<PromptFile>()
+        var firstError: (any Error)?
+        for file in PromptFile.allCases {
+            let url = fileURL(file)
+            guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+                continue
+            }
+            do {
+                if try !sync(file, manifest: &manifest) {
+                    newer.insert(file)
+                }
+            } catch {
+                firstError = firstError ?? error
             }
         }
+        try saveManifest(manifest)
+        if let firstError {
+            throw firstError
+        }
+        return newer
+    }
+
+    /// Records the current bundled default as seen, without changing the file ("Keep mine").
+    ///
+    /// - Throws: `PromptStoreError` when the default couldn't be read or the manifest couldn't be
+    ///   read or written.
+    public func acknowledgeDefault(_ file: PromptFile) throws {
+        var manifest = try loadManifest()
+        manifest[file.relativePath] = Self.hash(try readDefault(file))
+        try saveManifest(manifest)
     }
 
     /// Reads a prompt file from disk as UTF-8.
@@ -122,16 +181,18 @@ public struct PromptStore: PromptStoring {
         try save(text, to: fileURL(file))
     }
 
-    /// Overwrites one prompt file with its bundled default.
+    /// Overwrites one prompt file with its bundled default and records it in the manifest.
     ///
-    /// - Throws: `PromptStoreError` when the default couldn't be read or the file couldn't be
-    ///   written.
+    /// - Throws: `PromptStoreError` when the default couldn't be read or the file or manifest
+    ///   couldn't be written.
     public func restoreDefault(_ file: PromptFile) throws {
-        let source = defaultURL(file)
-        let text = try perform("read default", source) {
-            try String(contentsOf: source, encoding: .utf8)
-        }
-        try save(text, to: fileURL(file))
+        let data = try readDefault(file)
+        let destination = fileURL(file)
+        try createParentDirectory(of: destination)
+        try perform("write", destination) { try data.write(to: destination, options: .atomic) }
+        var manifest = try loadManifest()
+        manifest[file.relativePath] = Self.hash(data)
+        try saveManifest(manifest)
     }
 
     /// Builds the system prompt for `channel`.
@@ -149,6 +210,70 @@ public struct PromptStore: PromptStoring {
 
     private func defaultURL(_ file: PromptFile) -> URL {
         defaultsURL.appending(path: file.relativePath, directoryHint: .notDirectory)
+    }
+
+    /// Applies the `syncDefaults()` rules to one existing file. Returns false when the user's
+    /// edited copy is kept despite a newer bundled default.
+    private func sync(_ file: PromptFile, manifest: inout [String: String]) throws -> Bool {
+        let key = file.relativePath
+        let defaultData = try readDefault(file)
+        let bundled = Self.hash(defaultData)
+        let recorded = manifest[key]
+        guard recorded != bundled else { return true }
+        let url = fileURL(file)
+        let current = Self.hash(try perform("read", url) { try Data(contentsOf: url) })
+        if current == bundled {
+            manifest[key] = bundled
+            return true
+        }
+        guard let recorded, current == recorded else { return false }
+        try perform("update", url) { try defaultData.write(to: url, options: .atomic) }
+        manifest[key] = bundled
+        return true
+    }
+
+    private func readDefault(_ file: PromptFile) throws -> Data {
+        let source = defaultURL(file)
+        return try perform("read default", source) { try Data(contentsOf: source) }
+    }
+
+    /// `prompts/.defaults.json`: each `relativePath` mapped to the SHA-256 hex of the default the
+    /// file was last seeded, restored or updated from, or that the user acknowledged.
+    private var manifestURL: URL {
+        directoryURL.appending(path: ".defaults.json", directoryHint: .notDirectory)
+    }
+
+    /// A missing or undecodable manifest reads as empty, so every file is checked afresh. An
+    /// undecodable one is logged, since it means something other than the app wrote it.
+    private func loadManifest() throws -> [String: String] {
+        let url = manifestURL
+        let path = url.path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: path) else {
+            return [:]
+        }
+        let data = try perform("read", url) { try Data(contentsOf: url) }
+        do {
+            return try JSONDecoder().decode([String: String].self, from: data)
+        } catch {
+            Self.logger.error(
+                """
+                Ignoring undecodable prompt manifest at \(path, privacy: .public): \
+                \(error.localizedDescription, privacy: .public). It will be rewritten.
+                """)
+            return [:]
+        }
+    }
+
+    private func saveManifest(_ manifest: [String: String]) throws {
+        let url = manifestURL
+        try createParentDirectory(of: url)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try perform("write", url) { try encoder.encode(manifest).write(to: url, options: .atomic) }
+    }
+
+    private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func save(_ text: String, to url: URL) throws {

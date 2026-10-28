@@ -43,9 +43,60 @@ changes.
 ## Using the app
 
 Paste text, pick a channel (Formal is the default), and press **Process** or **⌘↩**. The Polished
-Text card shows the result, the detected language (or "Translated from X") and the model used,
-with a Copy button. When you wrote in English, the Learning Summary card lists corrections, a
-grammar insight and vocabulary. Translated input has no learning summary.
+Text card shows the result, the detected language (or "Translated from X") and the model used.
+When you wrote in English, the Learning Summary card lists corrections, a grammar insight and
+vocabulary. Translated input has no learning summary.
+
+- **Formatting:** both editors support bold, italic, strikethrough, inline code, bullet lists and
+  emoji, from the toolbar above each editor or the Format menu. Pasted text keeps bold, italic,
+  strikethrough, code and links, and drops fonts, sizes and colors.
+- **Editable output:** edit the polished text in place. **Copy** puts HTML and plain text on the
+  clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
+  targets as `label (url)`.
+- **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
+  output for the channel it was polished for, and keep the learning summary.
+- **Show changes:** highlights what changed between your input and the output (hidden for
+  translated input).
+- **Clear** empties the input and the results; **Cancel** stops a running request.
+- **History (⌘Y):** the last 50 requests. Selecting one restores the input, your edited output
+  and the learning summary.
+- **Learning log:** each learning summary is also appended to `learning-log.md`. Open it with
+  **Writing Assistant → Open Learning Log**.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| ⌘↩ | Process |
+| ⌘B / ⌘I / ⌘⇧X | Bold / Italic / Strikethrough in the focused editor |
+| ⌘K | Clear |
+| Esc | Cancel a running request |
+| ⌘Y | History |
+| ⌘, | Settings (prompt editor) |
+
+### Polish from any app
+
+Select text in another app and choose **Services → Polish with Writing Assistant** from that
+app's menu (or the right-click menu). The app comes forward, loads the selection as input and
+processes it with the selected channel. The selection itself isn't replaced; copy the result
+back. If a request is already running, the app shows a banner and keeps the current input.
+
+To assign a shortcut, open **System Settings → Keyboard → Keyboard Shortcuts → Services**, find
+**Polish with Writing Assistant** under Text, and set a key combination. If the entry is missing
+after installing, log out and back in (the build script already runs `pbs -update`).
+
+### Data files
+
+```
+~/Library/Application Support/Writing Assistant/
+  prompts/             live prompts (see below)
+  history.json         the last 50 requests
+  learning-log.md      learning summaries
+```
+
+If `history.json` is damaged, the app moves it to `history.corrupt.json`, starts with empty
+history and shows a banner. If the file can't be read at all (or can't be moved aside), the app
+leaves it as it is and doesn't save new history until you relaunch.
 
 ---
 
@@ -57,13 +108,18 @@ The global rules and the per-channel rules are plain-text files in:
 ~/Library/Application Support/Writing Assistant/prompts/
   polish.txt           global rules and the 4-step pipeline
   channels/*.txt       one file per channel
+  refinements/*.txt    one instruction per Refine button
+  .defaults.json       hashes of the bundled defaults each file came from
 ```
 
-On first launch the app copies the bundled defaults there. It only copies files that are missing,
-so your edits are never overwritten. Deleting a file and relaunching restores just that file.
+On first launch the app copies the bundled defaults there. Deleting a file and relaunching
+restores just that file. When an update changes a bundled default, files you haven't edited are
+updated at launch. Files you edited are kept: Settings marks them with a badge and offers
+**Restore Default** or **Keep mine**.
 
 Edit them in **Settings (⌘,)** or in any text editor. The app reads the files on every request, so
-a change applies to the next request with no restart. In Settings:
+a change applies to the next request with no restart. The Settings sidebar has a Prompts section
+(global rules and channels) and a Refinements section. In Settings:
 
 - **Save (⌘S)** writes the file. `polish.txt` must keep the `{{CHANNEL_GUIDELINES}}` placeholder,
   and no file can be empty; the editor shows the error and does not save.

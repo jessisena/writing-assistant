@@ -2,58 +2,213 @@ import AppKit
 import Observation
 import WritingAssistantCore
 
+/// What Copy puts on the clipboard: HTML for apps that keep formatting (Slack, Docs, Mail) and
+/// plain text, with link targets written out, for the rest.
+struct ClipboardContent: Equatable, Sendable {
+    let html: String
+    let plain: String
+}
+
 /// State and actions for the main window.
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
 
-    var inputText = ""
+    var input = NSAttributedString()
+    var output = NSAttributedString()
     var channel: Channel = .formal
     private(set) var isLoading = false
-    private(set) var result: PolishResult?
+    private(set) var result: PolishResult? {
+        didSet { showsChanges = false }
+    }
+    /// Whether the Polished Text card shows the diff instead of the editor. It lives here rather
+    /// than in view state because the card is rebuilt after every request. Any change to
+    /// `result` turns it off; a refinement only changes `output`, so it keeps it on.
+    var showsChanges = false
     private(set) var errorMessage: String?
     private(set) var copied = false
+    /// Past requests, newest first. Change it only through the methods in `AppModel+History`.
+    var history: [HistoryEntry] = []
+    /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
+    var currentHistoryID: UUID?
 
-    @ObservationIgnored private let polisher: any Polishing
-    @ObservationIgnored private let writeToPasteboard: @MainActor (String) -> Void
+    /// True when there is something to clear and no request is running.
+    var canClear: Bool {
+        !isLoading
+            && (input.length > 0 || output.length > 0 || result != nil || errorMessage != nil)
+    }
+
+    @ObservationIgnored let polisher: any Polishing
+    /// Where `process()` writes each learning summary. Append only from the main actor.
+    @ObservationIgnored let learningLog: LearningLog
+    @ObservationIgnored let historyStore: HistoryStore
+    /// The request started by `startProcessing()`, which `cancel()` stops.
+    @ObservationIgnored var requestTask: Task<Void, Never>?
+    @ObservationIgnored private var requestGeneration = 0
+    @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
     @ObservationIgnored private var copyGeneration = 0
     @ObservationIgnored private var startupErrorMessage: String?
+    /// False when the history file exists but couldn't be read or moved aside at launch. Saving
+    /// is then skipped until the next launch, so the unread file is never overwritten.
+    @ObservationIgnored private(set) var savesHistory = true
 
     /// Creates the model.
     ///
     /// - Parameters:
     ///   - polisher: Service that polishes text.
-    ///   - writeToPasteboard: Puts text on the clipboard. Defaults to the general pasteboard.
+    ///   - learningLog: The Markdown file learning summaries are appended to.
+    ///   - historyStore: Where past requests are kept. It is read here; a damaged file is shown
+    ///     in the error banner and the history starts empty. When the file can't be read (or a
+    ///     damaged one can't be moved aside), the banner says so and history isn't saved until
+    ///     the next launch.
+    ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
+    ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
     init(
         polisher: any Polishing,
-        writeToPasteboard: @escaping @MainActor (String) -> Void =
+        learningLog: LearningLog = .standard(),
+        historyStore: HistoryStore = .standard(),
+        writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
         sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
         self.polisher = polisher
+        self.learningLog = learningLog
+        self.historyStore = historyStore
         self.writeToPasteboard = writeToPasteboard
         self.sleep = sleep
+        loadHistory()
     }
 
-    /// Polishes `inputText` with the selected channel. Ignored while a request is running.
+    private func loadHistory() {
+        do {
+            history = try historyStore.load()
+        } catch HistoryStoreError.corrupted(let backup) {
+            showStartupError(HistoryStoreError.corrupted(backup: backup))
+        } catch {
+            savesHistory = false
+            showStartupError(Self.historyNotSavedMessage(error))
+        }
+    }
+
+    private static func historyNotSavedMessage(_ error: any Error) -> String {
+        error.localizedDescription
+            + " New history won't be saved until you relaunch the app, so the file isn't replaced."
+    }
+
+    /// Starts polishing `input` in a task that `cancel()` can stop. Ignored while a request is
+    /// running.
+    func startProcessing() {
+        guard let request = beginProcessing() else { return }
+        requestTask = Task { await polish(request) }
+    }
+
+    /// Polishes `input`, sent as Markdown, with the selected channel. Ignored while a request
+    /// is running.
     func process() async {
-        guard !isLoading else { return }
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let request = beginProcessing() else { return }
+        await polish(request)
+    }
+
+    /// Stops the running request and returns to the empty state, with no error banner. A
+    /// late answer from the stopped request is ignored.
+    func cancel() {
+        guard isLoading else { return }
+        requestTask?.cancel()
+        requestGeneration += 1
+        isLoading = false
+    }
+
+    /// Marks a request as running and clears the error banner.
+    ///
+    /// - Returns: The request's generation for `finishRequest(_:_:)`, or nil when a request is
+    ///   already running.
+    func beginRequest() -> Int? {
+        guard !isLoading else { return nil }
+        errorMessage = nil
+        isLoading = true
+        requestGeneration += 1
+        return requestGeneration
+    }
+
+    /// Runs the work of the request started as `generation` and ends its loading state.
+    ///
+    /// A request that was cancelled, or replaced by a newer one, changes nothing and shows no
+    /// error. A failure is shown in the error banner.
+    ///
+    /// - Returns: The operation's value, or nil when it failed or was cancelled.
+    func finishRequest<Value>(
+        _ generation: Int, _ operation: () async throws(PolishError) -> Value
+    ) async -> Value? {
+        let outcome: Result<Value, PolishError>
+        do {
+            outcome = .success(try await operation())
+        } catch {
+            outcome = .failure(error)
+        }
+        guard generation == requestGeneration else { return nil }
+        isLoading = false
+        guard !Task.isCancelled else { return nil }
+        switch outcome {
+        case .success(let value):
+            return value
+        case .failure(let error):
+            errorMessage = error.errorDescription
+            return nil
+        }
+    }
+
+    private struct PolishRequest {
+        let text: String
+        let channel: Channel
+        let generation: Int
+    }
+
+    private func beginProcessing() -> PolishRequest? {
+        guard !isLoading else { return nil }
+        let text = RichText.markdown(from: RichTextBridge.attributedString(from: input))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             errorMessage = PolishError.emptyInput.errorDescription
-            return
+            return nil
         }
-        errorMessage = nil
+        guard let generation = beginRequest() else { return nil }
+        leaveCurrentHistoryEntry()
         result = nil
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            result = try await polisher.polish(text: text, channel: channel)
-        } catch {
-            result = nil
-            errorMessage = error.errorDescription
+        output = NSAttributedString()
+        return PolishRequest(text: text, channel: channel, generation: generation)
+    }
+
+    private func polish(_ request: PolishRequest) async {
+        let polisher = polisher
+        let polished = await finishRequest(request.generation) { () async throws(PolishError) in
+            try await polisher.polish(text: request.text, channel: request.channel)
         }
+        guard let polished else { return }
+        result = polished
+        output = Self.editorText(fromMarkdown: polished.polishedText)
+        recordHistory(polished, input: request.text, channel: request.channel)
+        appendToLearningLog(polished, channel: request.channel)
+    }
+
+    /// Empties the input, the output, the result and the error banner, after saving the edited
+    /// output to history. Ignored while a request is running.
+    func clear() {
+        guard !isLoading else { return }
+        errorMessage = nil
+        leaveCurrentHistoryEntry()
+        input = NSAttributedString()
+        output = NSAttributedString()
+        result = nil
+    }
+
+    /// Puts a past request back on screen: `input` and the result, with the output editor
+    /// showing `result.polishedText`. Clears the error banner.
+    func show(_ result: PolishResult, input: NSAttributedString) {
+        errorMessage = nil
+        self.input = input
+        self.result = result
+        output = Self.editorText(fromMarkdown: result.polishedText)
     }
 
     /// Shows a banner when the polisher can't run (for example, the claude CLI is missing).
@@ -68,16 +223,47 @@ import WritingAssistantCore
         }
     }
 
+    /// Adds `error` to the error banner without touching the result, for failures that happen
+    /// after a request succeeded, such as a log or history file that couldn't be written.
+    func showBanner(_ error: any Error) {
+        showBanner(error.localizedDescription)
+    }
+
+    /// Adds `message` to the error banner until the next request starts. A message that is
+    /// already in the banner isn't repeated.
+    func showBanner(_ message: String) {
+        guard let current = errorMessage, !current.isEmpty else {
+            errorMessage = message
+            return
+        }
+        guard !current.components(separatedBy: "\n").contains(message) else { return }
+        errorMessage = current + "\n" + message
+    }
+
     /// Shows a startup failure, such as prompts that couldn't be seeded, in the error banner.
+    /// Earlier startup failures stay in the banner.
     func showStartupError(_ error: any Error) {
-        startupErrorMessage = error.localizedDescription
+        showStartupError(error.localizedDescription)
+    }
+
+    /// Shows a startup failure message in the error banner. Earlier startup failures stay in it.
+    func showStartupError(_ message: String) {
+        startupErrorMessage = [startupErrorMessage, message]
+            .compactMap { $0 }
+            .joined(separator: "\n")
         errorMessage = startupErrorMessage
     }
 
-    /// Copies the polished text and shows "Copied" for `copiedDuration`.
+    /// Copies the edited output as HTML and plain text and shows "Copied" for `copiedDuration`.
+    /// The edited output is saved to history first.
     func copyResult() async {
-        guard let text = result?.polishedText else { return }
-        writeToPasteboard(text)
+        guard result != nil else { return }
+        saveOutputToHistory()
+        let text = RichTextBridge.attributedString(from: output)
+        writeToPasteboard(
+            ClipboardContent(
+                html: RichText.html(from: text), plain: RichText.clipboardText(from: text))
+        )
         copied = true
         copyGeneration += 1
         let generation = copyGeneration
@@ -87,9 +273,15 @@ import WritingAssistantCore
         }
     }
 
-    static func writeToGeneralPasteboard(_ text: String) {
+    /// Converts Markdown from Claude into text for the output editor.
+    static func editorText(fromMarkdown markdown: String) -> NSAttributedString {
+        RichTextBridge.nsAttributedString(from: RichText.attributedString(fromMarkdown: markdown))
+    }
+
+    static func writeToGeneralPasteboard(_ content: ClipboardContent) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(content.html, forType: .html)
+        pasteboard.setString(content.plain, forType: .string)
     }
 }

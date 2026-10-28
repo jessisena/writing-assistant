@@ -2,12 +2,14 @@
     import Foundation
     import WritingAssistantCore
 
-    /// In-memory `Polishing` for previews and tests. Returns `outcome` after `delay`.
+    /// In-memory `Polishing` for previews and tests. Returns `outcome` after `delay`; `refine`
+    /// returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
         private var _calls: [(text: String, channel: Channel)] = []
+        private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
         let delay: Duration
 
         init(
@@ -32,6 +34,10 @@
 
         var calls: [(text: String, channel: Channel)] { lock.withLock { _calls } }
 
+        var refineCalls: [(text: String, channel: Channel, refinement: Refinement)] {
+            lock.withLock { _refineCalls }
+        }
+
         func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
             lock.withLock { _calls.append((text, channel)) }
             if delay > .zero {
@@ -40,25 +46,94 @@
             return try outcome.get()
         }
 
+        func refine(
+            text: String, channel: Channel, refinement: Refinement
+        ) async throws(PolishError) -> String {
+            lock.withLock { _refineCalls.append((text, channel, refinement)) }
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
+            return try outcome.get().polishedText
+        }
+
         func checkReady() async throws(PolishError) {
             if let readiness { throw readiness }
         }
     }
 
+    /// `Polishing` whose calls wait until `resume(_:with:)` answers them, for tests that need a
+    /// request to stay in flight.
+    ///
+    /// Like a `claude` child that hasn't exited yet, a waiting call ignores task cancellation;
+    /// it only counts it in `cancelledCount`.
+    final class GatedPolisher: Polishing, @unchecked Sendable {
+        private typealias Gate = CheckedContinuation<Result<PolishResult, PolishError>, Never>
+
+        private let lock = NSLock()
+        private var gates: [Gate] = []
+        private var _cancelledCount = 0
+
+        /// Calls made so far, each waiting until resumed.
+        var waitingCount: Int { lock.withLock { gates.count } }
+
+        var cancelledCount: Int { lock.withLock { _cancelledCount } }
+
+        /// Answers the call at `index`, in call order. Each call must be answered once.
+        func resume(_ index: Int, with outcome: Result<PolishResult, PolishError>) {
+            let gate = lock.withLock { gates[index] }
+            gate.resume(returning: outcome)
+        }
+
+        func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
+            let outcome = await withTaskCancellationHandler {
+                await withCheckedContinuation { gate in
+                    lock.withLock { gates.append(gate) }
+                }
+            } onCancel: {
+                lock.withLock { _cancelledCount += 1 }
+            }
+            return try outcome.get()
+        }
+
+        func refine(
+            text: String, channel: Channel, refinement: Refinement
+        ) async throws(PolishError) -> String {
+            try await polish(text: text, channel: channel).polishedText
+        }
+
+        func checkReady() async throws(PolishError) {}
+    }
+
     /// In-memory `PromptStoring` that applies the same validation as the real store.
+    ///
+    /// `syncDefaults()` returns the files in `newerDefaults`; acknowledging or restoring a file
+    /// removes it. Set `acknowledgeFailure` to make `acknowledgeDefault(_:)` throw.
     final class FakePromptStore: PromptStoring, @unchecked Sendable {
         private let lock = NSLock()
         private var files: [PromptFile: String]
         private let defaults: [PromptFile: String]
+        private var _newerDefaults: Set<PromptFile>
+        private var _acknowledgeFailure: (any Error)?
         let directoryURL = URL(fileURLWithPath: "/tmp/fake-prompts")
 
-        init(files: [PromptFile: String]? = nil) {
+        init(files: [PromptFile: String]? = nil, newerDefaults: Set<PromptFile> = []) {
             var seeded: [PromptFile: String] = [.global: "Rules\n\(PromptFile.channelPlaceholder)"]
             for channel in Channel.allCases {
                 seeded[.channel(channel)] = "\(channel.rawValue) guidelines"
             }
+            for refinement in Refinement.allCases {
+                seeded[.refinement(refinement)] = "\(refinement.rawValue) instruction"
+            }
             defaults = seeded
             self.files = files ?? seeded
+            _newerDefaults = newerDefaults
+        }
+
+        var newerDefaults: Set<PromptFile> { lock.withLock { _newerDefaults } }
+
+        var acknowledgeFailure: (any Error)? {
+            get { lock.withLock { _acknowledgeFailure } }
+            set { lock.withLock { _acknowledgeFailure = newValue } }
         }
 
         func fileURL(_ file: PromptFile) -> URL {
@@ -85,7 +160,21 @@
         }
 
         func restoreDefault(_ file: PromptFile) throws {
-            lock.withLock { files[file] = defaults[file] }
+            lock.withLock {
+                files[file] = defaults[file]
+                _newerDefaults.remove(file)
+            }
+        }
+
+        func syncDefaults() throws -> Set<PromptFile> {
+            newerDefaults
+        }
+
+        func acknowledgeDefault(_ file: PromptFile) throws {
+            try lock.withLock {
+                if let _acknowledgeFailure { throw _acknowledgeFailure }
+                _newerDefaults.remove(file)
+            }
         }
 
         func assemble(for channel: Channel) throws -> String {
@@ -97,7 +186,11 @@
 
     extension PolishResult {
         static let sample = PolishResult(
-            polishedText: "Thanks for the update. I'll review the doc today.",
+            polishedText: """
+                Thanks for the **update**. I'll review the doc *today*:
+                - Read the summary
+                - Leave comments 👍
+                """,
             learningSummary: LearningSummary(
                 corrections: [
                     Correction(

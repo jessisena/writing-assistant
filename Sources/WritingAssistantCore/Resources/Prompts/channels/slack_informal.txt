@@ -3,4 +3,5 @@ Keep it short. One or two short paragraphs, or a few bullets.
 Contractions are fine. Plain everyday words over formal ones.
 Emoji are welcome where they carry tone or mark status, but do not overdo it.
 Skip formal openings and sign-offs. Get straight to the point.
-No headers or heavy formatting. Slack-native formatting only (bold, italic, bullet lists).
+No headers or heavy formatting. Use only Markdown **bold**, *italic* and "- " bullets; they are
+converted to Slack formatting on copy. Do not use Slack's own *bold* or _italic_ syntax.

@@ -1,0 +1,5 @@
+Make the text noticeably shorter, about half its current length when possible.
+Keep every key point, request, and decision. Cut filler, repetition, and secondary detail first.
+Do not change the meaning and do not add facts that are not in the text.
+Never use em dashes.
+Keep any emoji and Markdown formatting (bold, italic, lists, links) that remain relevant.
