@@ -22,6 +22,22 @@ enum RichTextBridge {
         #/^[\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\t))[\t ]+/#.anchorsMatchLineEndings()
     }
 
+    /// List markers that start a line of plain text: the foreign bullets, and Markdown's `-` and
+    /// `*` followed by a space.
+    private static var plainListMarker: Regex<Substring> {
+        #/^[\t ]*[•◦▪▫●○■□‣⁃∙\-*][\t ]+/#.anchorsMatchLineEndings()
+    }
+
+    /// Builds unformatted editor text from pasted plain text, with list markers turned into
+    /// `"• "` bullets. Other Markdown, such as `**`, stays literal.
+    ///
+    /// - Parameter string: Plain text from the pasteboard.
+    /// - Returns: Text in the base style, whatever the typing style is.
+    static func plainText(_ string: String) -> NSAttributedString {
+        let bulleted = string.replacing(plainListMarker, with: bulletPrefix)
+        return NSAttributedString(string: bulleted, attributes: baseAttributes)
+    }
+
     /// Reads the supported formatting from editor text. Attachments are dropped.
     ///
     /// - Parameter text: Text from an editor or the pasteboard.
@@ -269,14 +285,27 @@ final class FormattingTextView: NSTextView {
         NSPasteboard.PasteboardType("Apple HTML pasteboard type"),
     ]
 
+    /// Pasteboard types of plain text: the modern name and the legacy ones AppKit passes for
+    /// paste, drag-and-drop and Paste and Match Style.
+    private static let plainTextTypes: Set<NSPasteboard.PasteboardType> = [
+        .string, NSPasteboard.PasteboardType("NSStringPboardType"),
+        NSPasteboard.PasteboardType("NSStringWithLinksPboardType"),
+    ]
+
     /// Reads pasted or dropped text into the selection. Paste, Paste and Match Style and
-    /// drag-and-drop all come through here. Rich text keeps only the supported formatting;
-    /// plain text and other types are left to `NSTextView`, which uses the typing style.
+    /// drag-and-drop all come through here. Rich text keeps only the supported formatting.
+    /// Plain text gets the base style rather than the typing style, with its list markers
+    /// turned into bullets. Other types are left to `NSTextView`.
     ///
     /// - Returns: False when the pasteboard holds no text of `type`.
     override func readSelection(
         from pboard: NSPasteboard, type: NSPasteboard.PasteboardType
     ) -> Bool {
+        if Self.plainTextTypes.contains(type) {
+            guard let pasted = pboard.string(forType: .string) else { return false }
+            replace(selectedRange(), with: RichTextBridge.plainText(pasted))
+            return true
+        }
         guard Self.richTextTypes.contains(type) else {
             return super.readSelection(from: pboard, type: type)
         }
