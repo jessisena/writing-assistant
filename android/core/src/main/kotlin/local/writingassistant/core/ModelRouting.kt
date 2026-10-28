@@ -10,7 +10,6 @@ object ModelRouting {
     private const val MAX_ASCII_CODE_POINT = 127
     private const val MAX_ROMANCE_HITS = 1
     private val WORD_PUNCTUATION = ".,!?;:\"'".toCharArray()
-    private val WHITESPACE = Regex("(?U)\\s+")
 
     /** Common Spanish and Portuguese stopwords, used only as a routing hint. */
     private val ROMANCE_STOPWORDS =
@@ -32,8 +31,14 @@ object ModelRouting {
             SONNET_MODEL
         }
 
+    // Char.isWhitespace covers Unicode whitespace on every platform; a `\s` regex doesn't
+    // (ASCII-only on the JVM, and Android's ICU engine rejects the `(?U)` flag).
     private fun words(text: String): List<String> =
-        text.split(WHITESPACE).filter { it.isNotEmpty() }
+        text
+            .map { if (it.isWhitespace()) ' ' else it }
+            .joinToString("")
+            .split(' ')
+            .filter { it.isNotEmpty() }
 
     private fun looksLikeEnglish(text: String): Boolean {
         val codePoints = text.codePoints().toArray()
