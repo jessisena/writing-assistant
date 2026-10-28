@@ -88,7 +88,7 @@ import WritingAssistantCore
         #expect(activations == 1)
         while polisher.waitingCount == 0 { await Task.yield() }
         polisher.resume(0, with: .success(.sample))
-        await model.requestTask?.value
+        await model.requests.task?.value
         #expect(model.result == .sample)
     }
 
@@ -122,7 +122,7 @@ import WritingAssistantCore
         #expect(activations == 1)
         while polisher.waitingCount == 0 { await Task.yield() }
         polisher.resume(0, with: .success(.sample))
-        await model.requestTask?.value
+        await model.requests.task?.value
     }
 
     private func makeWindow(identifier: String) -> NSWindow {

@@ -272,16 +272,86 @@ import WritingAssistantCore
         #expect(textView.string == "keep")
     }
 
-    @Test func readingPlainTextUsesTheTypingStyle() {
+    /// Paste and drag-and-drop read plain text as `NSStringPboardType`, and Paste and Match Style
+    /// also tries `NSStringWithLinksPboardType` first.
+    @Test(arguments: [
+        NSPasteboard.PasteboardType.string,
+        NSPasteboard.PasteboardType("NSStringPboardType"),
+        NSPasteboard.PasteboardType("NSStringWithLinksPboardType"),
+    ])
+    func readingPlainTextIgnoresTheTypingStyle(type: NSPasteboard.PasteboardType) {
         let pasteboard = makePasteboard()
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString("plain", forType: .string)
+        let textView = makeTextView("bold")
+        textView.setSelectedRange(NSRange(location: 0, length: 4))
+        textView.toggleBold(nil)
+        textView.setSelectedRange(NSRange(location: 4, length: 0))
+        #expect(RichTextStyle(attributes: textView.typingAttributes).bold)
+
+        #expect(textView.readSelection(from: pasteboard, type: type))
+
+        #expect(markdown(textView) == "**bold**plain")
+    }
+
+    @Test func readingPlainTextTurnsListMarkersIntoBulletsAndKeepsOtherMarkdown() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("- one\n* two\n  - three\n**four** -five", forType: .string)
         let textView = makeTextView("")
         textView.toggleBold(nil)
 
         #expect(textView.readSelection(from: pasteboard, type: .string))
 
-        #expect(markdown(textView) == "**plain**")
+        #expect(textView.string == "• one\n• two\n• three\n**four** -five")
+        #expect(markdown(textView) == "- one\n- two\n- three\n\\*\\*four\\*\\* -five")
+        let end = (textView.string as NSString).length
+        #expect(textView.selectedRange() == NSRange(location: end, length: 0))
+    }
+
+    @Test(arguments: [
+        ("- a\n* b", "• a\n• b"),
+        ("\t-  a\r\n  * b", "• a\r\n• b"),
+        ("◦ a", "• a"),
+        ("-a\n*b*\n--- c", "-a\n*b*\n--- c"),
+        ("a - b * c", "a - b * c"),
+        ("", ""),
+    ])
+    func plainTextTurnsLeadingListMarkersIntoBullets(input: String, expected: String) {
+        let text = RichTextBridge.plainText(input)
+
+        #expect(text.string == expected)
+        let attributes = text.length > 0 ? text.attributes(at: 0, effectiveRange: nil) : [:]
+        #expect(text.length == 0 || RichTextStyle(attributes: attributes) == RichTextStyle())
+    }
+
+    @Test func readingPlainTextReplacesTheSelectionAndCanBeUndone() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("- new", forType: .string)
+        let textView = makeTextView("old text")
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        let delegate = UndoDelegate(undoManager: undoManager)
+        textView.delegate = delegate
+        textView.setSelectedRange(NSRange(location: 0, length: 3))
+
+        undoManager.beginUndoGrouping()
+        #expect(textView.readSelection(from: pasteboard, type: .string))
+        undoManager.endUndoGrouping()
+        #expect(textView.string == "• new text")
+
+        undoManager.undo()
+        #expect(textView.string == "old text")
+    }
+
+    @Test func readingPlainTextFromAnEmptyPasteboardReadsNothing() {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let textView = makeTextView("keep")
+
+        #expect(!textView.readSelection(from: pasteboard, type: .string))
+        #expect(textView.string == "keep")
     }
 
     private func actions(in menu: NSMenu) -> [String] {
@@ -343,7 +413,7 @@ import WritingAssistantCore
     }
 }
 
-@MainActor private final class UndoDelegate: NSObject, NSTextViewDelegate {
+@MainActor final class UndoDelegate: NSObject, NSTextViewDelegate {
     let undoManager: UndoManager
 
     init(undoManager: UndoManager) {

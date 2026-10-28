@@ -342,7 +342,7 @@ import WritingAssistantCore
         #expect(gated.isLoading)
         await waitUntil(polisher, hasCalls: 1)
         polisher.resume(0, with: .success(.sample))
-        await gated.requestTask?.value
+        await gated.requests.task?.value
         #expect(polisher.waitingCount == 1)
         #expect(gated.result == .sample)
         #expect(!gated.isLoading)
@@ -360,7 +360,7 @@ import WritingAssistantCore
         #expect(!model.isLoading)
         #expect(polisher.cancelledCount == 1)
         polisher.resume(0, with: .failure(.cliFailed(stderr: "Cancelled")))
-        await model.requestTask?.value
+        await model.requests.task?.value
         #expect(model.errorMessage == nil)
         #expect(model.result == nil)
         #expect(model.output.length == 0)
@@ -389,13 +389,13 @@ import WritingAssistantCore
         model.input = NSAttributedString(string: "Hello")
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
-        let cancelled = model.requestTask
+        let cancelled = model.requests.task
         model.cancel()
 
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 2)
         polisher.resume(1, with: .success(Self.newerResult))
-        await model.requestTask?.value
+        await model.requests.task?.value
         polisher.resume(0, with: .success(.sample))
         await cancelled?.value
 
@@ -410,11 +410,11 @@ import WritingAssistantCore
         model.input = NSAttributedString(string: "Hello")
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
-        let cancelled = model.requestTask
+        let cancelled = model.requests.task
         model.cancel()
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 2)
-        let newer = model.requestTask
+        let newer = model.requests.task
 
         polisher.resume(0, with: .failure(.cliFailed(stderr: "Cancelled")))
         await cancelled?.value

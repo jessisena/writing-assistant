@@ -22,6 +22,22 @@ enum RichTextBridge {
         #/^[\t ]*(?:[•◦▪▫●○■□‣⁃∙]|-(?=\t))[\t ]+/#.anchorsMatchLineEndings()
     }
 
+    /// List markers that start a line of plain text: the foreign bullets, and Markdown's `-` and
+    /// `*` followed by a space.
+    private static var plainListMarker: Regex<Substring> {
+        #/^[\t ]*[•◦▪▫●○■□‣⁃∙\-*][\t ]+/#.anchorsMatchLineEndings()
+    }
+
+    /// Builds unformatted editor text from pasted plain text, with list markers turned into
+    /// `"• "` bullets. Other Markdown, such as `**`, stays literal.
+    ///
+    /// - Parameter string: Plain text from the pasteboard.
+    /// - Returns: Text in the base style, whatever the typing style is.
+    static func plainText(_ string: String) -> NSAttributedString {
+        let bulleted = string.replacing(plainListMarker, with: bulletPrefix)
+        return NSAttributedString(string: bulleted, attributes: baseAttributes)
+    }
+
     /// Reads the supported formatting from editor text. Attachments are dropped.
     ///
     /// - Parameter text: Text from an editor or the pasteboard.
@@ -198,6 +214,68 @@ final class FormattingTextView: NSTextView {
         }
     }
 
+    /// What Return does on a bulleted line.
+    enum ListReturn: Equatable {
+        /// Starts a new bulleted line, replacing the selection.
+        case continueList
+        /// Removes the bullet at the range from its otherwise empty line, which ends the list.
+        case endList(NSRange)
+    }
+
+    /// Return on a bulleted line continues the list, and on an empty bulleted line ends it, as
+    /// in Notes. Other lines get a plain newline.
+    override func insertNewline(_ sender: Any?) {
+        let selection = selectedRange()
+        switch Self.listReturn(in: string, selection: selection) {
+        case nil:
+            super.insertNewline(sender)
+        case .continueList:
+            let newline = NSMutableAttributedString(string: "\n", attributes: typingAttributes)
+            newline.append(
+                NSAttributedString(
+                    string: RichTextBridge.bulletPrefix, attributes: RichTextBridge.baseAttributes))
+            replaceKeepingTypingStyle(selection, with: newline)
+        case .endList(let bullet):
+            replaceKeepingTypingStyle(bullet, with: NSAttributedString())
+        }
+    }
+
+    /// Decides what Return does when `selection` is in `text`.
+    ///
+    /// - Returns: Nil unless the selection starts after the `"• "` of a bulleted line.
+    static func listReturn(in text: String, selection: NSRange) -> ListReturn? {
+        let string = text as NSString
+        let prefix = RichTextBridge.bulletPrefix
+        let prefixLength = (prefix as NSString).length
+        let paragraph = string.paragraphRange(for: NSRange(location: selection.location, length: 0))
+        let line = string.substring(with: paragraph)
+        guard line.hasPrefix(prefix), selection.location >= paragraph.location + prefixLength
+        else { return nil }
+        if selection.length == 0, line.trimmingCharacters(in: .newlines) == prefix {
+            return .endList(NSRange(location: paragraph.location, length: prefixLength))
+        }
+        return .continueList
+    }
+
+    /// Replaces `range` with `text` as one undoable step and leaves the caret after it, with the
+    /// typing style it had before.
+    private func replaceKeepingTypingStyle(_ range: NSRange, with text: NSAttributedString) {
+        let attributes = typingAttributes
+        breakUndoCoalescing()
+        replace(range, with: text)
+        typingAttributes = attributes
+    }
+
+    /// Replaces `range` with `text` as one undoable step and puts the caret after it.
+    private func replace(_ range: NSRange, with text: NSAttributedString) {
+        guard let storage = textStorage, shouldChangeText(in: range, replacementString: text.string)
+        else { return }
+        storage.replaceCharacters(in: range, with: text)
+        didChangeText()
+        setSelectedRange(NSRange(location: range.location + text.length, length: 0))
+        scrollRangeToVisible(selectedRange())
+    }
+
     /// Pasteboard types that carry another app's formatting, under both the modern names and the
     /// legacy ones AppKit passes to `readSelection(from:type:)`.
     private static let richTextTypes: Set<NSPasteboard.PasteboardType> = [
@@ -207,27 +285,33 @@ final class FormattingTextView: NSTextView {
         NSPasteboard.PasteboardType("Apple HTML pasteboard type"),
     ]
 
+    /// Pasteboard types of plain text: the modern name and the legacy ones AppKit passes for
+    /// paste, drag-and-drop and Paste and Match Style.
+    private static let plainTextTypes: Set<NSPasteboard.PasteboardType> = [
+        .string, NSPasteboard.PasteboardType("NSStringPboardType"),
+        NSPasteboard.PasteboardType("NSStringWithLinksPboardType"),
+    ]
+
     /// Reads pasted or dropped text into the selection. Paste, Paste and Match Style and
-    /// drag-and-drop all come through here. Rich text keeps only the supported formatting;
-    /// plain text and other types are left to `NSTextView`, which uses the typing style.
+    /// drag-and-drop all come through here. Rich text keeps only the supported formatting.
+    /// Plain text gets the base style rather than the typing style, with its list markers
+    /// turned into bullets. Other types are left to `NSTextView`.
     ///
     /// - Returns: False when the pasteboard holds no text of `type`.
     override func readSelection(
         from pboard: NSPasteboard, type: NSPasteboard.PasteboardType
     ) -> Bool {
+        if Self.plainTextTypes.contains(type) {
+            guard let pasted = pboard.string(forType: .string) else { return false }
+            replace(selectedRange(), with: RichTextBridge.plainText(pasted))
+            return true
+        }
         guard Self.richTextTypes.contains(type) else {
             return super.readSelection(from: pboard, type: type)
         }
         let objects = pboard.readObjects(forClasses: [NSAttributedString.self])
         guard let pasted = objects?.first as? NSAttributedString else { return false }
-        let text = RichTextBridge.normalized(pasted)
-        let range = selectedRange()
-        guard let storage = textStorage, shouldChangeText(in: range, replacementString: text.string)
-        else { return true }
-        storage.replaceCharacters(in: range, with: text)
-        didChangeText()
-        setSelectedRange(NSRange(location: range.location + text.length, length: 0))
-        scrollRangeToVisible(selectedRange())
+        replace(selectedRange(), with: RichTextBridge.normalized(pasted))
         return true
     }
 

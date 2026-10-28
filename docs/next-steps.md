@@ -88,6 +88,11 @@ added that were not in the original.
   Bullet List) and the emoji picker, then Process. The output keeps the emphasis and the emoji.
 - The Format menu items act on whichever editor has focus.
 - Paste from Google Docs: bold and italic are kept, fonts, sizes and colors are dropped.
+- Return at the end and in the middle of a bullet line starts a new bullet; Return on an empty
+  bullet ends the list. Each Return is one ⌘Z. With bold on, the next text stays bold.
+- Paste plain text right after bold text, with ⌘V and with Paste and Match Style (⌥⇧⌘V): it
+  arrives unformatted, and its `- ` / `* ` lines become bullets. A literal `**` stays as text.
+- Drag plain text in from another app, and drag text within the editor.
 
 ## 6. Copy and Slack paste
 
@@ -195,12 +200,10 @@ added that were not in the original.
 
 ## Known gaps
 
-- Drag and drop and Edit → Paste and Match Style skip paste normalization, so dropped text can
-  keep foreign fonts and colors.
-- Return on a bullet line doesn't continue the list.
 - An emoji that starts with punctuation (`‼️`, `#️⃣`) written right after a word, with no space,
   loses its bold or italic; CommonMark can't place a marker there.
 - The editor reads bold from font traits; if AppKit draws an emoji in Apple Color Emoji, the
   emoji may lose its bold before conversion. Not verified.
-- Refinements use the currently selected channel, not the channel of the original request.
+- Pasted URLs (`public.url`) still take the typing style.
+- Option-Return doesn't continue a bullet list.
 - Image titles aren't kept.
