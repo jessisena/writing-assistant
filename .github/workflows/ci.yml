@@ -38,6 +38,9 @@ jobs:
       - name: Validate Info.plist
         run: plutil -lint Resources/Info.plist
 
+      - name: Test release script
+        run: scripts/test_release.sh
+
   scripts-and-workflows:
     name: Lint scripts and workflows
     runs-on: ubuntu-24.04
