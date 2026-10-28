@@ -46,7 +46,10 @@ class ModelRoutingTest {
 
     @Test
     fun wordsAreSplitOnAnyUnicodeWhitespace() {
-        assertEquals(SONNET_MODEL, pickModel(List(61) { "word" }.joinToString("\u00A0")))
+        val longWords = List(61) { "a".repeat(200) }
+
+        assertEquals(SONNET_MODEL, pickModel(longWords.joinToString("\u00A0")))
+        assertEquals(SONNET_MODEL, pickModel(longWords.joinToString("\u2003")))
     }
 
     @Test
