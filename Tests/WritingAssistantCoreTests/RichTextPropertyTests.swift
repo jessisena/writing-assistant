@@ -43,7 +43,10 @@ private func characterStyles(of text: AttributedString) -> [CharacterStyle] {
     }
 }
 
-private let alphabet = Array("a .*_#-•`中![~\\👍👍🏽‼️❤️🇵🇹👨‍👩‍👧*️⃣#️⃣©")
+/// Pieces a run is made of: Markdown characters, emoji, and the starts of bare URLs and email
+/// addresses, which must stay plain text.
+private let alphabet =
+    Array("a .*_#-•`中![~\\👍👍🏽‼️❤️🇵🇹👨‍👩‍👧*️⃣#️⃣©").map(String.init) + ["https://", "www.", "@x.co"]
 private let links = [URL(string: "https://a.com/x")!, URL(string: "https://b.com/(y)")!]
 private let intentChoices: [InlinePresentationIntent] = [
     .stronglyEmphasized, .emphasized, .strikethrough, .code,
@@ -52,7 +55,7 @@ private let intentChoices: [InlinePresentationIntent] = [
 private func randomRun(using generator: inout SeededGenerator) -> AttributedString {
     let length = Int.random(in: 1...4, using: &generator)
     var run = AttributedString(
-        String((0..<length).map { _ in alphabet.randomElement(using: &generator)! }))
+        (0..<length).map { _ in alphabet.randomElement(using: &generator)! }.joined())
     var intent: InlinePresentationIntent = []
     for choice in intentChoices where Int.random(in: 0..<3, using: &generator) == 0 {
         intent.insert(choice)

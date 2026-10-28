@@ -30,9 +30,9 @@ extension AttributeDynamicLookup {
 /// HTML for the clipboard, and plain text.
 ///
 /// Supported: bold, italic, strikethrough and inline code (`inlinePresentationIntent`), links
-/// (`link`), bullet lines (a literal `"• "` prefix in the attributed string) and headings
-/// (`headingLevel`). Images are kept as their literal `![alt](url)` text, and everything else
-/// is kept as literal text too.
+/// written as `[text](url)` or `<url>` (`link`; bare URLs stay plain text), bullet lines (a
+/// literal `"• "` prefix in the attributed string) and headings (`headingLevel`). Images are
+/// kept as their literal `![alt](url)` text, and everything else is kept as literal text too.
 public enum RichText {
     static let bulletPrefix = "• "
     /// Link schemes written to the clipboard; other links are kept as their label only.
@@ -150,16 +150,119 @@ extension RichText {
     static func parseInline(_ markdown: Substring) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        guard var parsed = try? AttributedString(markdown: String(markdown), options: options)
-        else {
+        let source = escapingURLTriggers(markdown)
+        guard var parsed = try? AttributedString(markdown: source, options: options) else {
             return AttributedString(String(markdown))
         }
         for run in parsed.runs {
             let kept = run.inlinePresentationIntent?.intersection(supportedIntents)
             parsed[run.range].inlinePresentationIntent = kept?.isEmpty == false ? kept : nil
         }
+        removeBareEmailLinks(in: &parsed, source: source)
         restoreImageSources(in: &parsed)
         return parsed
+    }
+
+    /// Escapes the `:` of every `://` and the `.` of every `www.` outside code spans and
+    /// `<…>`, so the parser's extended autolinks leave bare URLs as plain text, as they were
+    /// written. Only `[text](url)` and `<url>` make links. The escapes don't change what the
+    /// text, link text or link targets read as.
+    private static func escapingURLTriggers(_ markdown: Substring) -> String {
+        let scalars = Array(markdown.unicodeScalars)
+        var result = String.UnicodeScalarView()
+        var index = 0
+        while index < scalars.count {
+            let verbatim = verbatimEnd(in: scalars, from: index)
+            if verbatim > index {
+                result.append(contentsOf: scalars[index..<verbatim])
+                index = verbatim
+                continue
+            }
+            if isURLTrigger(in: scalars, at: index) {
+                result.append("\\")
+            }
+            result.append(scalars[index])
+            index += 1
+        }
+        return String(result)
+    }
+
+    /// The end of what the parser reads literally from `start`: a backslash escape, a code
+    /// span (or an unmatched backtick run), or a `<…>` that may be an autolink or HTML tag.
+    /// Returns `start` when none starts there.
+    private static func verbatimEnd(in scalars: [Unicode.Scalar], from start: Int) -> Int {
+        let next = start + 1 < scalars.count ? scalars[start + 1] : nil
+        switch scalars[start] {
+        case "\\":
+            guard let next, next.isASCII, Flanking.isPunctuation(next) else {
+                return start
+            }
+            return start + 2
+        case "`":
+            return codeSpanEnd(in: scalars, from: start)
+        case "<":
+            guard let next, !next.properties.isWhitespace else {
+                return start
+            }
+            let close = scalars[(start + 1)...].firstIndex { $0 == "<" || $0 == ">" }
+            return close.flatMap { scalars[$0] == ">" ? $0 + 1 : nil } ?? start
+        default:
+            return start
+        }
+    }
+
+    /// The end of the code span opened by the backtick run at `start`, or of that run alone
+    /// when no run of the same length closes it.
+    private static func codeSpanEnd(in scalars: [Unicode.Scalar], from start: Int) -> Int {
+        func runEnd(_ index: Int) -> Int {
+            scalars[index...].firstIndex { $0 != "`" } ?? scalars.count
+        }
+        let openEnd = runEnd(start)
+        var index = openEnd
+        while let next = scalars[index...].firstIndex(of: "`") {
+            let end = runEnd(next)
+            if end - next == openEnd - start {
+                return end
+            }
+            index = end
+        }
+        return openEnd
+    }
+
+    private static func isURLTrigger(in scalars: [Unicode.Scalar], at index: Int) -> Bool {
+        switch scalars[index] {
+        case ":":
+            return scalars[(index + 1)...].prefix(2).elementsEqual("//".unicodeScalars)
+        case ".":
+            return index >= 3
+                && scalars[(index - 3)..<index].allSatisfy { $0 == "w" || $0 == "W" }
+        default:
+            return false
+        }
+    }
+
+    /// Removes the links the parser adds to bare email addresses, which escaping can't prevent:
+    /// a `mailto:` or `xmpp:` link whose text is its address, unless `source` also writes it as
+    /// `<address>` or as a `](target` link target.
+    private static func removeBareEmailLinks(in text: inout AttributedString, source: String) {
+        var bare: [Range<AttributedString.Index>] = []
+        for (link, range) in text.runs[\.link] {
+            guard let link, ["mailto", "xmpp"].contains(link.scheme?.lowercased() ?? "") else {
+                continue
+            }
+            let label = String(text[range].characters)
+            let target = link.absoluteString
+            let isAddress = target == label || target == "mailto:" + label
+            let isExplicit =
+                source.contains("<\(label)>") || source.contains("](\(target)")
+                || source.contains("](<\(target)")
+            if isAddress && !isExplicit {
+                bare.append(range)
+            }
+        }
+        for range in bare {
+            text[range].link = nil
+        }
     }
 
     /// Replaces each image, which the parser reduces to its alt text, with its `![alt](url)`
@@ -388,8 +491,8 @@ enum InlineMarkdown {
         return result
     }
 
-    /// Whether `markdown` parses to the characters of `segments` with their styling. Whitespace
-    /// styling is ignored, as are links the parser adds to bare URLs.
+    /// Whether `markdown` parses to the characters of `segments` with their styling and links.
+    /// Whitespace styling is ignored.
     private static func parsesBack(_ markdown: String, as segments: [InlineSegment]) -> Bool {
         let parsed = RichText.parseInline(Substring(markdown))
         let actual = parsed.runs.flatMap { run in
@@ -408,7 +511,7 @@ enum InlineMarkdown {
         return zip(actual, expected).allSatisfy { actual, expected in
             actual.0 == expected.0
                 && (expected.0.isWhitespace
-                    || (actual.1 == expected.1 && (expected.2 == nil || actual.2 == expected.2)))
+                    || (actual.1 == expected.1 && actual.2 == expected.2))
         }
     }
 
