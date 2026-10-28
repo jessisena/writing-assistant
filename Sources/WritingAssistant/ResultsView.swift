@@ -28,7 +28,10 @@ struct ResultsView: View {
                         PolishedCard(model: model, result: result)
                         LearningSummaryCard(result: result)
                     }
-                    .transition(.opacity.combined(with: .offset(y: 6)))
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity)
+                    )
                 }
             case .idle:
                 IdleHint()
