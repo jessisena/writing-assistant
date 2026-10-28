@@ -115,16 +115,10 @@ class PolishService(
             val response = decodeObject(raw)
             val polishedText = polishedText(response)
             val wasTranslated = isTruthy(response["was_translated"])
+            val summary = if (wasTranslated) null else decodeSummary(response["learning_summary"])
             return PolishResult(
                 polishedText = polishedText,
-                learningSummary =
-                    if (wasTranslated) {
-                        null
-                    } else {
-                        decodeSummary(
-                            response["learning_summary"],
-                        )
-                    },
+                learningSummary = summary,
                 detectedLanguage = stringValue(response["detected_language"]) ?: "Unknown",
                 wasTranslated = wasTranslated,
                 modelUsed = model,
@@ -170,25 +164,17 @@ class PolishService(
         /** Mirrors Python's `bool()` so any truthy `was_translated` drops the summary. */
         private fun isTruthy(element: JsonElement?): Boolean =
             when (element) {
-                null, JsonNull -> {
-                    false
-                }
+                null, JsonNull -> false
+                is JsonObject -> element.isNotEmpty()
+                is JsonArray -> element.isNotEmpty()
+                is JsonPrimitive -> isTruthyPrimitive(element)
+            }
 
-                is JsonObject -> {
-                    element.isNotEmpty()
-                }
-
-                is JsonArray -> {
-                    element.isNotEmpty()
-                }
-
-                is JsonPrimitive -> {
-                    if (element.isString) {
-                        element.content.isNotEmpty()
-                    } else {
-                        element.booleanOrNull ?: (element.doubleOrNull?.let { it != 0.0 } ?: false)
-                    }
-                }
+        private fun isTruthyPrimitive(primitive: JsonPrimitive): Boolean =
+            if (primitive.isString) {
+                primitive.content.isNotEmpty()
+            } else {
+                primitive.booleanOrNull ?: ((primitive.doubleOrNull ?: 0.0) != 0.0)
             }
     }
 }
