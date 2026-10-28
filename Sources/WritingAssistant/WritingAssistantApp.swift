@@ -42,6 +42,7 @@ struct WritingAssistantApp: App {
 
         Settings {
             PromptEditorView(store: store, newerDefaults: newerDefaults)
+                .tint(Theme.ink)
                 .handsMainWindowOpener(to: appDelegate)
         }
     }
@@ -116,6 +117,7 @@ struct LearningLogCommands: Commands {
 /// The single stacked column: composer, error banner, results, on the desk.
 struct MainWindowView: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -134,7 +136,11 @@ struct MainWindowView: View {
             }
             .onChange(of: model.result) { _, newValue in
                 guard newValue != nil else { return }
-                withAnimation { proxy.scrollTo(Self.resultsID, anchor: .bottom) }
+                if reduceMotion {
+                    proxy.scrollTo(Self.resultsID, anchor: .bottom)
+                } else {
+                    withAnimation { proxy.scrollTo(Self.resultsID, anchor: .bottom) }
+                }
             }
         }
         .background(Theme.desk)

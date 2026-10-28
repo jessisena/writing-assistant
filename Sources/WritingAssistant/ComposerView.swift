@@ -7,7 +7,9 @@ struct ComposerView: View {
     @Bindable var model: AppModel
     @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var inputController = RichTextController()
+    @State private var inputLength = 0
 
     private static let cornerRadius: CGFloat = 12
 
@@ -29,22 +31,37 @@ struct ComposerView: View {
             Divider()
             ComposerFooter(
                 model: model,
-                inputLength: InputLength.scalars(in: model.input),
-                onClear: { model.clear(undoManager: undoManager) }
+                inputLength: inputLength,
+                onClear: clear
             )
         }
         .background(Theme.paper, in: sheetShape)
         .clipShape(sheetShape)
-        .overlay(sheetShape.strokeBorder(borderColor, lineWidth: 1))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: inputController.isFocused)
+        .overlay(
+            sheetShape
+                .strokeBorder(borderColor, lineWidth: 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsFocus)
+        )
+        .onChange(of: model.input, initial: true) { _, newValue in
+            inputLength = InputLength.scalars(in: newValue)
+        }
+    }
+
+    /// Resigns focus first: the clear is registered on the window's undo manager, and while an
+    /// editor is first responder Edit > Undo goes to that editor's own (just emptied) stack.
+    private func clear() {
+        inputController.textView?.window?.makeFirstResponder(nil)
+        model.clear(undoManager: undoManager)
     }
 
     private var sheetShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: Self.cornerRadius)
     }
 
+    private var showsFocus: Bool { inputController.isFocused && controlActiveState == .key }
+
     private var borderColor: Color {
-        inputController.isFocused ? Theme.ink.opacity(0.6) : Theme.rule
+        showsFocus ? Theme.ink.opacity(0.6) : Theme.rule
     }
 }
 
@@ -53,11 +70,10 @@ enum InputLength {
     /// The meter shows once the input is over this many unicode scalars.
     static let meterThreshold = 15_000
 
-    /// Unicode scalars of the trimmed Markdown the pipeline would send. The Markdown is only
-    /// built when the plain text is long enough for the result to matter, because Markdown
-    /// is never shorter than the plain text it comes from.
+    /// Unicode scalars of the trimmed Markdown the pipeline would send, the count
+    /// `PolishService` checks against its limit. Markdown can be much longer than the plain
+    /// text, so the plain length says nothing about it.
     static func scalars(in input: NSAttributedString) -> Int {
-        guard input.length > meterThreshold / 2 else { return input.length }
         let markdown = RichText.markdown(from: RichTextBridge.attributedString(from: input))
         return markdown.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count
     }
@@ -74,6 +90,7 @@ private struct ComposerFooter: View {
             ActionRow(
                 inputLength: inputLength,
                 isLoading: model.isLoading,
+                isPolishing: model.isLoading && model.runningRefinement == nil,
                 canClear: model.canClear,
                 requestStartedAt: model.requestStartedAt,
                 onPolish: model.startProcessing,
@@ -110,23 +127,35 @@ private struct ChannelChips: View {
 
 private struct ChipStyle: ButtonStyle {
     let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        ChipBody(isSelected: isSelected, isPressed: configuration.isPressed) {
+            configuration.label
+        }
+    }
+}
+
+private struct ChipBody<Label: View>: View {
+    let isSelected: Bool
+    let isPressed: Bool
+    @ViewBuilder let label: Label
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+    var body: some View {
+        label
             .font(.callout)
             .foregroundStyle(isSelected ? Theme.ink : Color.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(fill(isPressed: configuration.isPressed), in: Capsule())
+            .background(fill, in: Capsule())
             .overlay(Capsule().strokeBorder(isSelected ? Theme.ink : Theme.rule, lineWidth: 1))
             .contentShape(Capsule())
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: isSelected)
     }
 
-    private func fill(isPressed: Bool) -> Color {
+    private var fill: Color {
         if isSelected { return Theme.ink.opacity(0.15) }
         if isPressed { return Color.primary.opacity(0.10) }
         return isHovered ? Color.primary.opacity(0.06) : .clear
@@ -136,6 +165,7 @@ private struct ChipStyle: ButtonStyle {
 private struct ActionRow: View {
     let inputLength: Int
     let isLoading: Bool
+    let isPolishing: Bool
     let canClear: Bool
     let requestStartedAt: Date?
     let onPolish: () -> Void
@@ -164,6 +194,7 @@ private struct ActionRow: View {
             }
             PolishButton(
                 isLoading: isLoading,
+                isPolishing: isPolishing,
                 isOverLimit: isOverLimit,
                 requestStartedAt: requestStartedAt,
                 action: onPolish
@@ -192,6 +223,7 @@ private struct LengthMeter: View {
 
 private struct PolishButton: View {
     let isLoading: Bool
+    let isPolishing: Bool
     let isOverLimit: Bool
     let requestStartedAt: Date?
     let action: () -> Void
@@ -201,19 +233,21 @@ private struct PolishButton: View {
             if !isLoading { action() }
         } label: {
             label
-                .foregroundStyle(Theme.paper)
+                .foregroundStyle(
+                    isOverLimit ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.paper)
+                )
                 .frame(minWidth: 150)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(isOverLimit)
         .keyboardShortcut(.return, modifiers: .command)
-        .accessibilityLabel(isLoading ? "Polishing" : "Polish")
+        .accessibilityLabel(isPolishing ? "Polishing" : "Polish")
         .help(isOverLimit ? tooLongHelp : "Polish the text (⌘↵)")
     }
 
     @ViewBuilder private var label: some View {
-        if isLoading {
+        if isPolishing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 ProgressText(startedAt: requestStartedAt)

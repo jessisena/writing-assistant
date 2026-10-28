@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WritingAssistantCore
 
 @testable import WritingAssistant
 
@@ -56,6 +57,18 @@ import Testing
 @Suite struct InputLengthTests {
     @Test func shortInputCountsItsCharacters() {
         #expect(InputLength.scalars(in: NSAttributedString(string: "hello")) == 5)
+    }
+
+    @Test func formattedInputCountsItsMarkdownNotItsPlainText() {
+        let source = String(repeating: "**bold** [link](https://example.com/a) ", count: 50)
+        let input = RichTextBridge.nsAttributedString(
+            from: RichText.attributedString(fromMarkdown: source))
+        let pipelineInput = RichText.markdown(from: RichTextBridge.attributedString(from: input))
+        let expected = pipelineInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            .unicodeScalars.count
+
+        #expect(InputLength.scalars(in: input) == expected)
+        #expect(expected > input.length)
     }
 
     @Test func longInputIsTrimmedLikeThePipelineDoes() {
