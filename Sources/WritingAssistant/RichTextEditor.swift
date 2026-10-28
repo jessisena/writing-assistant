@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import WritingAssistantCore
 
@@ -9,7 +10,8 @@ import WritingAssistantCore
 /// links and headings. Fonts, sizes and colors from elsewhere are replaced with the editor's own,
 /// so pasted text looks like typed text and stays readable in dark mode.
 enum RichTextBridge {
-    static let bodyFontSize = NSFont.systemFontSize
+    static let bodyFontSize: CGFloat = 15
+    static let lineHeightMultiple: CGFloat = 1.35
     static let bulletPrefix = "• "
     static let headingLevelKey = NSAttributedString.Key("WritingAssistant.headingLevel")
 
@@ -139,14 +141,21 @@ struct RichTextStyle: Equatable {
         return intent.isEmpty ? nil : intent
     }
 
-    /// Returns `attributes` with the font, color, strikethrough and heading level replaced by
-    /// this style's. Other attributes, such as links, are kept.
+    private static var paragraphStyle: NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineHeightMultiple = RichTextBridge.lineHeightMultiple
+        return style
+    }
+
+    /// Returns `attributes` with the font, color, line spacing, strikethrough and heading level
+    /// replaced by this style's. Other attributes, such as links, are kept.
     func applied(
         to attributes: [NSAttributedString.Key: Any]
     ) -> [NSAttributedString.Key: Any] {
         var result = attributes
         result[.font] = font
         result[.foregroundColor] = NSColor.textColor
+        result[.paragraphStyle] = Self.paragraphStyle
         result[.strikethroughStyle] = strikethrough ? NSUnderlineStyle.single.rawValue : nil
         result[RichTextBridge.headingLevelKey] = headingLevel
         return result
@@ -177,6 +186,21 @@ struct RichTextStyle: Equatable {
 /// Rich text view for the editors: no images, spell check, its own formatting actions, and
 /// pasting that keeps only the supported formatting.
 final class FormattingTextView: NSTextView {
+    /// Called with true when the view becomes first responder and false when it resigns.
+    var onFocusChange: (@MainActor (Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange?(false) }
+        return accepted
+    }
+
     /// Creates a text view configured for the editors.
     static func make() -> FormattingTextView {
         let textView = FormattingTextView(frame: .zero)
@@ -428,8 +452,10 @@ final class FormattingTextView: NSTextView {
 }
 
 /// Lets a toolbar act on its own editor, whether or not that editor has focus.
-@MainActor final class RichTextController {
-    weak var textView: FormattingTextView?
+@Observable @MainActor final class RichTextController {
+    @ObservationIgnored weak var textView: FormattingTextView?
+    /// Whether the editor is the window's first responder.
+    var isFocused = false
 
     /// Focuses the editor and applies `action` to its selection.
     func perform(_ action: FormattingAction) {
@@ -446,8 +472,8 @@ final class FormattingTextView: NSTextView {
     }
 }
 
-/// A bordered rich text editor with a placeholder. It grows with its text between `minHeight`
-/// and `maxHeight`, then scrolls.
+/// A rich text editor with a placeholder, bordered unless `isBordered` is false. It grows with
+/// its text between `minHeight` and `maxHeight`, then scrolls.
 struct RichTextEditor: View {
     @Binding var text: NSAttributedString
     let controller: RichTextController
@@ -455,18 +481,32 @@ struct RichTextEditor: View {
     var placeholder: String?
     var minHeight: CGFloat = 160
     var maxHeight: CGFloat = 400
+    /// When false the editor draws no background, clipping or border, so its parent can draw
+    /// them.
+    var isBordered = true
 
     var body: some View {
+        if isBordered {
+            editor
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+        } else {
+            editor
+        }
+    }
+
+    private var editor: some View {
         FormattingTextViewRepresentable(
             text: $text,
             controller: controller,
             accessibilityLabel: accessibilityLabel,
             heightRange: minHeight...maxHeight
         )
-        .background(Color(nsColor: .textBackgroundColor))
         .overlay(alignment: .topLeading) {
             if let placeholder, text.length == 0 {
                 Text(placeholder)
+                    .font(.system(size: RichTextBridge.bodyFontSize))
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 8)
@@ -474,8 +514,6 @@ struct RichTextEditor: View {
                     .accessibilityHidden(true)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
     }
 }
 
@@ -501,6 +539,7 @@ private struct FormattingTextViewRepresentable: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.setContents(text)
+        textView.onFocusChange = { [weak controller] in controller?.isFocused = $0 }
         controller.textView = textView
 
         let scrollView = NSScrollView()
