@@ -5,6 +5,7 @@ import WritingAssistantCore
 /// sheet of paper.
 struct ComposerView: View {
     @Bindable var model: AppModel
+    @Environment(\.theme) private var theme
     @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.controlActiveState) private var controlActiveState
@@ -35,7 +36,7 @@ struct ComposerView: View {
                 onClear: clear
             )
         }
-        .background(Theme.paper, in: sheetShape)
+        .background(theme.paper, in: sheetShape)
         .clipShape(sheetShape)
         .overlay(
             sheetShape
@@ -61,7 +62,7 @@ struct ComposerView: View {
     private var showsFocus: Bool { inputController.isFocused && controlActiveState == .key }
 
     private var borderColor: Color {
-        showsFocus ? Theme.ink.opacity(0.6) : Theme.rule
+        showsFocus ? theme.ink.opacity(0.6) : theme.rule
     }
 }
 
@@ -139,24 +140,25 @@ private struct ChipBody<Label: View>: View {
     let isSelected: Bool
     let isPressed: Bool
     @ViewBuilder let label: Label
+    @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     var body: some View {
         label
             .font(.callout)
-            .foregroundStyle(isSelected ? Theme.ink : Color.primary)
+            .foregroundStyle(isSelected ? theme.ink : Color.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(fill, in: Capsule())
-            .overlay(Capsule().strokeBorder(isSelected ? Theme.ink : Theme.rule, lineWidth: 1))
+            .overlay(Capsule().strokeBorder(isSelected ? theme.ink : theme.rule, lineWidth: 1))
             .contentShape(Capsule())
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: isSelected)
     }
 
     private var fill: Color {
-        if isSelected { return Theme.ink.opacity(0.15) }
+        if isSelected { return theme.ink.opacity(0.15) }
         if isPressed { return Color.primary.opacity(0.10) }
         return isHovered ? Color.primary.opacity(0.06) : .clear
     }
@@ -206,13 +208,14 @@ private struct ActionRow: View {
 private struct LengthMeter: View {
     let length: Int
     let isOverLimit: Bool
+    @Environment(\.theme) private var theme
 
     private var limit: String { PolishService.maxInputLength.formatted() }
 
     var body: some View {
         Text("\(length.formatted()) / \(limit)")
             .font(.callout.monospacedDigit())
-            .foregroundStyle(isOverLimit ? Theme.redPencil : .secondary)
+            .foregroundStyle(isOverLimit ? theme.redPencil : .secondary)
             .accessibilityLabel(
                 isOverLimit
                     ? "\(length.formatted()) characters, over the limit of \(limit)"
@@ -227,6 +230,7 @@ private struct PolishButton: View {
     let isOverLimit: Bool
     let requestStartedAt: Date?
     let action: () -> Void
+    @Environment(\.theme) private var theme
 
     var body: some View {
         Button {
@@ -234,7 +238,7 @@ private struct PolishButton: View {
         } label: {
             label
                 .foregroundStyle(
-                    isOverLimit ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.paper)
+                    isOverLimit ? AnyShapeStyle(.secondary) : AnyShapeStyle(theme.paper)
                 )
                 .frame(minWidth: 150)
         }

@@ -6,6 +6,7 @@ import WritingAssistantCore
 struct WritingAssistantApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+    @State private var themeSettings = ThemeSettings()
     private let store: PromptStore
     private let newerDefaults: Set<PromptFile>
 
@@ -29,7 +30,8 @@ struct WritingAssistantApp: App {
         Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
-                .tint(Theme.ink)
+                .environment(\.theme, themeSettings.palette)
+                .tint(themeSettings.palette.ink)
                 .task { await model.checkReadiness() }
                 .handsMainWindowOpener(to: appDelegate)
         }
@@ -41,9 +43,15 @@ struct WritingAssistantApp: App {
         }
 
         Settings {
-            PromptEditorView(store: store, newerDefaults: newerDefaults)
-                .tint(Theme.ink)
-                .handsMainWindowOpener(to: appDelegate)
+            TabView {
+                PromptEditorView(store: store, newerDefaults: newerDefaults)
+                    .tabItem { Label("Prompts", systemImage: "doc.text") }
+                AppearanceSettingsView(settings: themeSettings)
+                    .tabItem { Label("Appearance", systemImage: "paintpalette") }
+            }
+            .environment(\.theme, themeSettings.palette)
+            .tint(themeSettings.palette.ink)
+            .handsMainWindowOpener(to: appDelegate)
         }
     }
 }
@@ -117,6 +125,7 @@ struct LearningLogCommands: Commands {
 /// The single stacked column: composer, error banner, results, on the desk.
 struct MainWindowView: View {
     let model: AppModel
+    @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -143,7 +152,7 @@ struct MainWindowView: View {
                 }
             }
         }
-        .background(Theme.desk)
+        .background(theme.desk)
         .toolbar {
             ToolbarItem(placement: .primaryAction) { HistoryButton(model: model) }
         }

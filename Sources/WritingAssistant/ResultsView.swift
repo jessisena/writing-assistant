@@ -66,12 +66,13 @@ private struct SkeletonCards: View {
     }
 }
 
-/// A flat card on `Theme.paper` with a `Theme.rule` border: a title, an optional accessory view
-/// at the trailing edge, a hairline and the content.
+/// A flat card on the theme's paper with a rule border: a title, an optional accessory view at
+/// the trailing edge, a hairline and the content.
 struct ResultCard<Accessory: View, Content: View>: View {
     let title: String
     @ViewBuilder let accessory: Accessory
     @ViewBuilder let content: Content
+    @Environment(\.theme) private var theme
 
     init(
         title: String,
@@ -95,13 +96,13 @@ struct ResultCard<Accessory: View, Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            Theme.rule.frame(height: 1)
+            theme.rule.frame(height: 1)
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
         }
-        .background(Theme.paper, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.rule))
+        .background(theme.paper, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.rule))
     }
 }
 
