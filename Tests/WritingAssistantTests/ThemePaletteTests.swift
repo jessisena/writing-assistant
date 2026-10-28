@@ -36,12 +36,21 @@ import Testing
         #expect(palette.ink.hex(in: .aqua) == 0x00_0000)
         #expect(palette.ink.hex(in: .darkAqua) == 0xFF_FFFF)
     }
+
+    @Test func sameValueGivesAnEqualColor() {
+        let lagoon = ThemePreset.lagoon.palette
+        var custom = ThemePreset.writingDesk.palette
+        custom.colors[.ink] = lagoon[.ink]
+
+        #expect(lagoon.ink == lagoon.ink)
+        #expect(custom.ink == lagoon.ink)
+        #expect(lagoon.ink != ThemePreset.writingDesk.palette.ink)
+    }
 }
 
 extension Color {
-    /// The colour in sRGB as drawn under the named appearance. Palette colours are compared this
-    /// way because each `ThemePalette.color(_:)` call makes a new dynamic colour, and two of them
-    /// are never `==`.
+    /// The colour in sRGB as drawn under the named appearance, to check what a dynamic palette
+    /// colour actually draws.
     @MainActor
     func resolved(in appearanceName: NSAppearance.Name) -> NSColor? {
         guard let appearance = NSAppearance(named: appearanceName) else { return nil }

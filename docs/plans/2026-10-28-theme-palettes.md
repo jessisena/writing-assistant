@@ -65,7 +65,7 @@ implementation by screenshots in both appearances.
   `ColorPicker` "Dark" (`supportsOpacity: false`); a "Reset to preset" button enabled when
   customised. Changes apply live to the open main window.
 - `ColorPicker` → hex: `NSColor(color).usingColorSpace(.sRGB)` rounded to `UInt32`; a small
-  `UInt32(hex:)` helper next to `NSColor(hex:)`.
+  `NSColor.hexValue` next to `NSColor(hex:)`.
 
 ## Tests (`Tests/WritingAssistantTests/ThemeSettingsTests.swift`, new; `TestDefaults.make()`)
 - Default is Writing Desk with no overrides; its palette equals today's hex values.
@@ -97,7 +97,7 @@ session manages the work and runs subagents in parallel worktrees.
   remove the static tokens from `Theme.swift`, update `DiffView` and `DiffViewTests`, add the
   palette-resolves-per-appearance test. Wire `themeSettings` + `.environment`/`.tint` into the
   main window scene in `WritingAssistantApp.swift`.
-- **C: Appearance tab.** `AppearanceSettingsView.swift`, the `UInt32(hex:)` helper with its
+- **C: Appearance tab.** `AppearanceSettingsView.swift`, `NSColor.hexValue` with its
   round-trip test, the Settings `TabView` in `WritingAssistantApp.swift` (only the `Settings`
   scene; B owns the `Window` scene, so the one-file overlap is in separate blocks).
 

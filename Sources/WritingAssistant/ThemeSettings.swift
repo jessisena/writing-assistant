@@ -7,7 +7,8 @@ import os
 /// Saved under `defaultsKey` as a JSON string, so `defaults write` or an agent can set a theme:
 /// `{"preset":"lagoon","overrides":{"ink":{"light":"#025F67","dark":"#6FCFC6"}}}`.
 /// `preset` is a `ThemePreset` raw value, override keys are `ThemeToken` raw values and colours
-/// are `#RRGGBB`; `overrides` may be left out. A value that doesn't parse loads as Writing Desk without overrides.
+/// are `#RRGGBB`; `overrides` may be left out. A value that doesn't parse loads as Writing Desk
+/// without overrides.
 @MainActor @Observable final class ThemeSettings {
     static let defaultsKey = "theme"
 

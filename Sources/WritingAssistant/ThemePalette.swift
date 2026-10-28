@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 /// One of the app's six colour roles.
 enum ThemeToken: String, Codable, CaseIterable, Sendable {
@@ -36,7 +37,7 @@ enum ThemeAppearance: String, Codable, CaseIterable, Sendable {
 }
 
 /// A token's `0xRRGGBB` value in the light and the dark appearance.
-struct ThemeColor: Codable, Equatable, Sendable {
+struct ThemeColor: Codable, Hashable, Sendable {
     var light: UInt32
     var dark: UInt32
 
@@ -66,12 +67,21 @@ struct ThemePalette: Equatable, Sendable {
 
     func color(_ token: ThemeToken) -> Color {
         let value = self[token]
-        let color = NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return NSColor(hex: isDark ? value.dark : value.light)
+        return Self.cache.withLock { cache in
+            if let color = cache[value] { return color }
+            let nsColor = NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                return NSColor(hex: isDark ? value.dark : value.light)
+            }
+            let color = Color(nsColor: nsColor)
+            cache[value] = color
+            return color
         }
-        return Color(nsColor: color)
     }
+
+    /// One `Color` per value. Each dynamic `NSColor` is a distinct object, so without this two
+    /// colours for the same token compare unequal and SwiftUI sees the tint change on every body.
+    private static let cache = OSAllocatedUnfairLock(initialState: [ThemeColor: Color]())
 
     var ink: Color { color(.ink) }
     var paper: Color { color(.paper) }
