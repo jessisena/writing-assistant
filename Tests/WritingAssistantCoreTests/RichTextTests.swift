@@ -67,6 +67,16 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         #expect(RichText.markdown(from: text) == "a b")
     }
 
+    @Test(arguments: [
+        plain("see https://example.com/a_b or www.x.com, mail me@x.com"),
+        styled("https://x", .stronglyEmphasized) + plain(".com"),
+        plain("go to ") + styled("https://x.com", .code),
+    ])
+    func plainURLTextRoundTripsWithoutBecomingALink(text: AttributedString) {
+        let markdown = RichText.markdown(from: text)
+        #expect(parse(markdown) == text, "\(markdown)")
+    }
+
     @Test func adjacentDifferentLinksStaySeparate() {
         let text = parse("[a](https://a.com)[b](https://b.com)")
         #expect(RichText.markdown(from: text) == "[a](https://a.com)[b](https://b.com)")
@@ -88,6 +98,38 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         let styledWords = intents(of: reparsed).filter { $0.1 != nil }.map(\.0)
         let expectedWords = intents(of: text).filter { $0.1 != nil }.map(\.0).map(wordPart)
         #expect(styledWords == expectedWords.filter { !$0.isEmpty })
+    }
+
+    /// Emoji made of several code points, such as keycaps (`*️⃣` starts with `*`) and `‼️`
+    /// (punctuation plus a variation selector): the parser reads the code points, not the
+    /// characters, when it escapes and decides whether a marker flanks.
+    @Test(arguments: [
+        (styled("*️⃣ done", .stronglyEmphasized), "**\\*️⃣ done**"),
+        (plain("go ") + styled("*️⃣", .emphasized) + plain(" now"), "go *\\*️⃣* now"),
+        (plain("wow ") + styled("‼️ yes", .stronglyEmphasized), "wow **‼️ yes**"),
+        (styled("yes 👍🏽", .stronglyEmphasized) + plain(" ok"), "**yes 👍🏽** ok"),
+        (styled("#️⃣ tag", .emphasized), "*#️⃣ tag*"),
+        (styled("wow‼️", .stronglyEmphasized) + plain("x"), "**wow‼️**x"),
+        (plain("x") + styled("❤️", .emphasized), "x*❤️*"),
+    ])
+    func emojiInsideEmphasisKeepsItsStyle(text: AttributedString, expected: String) {
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == expected)
+        #expect(parse(markdown) == text)
+    }
+
+    /// Glued to a word, an emoji that starts with punctuation can't take a marker, so it moves
+    /// outside it like other edge punctuation, instead of leaving literal `**` in the text.
+    @Test(arguments: [
+        (plain("wow") + styled("‼️", .stronglyEmphasized), "wow‼️"),
+        (plain("a") + styled("#️⃣b", .emphasized), "a#️⃣*b*"),
+    ])
+    func emojiStartingWithPunctuationNextToAWordMovesOutsideMarkers(
+        text: AttributedString, expected: String
+    ) {
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == expected)
+        #expect(String(parse(markdown).characters) == String(text.characters))
     }
 
     @Test(arguments: ["  ", " ", "   "])
@@ -150,6 +192,52 @@ private func wordPart(_ text: String) -> String {
         let link = text.runs.compactMap(\.link).first
         #expect(link == URL(string: "https://example.com"))
         #expect(String(text.characters) == "see docs")
+    }
+
+    @Test(arguments: [
+        "see https://example.com now", "HTTP://X.COM", "ftp://x.com/a", "www.example.com",
+        "(www.x.com)", "mail me@x.com", "mailto:me@x.com", "xmpp:me@x.com",
+        "**https://x.com** and *www.x.com*", "a < https://x.com > b", "- https://x.com",
+    ])
+    func bareURLStaysPlainText(markdown: String) {
+        let text = parse(markdown)
+        #expect(text.runs.allSatisfy { $0.link == nil })
+        let expected = markdown.replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "- ", with: "• ")
+        #expect(String(text.characters) == expected)
+    }
+
+    @Test(arguments: [
+        ("[https://x.com](https://x.com)", "https://x.com", "https://x.com"),
+        ("<https://x.com>", "https://x.com", "https://x.com"),
+        ("[www.x.com](https://www.x.com)", "www.x.com", "https://www.x.com"),
+        ("[me@x.com](mailto:me@x.com)", "me@x.com", "mailto:me@x.com"),
+        ("<me@x.com>", "me@x.com", "mailto:me@x.com"),
+        ("<mailto:me@x.com>", "mailto:me@x.com", "mailto:me@x.com"),
+        ("[a](<https://x.com/a(b)>)", "a", "https://x.com/a(b)"),
+        ("**[see https://y.com](https://x.com)**", "see https://y.com", "https://x.com"),
+    ])
+    func explicitLinkKeepsItsTarget(markdown: String, label: String, target: String) {
+        let text = parse(markdown)
+        let links = text.runs[\.link].compactMap { link, range in
+            link.map { (String(text[range].characters), $0.absoluteString) }
+        }
+        #expect(links.count == 1)
+        #expect(links.first?.0 == label)
+        #expect(links.first?.1 == target)
+    }
+
+    @Test(arguments: ["`https://x.com`", "<span title=\"https://x.com\">", "``a`www.x.com``"])
+    func urlInCodeOrHTMLStaysVerbatim(markdown: String) {
+        let text = parse(markdown)
+        #expect(!String(text.characters).contains("\\"))
+        #expect(text.runs.allSatisfy { $0.link == nil })
+    }
+
+    @Test func autolinkDoesNotSwallowEmphasisMarkers() {
+        let text = parse("**https://x**.com")
+        #expect(intents(of: text).map(\.0) == ["https://x", ".com"])
+        #expect(intents(of: text).map(\.1) == [.stronglyEmphasized, nil])
     }
 
     @Test func bulletLinesGetBulletPrefix() {

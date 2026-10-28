@@ -171,7 +171,10 @@ A corrupt manifest is logged, treated as missing and rewritten.
 ### Rich text
 
 `RichText` (Core) converts between the Markdown subset and `AttributedString` with inline
-presentation intents, and renders HTML and plain text. `plainText(from:)` drops link targets, for
+presentation intents, and renders HTML and plain text. Only `[text](url)` and `<url>` make links:
+bare URLs and email addresses stay plain text, since Foundation's parser would otherwise
+autolink them. Emphasis markers are placed by code point, as the parser reads them, so emoji
+inside bold or italic keep their style. `plainText(from:)` drops link targets, for
 the diff and history previews; `clipboardText(from:)` writes them as `label (url)` for the plain
 clipboard flavor. `RichTextBridge` (app) converts between
 `AttributedString` and the `NSAttributedString` the editors use (font traits, strikethrough,
