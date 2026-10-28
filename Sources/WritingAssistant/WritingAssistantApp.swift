@@ -6,6 +6,7 @@ import WritingAssistantCore
 struct WritingAssistantApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+    @State private var themeSettings = ThemeSettings()
     private let store: PromptStore
     private let newerDefaults: Set<PromptFile>
 
