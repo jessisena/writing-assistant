@@ -46,6 +46,23 @@ enum DiffDisplay {
         }
     }
 
+    /// The number of changes: runs of removed and added segments. A removed segment followed by
+    /// an added one is one change. Unchanged text made only of whitespace between two changes
+    /// doesn't separate them, so a rewritten phrase counts once; any unchanged word does.
+    static func changeCount(_ segments: [DiffSegment]) -> Int {
+        var count = 0
+        var inRun = false
+        for segment in segments {
+            if segment.kind != .same {
+                if !inRun { count += 1 }
+                inRun = true
+            } else if !segment.text.allSatisfy(\.isWhitespace) {
+                inRun = false
+            }
+        }
+        return count
+    }
+
     /// A VoiceOver description that names each change, such as
     /// "I, removed: will to review, added: 'll review, the doc".
     static func accessibilityText(_ segments: [DiffSegment]) -> String {

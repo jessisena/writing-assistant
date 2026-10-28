@@ -47,6 +47,57 @@ import WritingAssistantCore
         #expect(run.strikethroughStyle == nil)
     }
 
+    @Test func noSegmentsHaveNoChanges() {
+        #expect(DiffDisplay.changeCount([]) == 0)
+    }
+
+    @Test func unchangedTextHasNoChanges() {
+        #expect(DiffDisplay.changeCount([DiffSegment(kind: .same, text: "Same text")]) == 0)
+    }
+
+    @Test func removedTextFollowedByAddedTextIsOneChange() {
+        #expect(DiffDisplay.changeCount(replacement) == 1)
+    }
+
+    @Test func aLoneRemovalOrAdditionIsOneChange() {
+        #expect(DiffDisplay.changeCount([DiffSegment(kind: .removed, text: "um ")]) == 1)
+        #expect(DiffDisplay.changeCount([DiffSegment(kind: .added, text: "so ")]) == 1)
+    }
+
+    @Test func changesSeparatedByUnchangedWordsAreCountedSeparately() {
+        let segments = [
+            DiffSegment(kind: .removed, text: "will"),
+            DiffSegment(kind: .added, text: "would"),
+            DiffSegment(kind: .same, text: " review the doc "),
+            DiffSegment(kind: .removed, text: "tomorrow"),
+        ]
+
+        #expect(DiffDisplay.changeCount(segments) == 2)
+    }
+
+    @Test func changesSeparatedOnlyByWhitespaceAreOneChange() {
+        let segments = [
+            DiffSegment(kind: .removed, text: "very"),
+            DiffSegment(kind: .same, text: " \n"),
+            DiffSegment(kind: .added, text: "really"),
+            DiffSegment(kind: .same, text: " "),
+            DiffSegment(kind: .removed, text: "good"),
+        ]
+
+        #expect(DiffDisplay.changeCount(segments) == 1)
+    }
+
+    @Test func aWhitespaceOnlyChangeCountsAsAChange() {
+        let segments = [
+            DiffSegment(kind: .same, text: "one"),
+            DiffSegment(kind: .removed, text: "  "),
+            DiffSegment(kind: .added, text: "\n"),
+            DiffSegment(kind: .same, text: "two"),
+        ]
+
+        #expect(DiffDisplay.changeCount(segments) == 1)
+    }
+
     @Test func accessibilityTextNamesRemovedAndAddedParts() {
         #expect(
             DiffDisplay.accessibilityText(replacement)
