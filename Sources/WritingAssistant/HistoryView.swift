@@ -130,7 +130,7 @@ private struct HistoryRow: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .background(
-            isCurrent ? Color.accentColor.opacity(0.12) : .clear,
+            isCurrent ? Theme.ink.opacity(0.12) : .clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
     }
