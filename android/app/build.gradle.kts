@@ -51,6 +51,8 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // Robolectric's SDK 36 runtime reads jdk.internal.access, which JDK 21 doesn't export.
+        unitTests.all { it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED") }
     }
 
     lint {

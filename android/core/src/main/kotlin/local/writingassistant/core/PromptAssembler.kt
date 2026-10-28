@@ -6,13 +6,22 @@ import java.io.File
 class PromptAssembler(
     private val reader: PromptReading,
 ) {
-    /** `polish.txt` with the placeholder replaced by the channel file (both trimmed). */
-    fun assemble(channel: Channel): String = TODO("core worker ($reader, $channel)")
+    /**
+     * Returns `polish.txt` with the placeholder replaced by the channel file (both trimmed).
+     *
+     * @throws java.io.IOException when either file can't be read.
+     */
+    fun assemble(channel: Channel): String {
+        val global = reader.read(PromptFile.Global).trim()
+        val guidelines = reader.read(PromptFile.ForChannel(channel)).trim()
+        return global.replace(PromptFile.CHANNEL_PLACEHOLDER, guidelines)
+    }
 }
 
 /** Reads prompt files from a directory laid out like the bundled `Prompts` folder. */
 class DirectoryPromptReader(
     private val directory: File,
 ) : PromptReading {
-    override fun read(file: PromptFile): String = TODO("core worker ($directory, $file)")
+    override fun read(file: PromptFile): String =
+        File(directory, file.relativePath).readText(Charsets.UTF_8)
 }
