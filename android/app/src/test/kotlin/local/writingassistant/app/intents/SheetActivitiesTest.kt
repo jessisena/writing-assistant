@@ -127,10 +127,11 @@ class SheetActivitiesTest {
     fun missingKeyAsksForItThenReturnsToTheComposer() {
         app.graph.apiKeyStore.key = null
         ActivityScenario.launch<ShareActivity>(share("hello")).use {
-            compose.onNodeWithText("Anthropic API key").performTextInput("sk-ant-test")
+            // Replace, not append: debug builds prefill the field from local.properties.
+            compose.onNodeWithText("Anthropic API key").performTextReplacement("sk-ant-test")
             compose.onNodeWithText("Save").performClick()
             compose.waitForIdle()
-            assertEquals("sk-ant-test", app.graph.apiKeyStore.key)
+            assertTrue("the typed key was not stored", app.graph.apiKeyStore.key == "sk-ant-test")
             polish()
             compose.onNodeWithText("polished: hello").assertExists()
         }
