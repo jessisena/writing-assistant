@@ -30,7 +30,8 @@ struct WritingAssistantApp: App {
         Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
-                .tint(Theme.ink)
+                .environment(\.theme, themeSettings.palette)
+                .tint(themeSettings.palette.ink)
                 .task { await model.checkReadiness() }
                 .handsMainWindowOpener(to: appDelegate)
         }
@@ -124,6 +125,7 @@ struct LearningLogCommands: Commands {
 /// The single stacked column: composer, error banner, results, on the desk.
 struct MainWindowView: View {
     let model: AppModel
+    @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -150,7 +152,7 @@ struct MainWindowView: View {
                 }
             }
         }
-        .background(Theme.desk)
+        .background(theme.desk)
         .toolbar {
             ToolbarItem(placement: .primaryAction) { HistoryButton(model: model) }
         }

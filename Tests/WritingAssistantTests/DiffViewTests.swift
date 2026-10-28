@@ -6,6 +6,7 @@ import WritingAssistantCore
 @testable import WritingAssistant
 
 @Suite struct DiffDisplayTests {
+    private let palette = ThemePreset.lagoon.palette
     private let replacement = [
         DiffSegment(kind: .same, text: "I "),
         DiffSegment(kind: .removed, text: "will to review"),
@@ -14,36 +15,54 @@ import WritingAssistantCore
     ]
 
     @Test func textKeepsEverySegmentInOrder() {
-        let text = DiffDisplay.attributedText(replacement)
+        let text = DiffDisplay.attributedText(replacement, palette: palette)
 
         #expect(String(text.characters) == "I will to review'll review the doc 👍")
     }
 
-    @Test func removedTextIsRedPencilStruckThroughOnATint() throws {
-        let text = DiffDisplay.attributedText(replacement)
+    @MainActor
+    @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+    func removedTextIsRedPencilStruckThroughOnATint(appearance: NSAppearance.Name) throws {
+        let text = DiffDisplay.attributedText(replacement, palette: palette)
 
         let removed = try #require(text.range(of: "will to review"))
         let run = try #require(text[removed].runs.first)
-        #expect(run.foregroundColor == Theme.redPencil)
-        #expect(run.backgroundColor == Theme.redPencil.opacity(0.12))
+        let foreground = try #require(run.foregroundColor)
+        let background = try #require(run.backgroundColor)
+        #expect(foreground.hex(in: appearance) == palette.redPencil.hex(in: appearance))
+        #expect(background.hex(in: appearance) == palette.redPencil.hex(in: appearance))
+        #expect(isAlpha(of: background, in: appearance, about: 0.12))
         #expect(run.strikethroughStyle == .single)
         #expect(run.underlineStyle == nil)
         #expect(text[removed].runs.count == 1)
     }
 
-    @Test func addedTextIsMarginGreenUnderlinedOnATint() throws {
-        let text = DiffDisplay.attributedText(replacement)
+    @MainActor
+    @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+    func addedTextIsMarginGreenUnderlinedOnATint(appearance: NSAppearance.Name) throws {
+        let text = DiffDisplay.attributedText(replacement, palette: palette)
 
         let added = try #require(text.range(of: "'ll review"))
         let run = try #require(text[added].runs.first)
-        #expect(run.foregroundColor == Theme.marginGreen)
-        #expect(run.backgroundColor == Theme.marginGreen.opacity(0.14))
+        let foreground = try #require(run.foregroundColor)
+        let background = try #require(run.backgroundColor)
+        #expect(foreground.hex(in: appearance) == palette.marginGreen.hex(in: appearance))
+        #expect(background.hex(in: appearance) == palette.marginGreen.hex(in: appearance))
+        #expect(isAlpha(of: background, in: appearance, about: 0.14))
         #expect(run.underlineStyle == .single)
         #expect(run.strikethroughStyle == nil)
     }
 
+    @MainActor
+    private func isAlpha(
+        of color: Color, in appearance: NSAppearance.Name, about expected: CGFloat
+    ) -> Bool {
+        guard let alpha = color.resolved(in: appearance)?.alphaComponent else { return false }
+        return abs(alpha - expected) < 0.001
+    }
+
     @Test func unchangedTextHasNoStyling() throws {
-        let text = DiffDisplay.attributedText(replacement)
+        let text = DiffDisplay.attributedText(replacement, palette: palette)
 
         let same = try #require(text.range(of: " the doc 👍"))
         let run = try #require(text[same].runs.first)
@@ -135,7 +154,7 @@ import WritingAssistantCore
     }
 
     @Test func noSegmentsGiveEmptyTextAndNoChangesDescription() {
-        #expect(DiffDisplay.attributedText([]).characters.isEmpty)
+        #expect(DiffDisplay.attributedText([], palette: palette).characters.isEmpty)
         #expect(DiffDisplay.accessibilityText([]) == "No changes")
     }
 

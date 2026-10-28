@@ -95,6 +95,7 @@ private struct HistoryRow: View {
     let isCurrent: Bool
     let onRestore: () -> Void
     let onDelete: () -> Void
+    @Environment(\.theme) private var theme
 
     private var preview: String { Self.firstLine(of: entry.outputMarkdown) }
 
@@ -130,7 +131,7 @@ private struct HistoryRow: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .background(
-            isCurrent ? Theme.ink.opacity(0.12) : .clear,
+            isCurrent ? theme.ink.opacity(0.12) : .clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
     }

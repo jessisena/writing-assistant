@@ -108,15 +108,16 @@ private struct CorrectionRow: View {
 
 private struct GrammarInsight: View {
     let text: String
+    @Environment(\.theme) private var theme
 
     var body: some View {
         Text(text)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.ink.opacity(0.06))
+            .background(theme.ink.opacity(0.06))
             .overlay(alignment: .leading) {
-                Rectangle().fill(Theme.ink).frame(width: 3)
+                Rectangle().fill(theme.ink).frame(width: 3)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
     }
