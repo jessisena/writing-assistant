@@ -197,12 +197,16 @@ private struct PolishButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            label.frame(minWidth: 150)
+        Button {
+            if !isLoading { action() }
+        } label: {
+            label
+                .foregroundStyle(Theme.paper)
+                .frame(minWidth: 150)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(isLoading || isOverLimit)
+        .disabled(isOverLimit)
         .keyboardShortcut(.return, modifiers: .command)
         .accessibilityLabel(isLoading ? "Polishing" : "Polish")
         .help(isOverLimit ? tooLongHelp : "Polish the text (⌘↵)")
