@@ -81,7 +81,7 @@ vocabulary. Translated input has no learning summary.
 | ⌘K | Clear |
 | Esc | Cancel a running request |
 | ⌘Y | History |
-| ⌘, | Settings (prompt editor) |
+| ⌘, | Settings (prompts and appearance) |
 
 ### Polish from any app
 
@@ -176,6 +176,28 @@ a change applies to the next request with no restart. The Settings sidebar has a
 - **Reveal in Finder** shows the selected file in Finder.
 
 The bundled defaults live in `Sources/WritingAssistantCore/Resources/Prompts/`.
+
+---
+
+## Appearance
+
+**Settings (⌘,) → Appearance** picks the app's colours. Choose one of three presets (Writing
+Desk, Lagoon, Sepia), then change any of its six colours: Accent, Sheet, Background, Dividers,
+Removed text and Added text. Each colour has a Light and a Dark value, and the app follows the
+system appearance. Changes apply to the open window right away. **Reset to Preset** drops your
+custom colours; choosing another preset drops them too.
+
+The theme is stored as a JSON string under the `theme` key of the app's defaults, so it can also
+be set from the command line (the app reads it at launch):
+
+```sh
+defaults write local.writing-assistant theme \
+  '{"preset":"lagoon","overrides":{"ink":{"light":"#025F67","dark":"#6FCFC6"}}}'
+```
+
+`preset` is `writingDesk`, `lagoon` or `sepia`; override keys are `ink`, `paper`, `desk`, `rule`,
+`redPencil` and `marginGreen`; `overrides` can be left out. A value the app can't read is logged
+and replaced by Writing Desk.
 
 ---
 

@@ -122,12 +122,17 @@ Sources/WritingAssistant/            SwiftUI executable
   DiffView.swift                     read-only diff of input against output
   HistoryView.swift                  History button (⌘Y) and popover
   ServiceProvider.swift              "Polish with Writing Assistant" service
-  PromptEditorView.swift             prompt editor (Settings window)
+  PromptEditorView.swift             prompt editor (Settings → Prompts)
   PromptEditorModel.swift            editor state: selection, dirty tracking, validation,
                                      newer-default notices
+  ThemePalette.swift                 ThemeToken, ThemeColor, ThemePalette, the 3 presets,
+                                     the `theme` environment value
+  ThemeSettings.swift                @Observable preset + custom colours, saved in UserDefaults
+  AppearanceSettingsView.swift       preset cards and colour pickers (Settings → Appearance)
+  NSColor+Hex.swift                  0xRRGGBB ↔ sRGB NSColor
 Tests/WritingAssistantCoreTests/     Swift Testing, Core logic
 Tests/WritingAssistantTests/         Swift Testing, AppModel, PromptEditorModel, RichTextBridge,
-                                     DiffView and ServiceProvider
+                                     DiffView, ServiceProvider and theme settings
 Resources/                           Info.plist (with NSServices), AppIcon.icns, icon-1024.png
 scripts/build_app.sh                 build, assemble, sign, install
 scripts/test.sh                      swift test with Command Line Tools framework paths
@@ -187,6 +192,20 @@ and reads plain text in the base style with `-`/`*` list markers turned into bul
 `RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
 editor lets each `FormattingToolbar` act on its own editor. The Format menu sends to the first
 responder.
+
+### Theme
+
+Views draw with six tokens (`ink`, `paper`, `desk`, `rule`, `redPencil`, `marginGreen`) read
+from `@Environment(\.theme)`, a `ThemePalette`. Each token is a light and a dark `0xRRGGBB`
+value, turned into a dynamic `NSColor` that follows the appearance of the view it is drawn in;
+one `Color` is cached per value, so equal palettes give equal colours. `ThemeSettings` (owned by
+the app, applied to both scenes with `.environment(\.theme, …)` and `.tint(palette.ink)`) holds a
+`ThemePreset` plus per-token overrides; `palette` merges the two, and choosing a preset clears the
+overrides. Every change is saved as a JSON string under the `theme` UserDefaults key
+(`{"preset":"lagoon","overrides":{"ink":{"light":"#025F67","dark":"#6FCFC6"}}}`); a value that
+doesn't parse is logged and loads as Writing Desk. System colours (error banner, prompt editor
+notices) are not themed. `EnvironmentValues.theme` uses a plain `EnvironmentKey`, since `@Entry`
+needs a macro plugin that ships only with Xcode.
 
 ### Diff, learning log and history
 
