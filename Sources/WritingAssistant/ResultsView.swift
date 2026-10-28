@@ -18,7 +18,7 @@ struct ResultsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .top) {
             switch phase {
             case .loading:
                 SkeletonCards().transition(.opacity)
