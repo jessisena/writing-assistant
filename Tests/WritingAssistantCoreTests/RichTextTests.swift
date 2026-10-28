@@ -90,6 +90,38 @@ private func intents(of text: AttributedString) -> [(String, InlinePresentationI
         #expect(styledWords == expectedWords.filter { !$0.isEmpty })
     }
 
+    /// Emoji made of several code points, such as keycaps (`*️⃣` starts with `*`) and `‼️`
+    /// (punctuation plus a variation selector): the parser reads the code points, not the
+    /// characters, when it escapes and decides whether a marker flanks.
+    @Test(arguments: [
+        (styled("*️⃣ done", .stronglyEmphasized), "**\\*️⃣ done**"),
+        (plain("go ") + styled("*️⃣", .emphasized) + plain(" now"), "go *\\*️⃣* now"),
+        (plain("wow ") + styled("‼️ yes", .stronglyEmphasized), "wow **‼️ yes**"),
+        (styled("yes 👍🏽", .stronglyEmphasized) + plain(" ok"), "**yes 👍🏽** ok"),
+        (styled("#️⃣ tag", .emphasized), "*#️⃣ tag*"),
+        (styled("wow‼️", .stronglyEmphasized) + plain("x"), "**wow‼️**x"),
+        (plain("x") + styled("❤️", .emphasized), "x*❤️*"),
+    ])
+    func emojiInsideEmphasisKeepsItsStyle(text: AttributedString, expected: String) {
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == expected)
+        #expect(parse(markdown) == text)
+    }
+
+    /// Glued to a word, an emoji that starts with punctuation can't take a marker, so it moves
+    /// outside it like other edge punctuation, instead of leaving literal `**` in the text.
+    @Test(arguments: [
+        (plain("wow") + styled("‼️", .stronglyEmphasized), "wow‼️"),
+        (plain("a") + styled("#️⃣b", .emphasized), "a#️⃣*b*"),
+    ])
+    func emojiStartingWithPunctuationNextToAWordMovesOutsideMarkers(
+        text: AttributedString, expected: String
+    ) {
+        let markdown = RichText.markdown(from: text)
+        #expect(markdown == expected)
+        #expect(String(parse(markdown).characters) == String(text.characters))
+    }
+
     @Test(arguments: ["  ", " ", "   "])
     func allSpaceCodeKeepsItsLength(spaces: String) {
         let text = plain("a") + styled(spaces, .code) + plain("b")

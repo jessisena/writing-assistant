@@ -43,7 +43,7 @@ private func characterStyles(of text: AttributedString) -> [CharacterStyle] {
     }
 }
 
-private let alphabet = Array("a .*_#-•`中![~\\")
+private let alphabet = Array("a .*_#-•`中![~\\👍👍🏽‼️❤️🇵🇹👨‍👩‍👧*️⃣#️⃣©")
 private let links = [URL(string: "https://a.com/x")!, URL(string: "https://b.com/(y)")!]
 private let intentChoices: [InlinePresentationIntent] = [
     .stronglyEmphasized, .emphasized, .strikethrough, .code,
@@ -114,8 +114,10 @@ private func checkRoundTrip(of line: AttributedString, wordsKeepStyle: Bool) {
     #expect(again == reparsed, "not stable: \(context)")
 }
 
+/// Whether `character` is part of a word for CommonMark: emoji and other non-ASCII symbols are.
 private func isWord(_ character: Character) -> Bool {
-    !character.isWhitespace && !character.isPunctuation && !character.isSymbol
+    let isASCIISymbol = character.isASCII && character.isSymbol
+    return !character.isWhitespace && !character.isPunctuation && !isASCIISymbol
 }
 
 @Suite struct RichTextPropertyTests {

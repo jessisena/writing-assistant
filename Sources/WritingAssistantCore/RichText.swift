@@ -244,15 +244,17 @@ extension RichText {
         }
     }
 
+    /// Escapes by code point, since the parser reads code points: the keycap emoji `*️⃣` starts
+    /// with a `*` that would otherwise open emphasis.
     static func escapeMarkdown(_ text: String) -> String {
-        var result = ""
-        for character in text {
-            if "\\*_~`[]<&".contains(character) {
+        var result = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if "\\*_~`[]<&".unicodeScalars.contains(scalar) {
                 result.append("\\")
             }
-            result.append(character)
+            result.append(scalar)
         }
-        return result
+        return String(result)
     }
 
     static func escapeLineStart(_ inline: String) -> String {
@@ -445,7 +447,10 @@ enum InlineMarkdown {
     ) -> (edge: String, rest: String)? {
         let characters = leading ? Array(text) : Array(text.reversed())
         let spaces = characters.prefix(while: \.isWhitespace).count
-        let marks = characters.dropFirst(spaces).prefix(while: Flanking.isPunctuation).count
+        let marks = characters.dropFirst(spaces).prefix { character in
+            let flanking = leading ? Flanking(after: character) : Flanking(before: character)
+            return flanking == .punctuation
+        }.count
         guard marks > 0 else {
             return nil
         }
@@ -464,22 +469,45 @@ enum InlineMarkdown {
 }
 
 /// CommonMark's character classes for deciding whether a delimiter run can open or close.
+///
+/// The parser reads code points, so a character is classed by its code point next to the
+/// delimiter: its last one when it comes before, its first one when it comes after. `‼️` is
+/// punctuation plus a variation selector, so it counts as a word before a delimiter and as
+/// punctuation after one.
 enum Flanking {
     case space
     case punctuation
     case word
 
-    init(_ character: Character?) {
-        guard let character, !character.isWhitespace else {
+    /// The class of the character that comes before a delimiter run.
+    init(before character: Character?) {
+        self.init(character?.unicodeScalars.last)
+    }
+
+    /// The class of the character that comes after a delimiter run.
+    init(after character: Character?) {
+        self.init(character?.unicodeScalars.first)
+    }
+
+    private init(_ scalar: Unicode.Scalar?) {
+        guard let scalar, !scalar.properties.isWhitespace else {
             self = .space
             return
         }
-        self = Self.isPunctuation(character) ? .punctuation : .word
+        self = Self.isPunctuation(scalar) ? .punctuation : .word
     }
 
     /// ASCII punctuation and symbols, plus Unicode punctuation (not other Unicode symbols).
-    static func isPunctuation(_ character: Character) -> Bool {
-        character.isPunctuation || (character.isASCII && character.isSymbol)
+    static func isPunctuation(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+            .initialPunctuation, .finalPunctuation, .otherPunctuation:
+            true
+        case .mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol:
+            scalar.isASCII
+        default:
+            false
+        }
     }
 
     static func canOpen(before: Flanking, after: Flanking) -> Bool {
@@ -561,8 +589,8 @@ struct MarkdownLineWriter {
             }
             let start = delimiters[first].start
             let end = delimiters[last].end
-            let before = Flanking(start > 0 ? output[start - 1] : nil)
-            let after = Flanking(end < output.count ? output[end] : nil)
+            let before = Flanking(before: start > 0 ? output[start - 1] : nil)
+            let after = Flanking(after: end < output.count ? output[end] : nil)
             let canOpen = Flanking.canOpen(before: before, after: after)
             let canClose = Flanking.canClose(before: before, after: after)
             let failure = delimiters[first...last].first {
