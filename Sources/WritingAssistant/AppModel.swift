@@ -12,10 +12,14 @@ struct ClipboardContent: Equatable, Sendable {
 /// State and actions for the main window.
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
+    static let channelDefaultsKey = "selectedChannel"
 
     var input = NSAttributedString()
     var output = NSAttributedString()
-    var channel: Channel = .formal
+    /// The channel to write for. Each change is saved, so the next launch starts with it.
+    var channel: Channel {
+        didSet { defaults.set(channel.rawValue, forKey: Self.channelDefaultsKey) }
+    }
     var isLoading: Bool { requests.isRunning }
     private(set) var result: PolishResult? {
         didSet { showsChanges = false }
@@ -26,6 +30,12 @@ struct ClipboardContent: Equatable, Sendable {
     var showsChanges = false
     private(set) var errorMessage: String?
     private(set) var copied = false
+    /// Counts successful copies, so views can react to every copy, even two within `copiedDuration`.
+    private(set) var copyGeneration = 0
+    /// When the running polish or refinement started. Nil when no request is running.
+    private(set) var requestStartedAt: Date?
+    /// The refinement that is running, or nil when none is (a polish request leaves it nil).
+    private(set) var runningRefinement: Refinement?
     /// Past requests, newest first. Change it only through the methods in `AppModel+History`.
     var history: [HistoryEntry] = []
     /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
@@ -38,6 +48,7 @@ struct ClipboardContent: Equatable, Sendable {
     }
 
     @ObservationIgnored let polisher: any Polishing
+    @ObservationIgnored private let defaults: UserDefaults
     /// Where `process()` writes each learning summary. Append only from the main actor.
     @ObservationIgnored let learningLog: LearningLog
     @ObservationIgnored let historyStore: HistoryStore
@@ -45,7 +56,6 @@ struct ClipboardContent: Equatable, Sendable {
     @ObservationIgnored let requests = RequestRunner()
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
-    @ObservationIgnored private var copyGeneration = 0
     @ObservationIgnored private var startupErrorMessage: String?
     /// False when the history file exists but couldn't be read or moved aside at launch. Saving
     /// is then skipped until the next launch, so the unread file is never overwritten.
@@ -63,15 +73,22 @@ struct ClipboardContent: Equatable, Sendable {
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
+    ///   - defaults: Where the selected channel is kept between launches. A missing or unknown
+    ///     saved value gives Formal document.
     init(
         polisher: any Polishing,
         learningLog: LearningLog = .standard(),
         historyStore: HistoryStore = .standard(),
         writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
-        sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        defaults: UserDefaults = .standard
     ) {
         self.polisher = polisher
+        self.defaults = defaults
+        channel =
+            defaults.string(forKey: Self.channelDefaultsKey).flatMap(Channel.init(rawValue:))
+            ?? .formal
         self.learningLog = learningLog
         self.historyStore = historyStore
         self.writeToPasteboard = writeToPasteboard
@@ -113,15 +130,20 @@ struct ClipboardContent: Equatable, Sendable {
     /// late answer from the stopped request is ignored.
     func cancel() {
         requests.cancel()
+        requestStartedAt = nil
+        runningRefinement = nil
     }
 
     /// Marks a request as running in `requests` and clears the error banner.
     ///
+    /// - Parameter refinement: The refinement this request applies, if it is one.
     /// - Returns: The request's generation for `finishRequest(_:_:)`, or nil when a request is
     ///   already running.
-    func beginRequest() -> Int? {
+    func beginRequest(refinement: Refinement? = nil) -> Int? {
         guard let generation = requests.begin() else { return nil }
+        runningRefinement = refinement
         errorMessage = nil
+        requestStartedAt = .now
         return generation
     }
 
@@ -132,7 +154,12 @@ struct ClipboardContent: Equatable, Sendable {
     func finishRequest<Value>(
         _ generation: Int, _ operation: () async throws(PolishError) -> Value
     ) async -> Value? {
-        switch await requests.finish(generation, operation) {
+        let outcome = await requests.finish(generation, operation)
+        if !requests.isRunning {
+            requestStartedAt = nil
+            runningRefinement = nil
+        }
+        switch outcome {
         case .success(let value):
             return value
         case .failure(let error):
@@ -178,13 +205,42 @@ struct ClipboardContent: Equatable, Sendable {
 
     /// Empties the input, the output, the result and the error banner, after saving the edited
     /// output to history. Ignored while a request is running.
-    func clear() {
+    ///
+    /// - Parameter undoManager: Gets an undo action named "Clear" that puts back what was on
+    ///   screen, including which history entry the output belongs to. The action does nothing
+    ///   while a request is running.
+    func clear(undoManager: UndoManager?) {
         guard !isLoading else { return }
+        let snapshot = ScreenSnapshot(
+            input: input, output: output, result: result, errorMessage: errorMessage,
+            historyID: currentHistoryID)
         errorMessage = nil
         leaveCurrentHistoryEntry()
         input = NSAttributedString()
         output = NSAttributedString()
         result = nil
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restore(snapshot) }
+        }
+        undoManager?.setActionName("Clear")
+    }
+
+    private struct ScreenSnapshot {
+        let input: NSAttributedString
+        let output: NSAttributedString
+        let result: PolishResult?
+        let errorMessage: String?
+        let historyID: UUID?
+    }
+
+    private func restore(_ snapshot: ScreenSnapshot) {
+        guard !isLoading else { return }
+        saveOutputToHistory()
+        input = snapshot.input
+        output = snapshot.output
+        result = snapshot.result
+        errorMessage = snapshot.errorMessage
+        currentHistoryID = snapshot.historyID
     }
 
     /// Puts a past request back on screen: `input` and the result, with the output editor

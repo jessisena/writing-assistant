@@ -109,7 +109,7 @@ import WritingAssistantCore
         await process(model, "Hello")
         model.output = NSAttributedString()
 
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(try saved().first?.outputMarkdown == PolishResult.sample.polishedText)
         #expect(model.currentHistoryID == nil)
@@ -136,7 +136,7 @@ import WritingAssistantCore
         await process(model, "Hello")
         model.output = AppModel.editorText(fromMarkdown: "Edited *before* clear")
 
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(try saved().first?.outputMarkdown == "Edited *before* clear")
         #expect(model.currentHistoryID == nil)
@@ -168,7 +168,7 @@ import WritingAssistantCore
 
         polisher.outcome = .failure(.claudeNotFound)
         await process(model, "Again")
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(try saved().map(\.outputMarkdown) == ["Edited first"])
         #expect(model.currentHistoryID == nil)
@@ -373,7 +373,8 @@ import WritingAssistantCore
             learningLog: LearningLog(fileURL: directory.appending(path: "learning-log.md")),
             historyStore: HistoryStore(fileURL: store.fileURL, limit: 2),
             writeToPasteboard: { _ in },
-            sleep: { _ in }
+            sleep: { _ in },
+            defaults: TestDefaults.make()
         )
 
         for text in ["One", "Two", "Three"] {

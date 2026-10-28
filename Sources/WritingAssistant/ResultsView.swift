@@ -1,29 +1,62 @@
+import AppKit
 import SwiftUI
 import WritingAssistantCore
 
-/// Polished text and learning summary cards, or skeleton cards while loading.
+/// Polished text and learning summary cards, skeleton cards while loading, or a hint when idle.
 struct ResultsView: View {
     @Bindable var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Phase {
+        case idle, loading, result
+    }
+
+    /// A refinement keeps the result on screen, so only a polish request shows the skeleton.
+    private var phase: Phase {
+        if model.isLoading && model.runningRefinement == nil { return .loading }
+        return model.result == nil ? .idle : .result
+    }
 
     var body: some View {
-        if model.isLoading {
-            SkeletonCards()
-        } else if let result = model.result {
-            VStack(spacing: 16) {
-                PolishedCard(model: model, result: result)
-                LearningSummaryCard(result: result)
+        ZStack(alignment: .top) {
+            switch phase {
+            case .loading:
+                SkeletonCards().transition(.opacity)
+            case .result:
+                if let result = model.result {
+                    VStack(spacing: 16) {
+                        PolishedCard(model: model, result: result)
+                        LearningSummaryCard(result: result)
+                    }
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity)
+                    )
+                }
+            case .idle:
+                IdleHint()
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phase)
+    }
+}
+
+private struct IdleHint: View {
+    var body: some View {
+        Text("Your polished text and a short English tip will appear here.")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SkeletonCards: View {
     var body: some View {
         VStack(spacing: 16) {
-            Card(title: "Polished Text") {
+            ResultCard(title: "Polished text") {
                 Text(String(repeating: "Polished text is on its way. ", count: 8))
             }
-            Card(title: "English Learning Summary") {
+            ResultCard(title: "English learning summary") {
                 Text(String(repeating: "The summary is on its way. ", count: 5))
             }
         }
@@ -33,7 +66,9 @@ private struct SkeletonCards: View {
     }
 }
 
-private struct Card<Accessory: View, Content: View>: View {
+/// A flat card on `Theme.paper` with a `Theme.rule` border: a title, an optional accessory view
+/// at the trailing edge, a hairline and the content.
+struct ResultCard<Accessory: View, Content: View>: View {
     let title: String
     @ViewBuilder let accessory: Accessory
     @ViewBuilder let content: Content
@@ -51,23 +86,30 @@ private struct Card<Accessory: View, Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text(title.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.headline)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityLabel(title)
-                Spacer()
                 accessory
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            Divider()
+            Theme.rule.frame(height: 1)
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
         }
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+        .background(Theme.paper, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.rule))
+    }
+}
+
+private struct EditorHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -75,48 +117,112 @@ private struct PolishedCard: View {
     @Bindable var model: AppModel
     let result: PolishResult
     @State private var outputController = RichTextController()
+    @State private var editorHeight: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showsDiff: Bool {
+        model.showsChanges && !result.wasTranslated
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             card
+                .opacity(model.runningRefinement == nil ? 1 : 0.5)
+                .allowsHitTesting(model.runningRefinement == nil)
             RefinementRow(model: model)
         }
     }
 
     private var card: some View {
-        Card(title: "Polished Text") {
-            HStack(spacing: 10) {
-                LanguageLabel(result: result)
-                Text(result.modelUsed)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Model \(result.modelUsed)")
-                if !result.wasTranslated {
-                    Toggle("Show changes", isOn: $model.showsChanges)
-                        .toggleStyle(.button)
-                        .help("Highlights what changed between your input and the polished text")
+        ResultCard(title: "Polished text") {
+            ResultMeta(result: result)
+            Spacer()
+            if !result.wasTranslated {
+                Picker("Show changes", selection: $model.showsChanges) {
+                    Text("Edit").tag(false)
+                    Text("Changes").tag(true)
                 }
-                Button(model.copied ? "Copied" : "Copy") {
-                    Task { await model.copyResult() }
-                }
-                .tint(model.copied ? .green : nil)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Highlights what changed between your input and the polished text")
             }
+            CopyButton(model: model)
         } content: {
-            if model.showsChanges && !result.wasTranslated {
-                DiffView(input: model.input, output: model.output)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    FormattingToolbar(controller: outputController)
-                    RichTextEditor(
-                        text: $model.output,
-                        controller: outputController,
-                        accessibilityLabel: "Polished text",
-                        minHeight: 80,
-                        maxHeight: 480
-                    )
+            ZStack(alignment: .top) {
+                if showsDiff {
+                    DiffView(input: model.input, output: model.output, minHeight: editorHeight)
+                        .transition(.opacity)
+                } else {
+                    editor.transition(.opacity)
                 }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showsDiff)
+            .onPreferenceChange(EditorHeightKey.self) { height in
+                if height > 0 { editorHeight = height }
             }
         }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FormattingToolbar(controller: outputController)
+            RichTextEditor(
+                text: $model.output,
+                controller: outputController,
+                accessibilityLabel: "Polished text",
+                minHeight: 80,
+                maxHeight: 480
+            )
+        }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: EditorHeightKey.self, value: proxy.size.height)
+            }
+        )
+    }
+}
+
+/// The detected language and the model, as one quiet line. A translation gets a capsule.
+private struct ResultMeta: View {
+    let result: PolishResult
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if result.wasTranslated {
+                Text("Translated from \(result.detectedLanguage)")
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .overlay(Capsule().strokeBorder(.tint))
+                Text(result.modelUsed)
+                    .accessibilityLabel("Model \(result.modelUsed)")
+            } else {
+                Text("\(result.detectedLanguage) · \(result.modelUsed)")
+                    .accessibilityLabel("\(result.detectedLanguage), model \(result.modelUsed)")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
+private struct CopyButton: View {
+    let model: AppModel
+
+    var body: some View {
+        Button {
+            Task { await model.copyResult() }
+        } label: {
+            Label(
+                model.copied ? "Copied" : "Copy",
+                systemImage: model.copied ? "checkmark" : "doc.on.doc"
+            )
+            .contentTransition(.symbolEffect(.replace))
+        }
+        .tint(model.copied ? .green : nil)
+        .sensoryFeedback(.alignment, trigger: model.copyGeneration)
     }
 }
 
@@ -130,173 +236,23 @@ private struct RefinementRow: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             ForEach(Refinement.allCases) { refinement in
-                Button(refinement.displayName) { model.refine(refinement) }
-                    .accessibilityLabel("Refine: \(refinement.displayName)")
-                    .help("Rewrites the polished text, including your edits")
+                Button {
+                    model.refine(refinement)
+                } label: {
+                    ZStack {
+                        Text(refinement.displayName)
+                            .opacity(model.runningRefinement == refinement ? 0 : 1)
+                        if model.runningRefinement == refinement {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
+                .accessibilityLabel("Refine: \(refinement.displayName)")
+                .help("Rewrites the polished text, including your edits")
             }
         }
         .disabled(!model.canRefine)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Refine polished text")
-    }
-}
-
-private struct LanguageLabel: View {
-    let result: PolishResult
-
-    private var text: String {
-        result.wasTranslated
-            ? "Translated from \(result.detectedLanguage)" : result.detectedLanguage
-    }
-
-    private var style: AnyShapeStyle {
-        result.wasTranslated ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary)
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(style)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .overlay(
-                Capsule().strokeBorder(
-                    result.wasTranslated ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator)
-                )
-            )
-    }
-}
-
-private struct LearningSummaryCard: View {
-    let result: PolishResult
-
-    var body: some View {
-        Card(title: "English Learning Summary") {
-            if result.wasTranslated || result.learningSummary == nil {
-                NoteText(
-                    "Original was in \(result.detectedLanguage) — the summary is only shown when "
-                        + "you write directly in English, since that's when your own English "
-                        + "patterns are visible."
-                )
-            } else if let summary = result.learningSummary, summary.isEmpty {
-                NoteText("Nothing to flag here — the text was already clean.")
-            } else if let summary = result.learningSummary {
-                SummarySections(summary: summary)
-            }
-        }
-    }
-}
-
-private struct NoteText: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-    }
-}
-
-private struct SummarySections: View {
-    let summary: LearningSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if !summary.corrections.isEmpty {
-                SummarySection(label: "Corrections") {
-                    ForEach(Array(summary.corrections.enumerated()), id: \.offset) { _, item in
-                        CorrectionRow(correction: item)
-                    }
-                }
-            }
-            if !summary.grammarInsight.isEmpty {
-                SummarySection(label: "Grammar insight") {
-                    GrammarInsight(text: summary.grammarInsight)
-                }
-            }
-            if !summary.vocabulary.isEmpty {
-                SummarySection(label: "New vocabulary") {
-                    ForEach(Array(summary.vocabulary.enumerated()), id: \.offset) { _, item in
-                        VocabularyRow(item: item)
-                    }
-                }
-            }
-        }
-        .textSelection(.enabled)
-    }
-}
-
-private struct SummarySection<Content: View>: View {
-    let label: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(label.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityLabel(label)
-            content
-        }
-    }
-}
-
-private struct CorrectionRow: View {
-    let correction: Correction
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(correction.original)
-                    .strikethrough()
-                    .italic()
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Original: \(correction.original)")
-                Image(systemName: "arrow.right")
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-                Text(correction.corrected)
-                    .fontWeight(.medium)
-                    .accessibilityLabel("Corrected: \(correction.corrected)")
-            }
-            Text(correction.why)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct GrammarInsight: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .leading) {
-                Rectangle().fill(.tint).frame(width: 3)
-            }
-    }
-}
-
-private struct VocabularyRow: View {
-    let item: VocabularyItem
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            (Text(item.term).bold().foregroundStyle(.tint)
-                + Text(" — \(item.meaning)").foregroundStyle(.secondary))
-            Text("\"\(item.example)\"")
-                .font(.callout)
-                .italic()
-                .foregroundStyle(.secondary)
-        }
     }
 }

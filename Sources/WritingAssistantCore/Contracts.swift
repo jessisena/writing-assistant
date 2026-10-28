@@ -22,6 +22,18 @@ public enum Channel: String, CaseIterable, Sendable, Identifiable {
         case .other: "Other / general"
         }
     }
+
+    /// A label short enough for a chip.
+    public var shortName: String {
+        switch self {
+        case .slack: "Slack"
+        case .slackInformal: "Casual Slack"
+        case .talkingPoints: "Talking points"
+        case .formal: "Formal doc"
+        case .aiPrompt: "AI prompt"
+        case .other: "General"
+        }
+    }
 }
 
 /// A quick follow-up edit applied to text that was already polished.

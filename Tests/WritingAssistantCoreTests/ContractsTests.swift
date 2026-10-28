@@ -9,6 +9,13 @@ import WritingAssistantCore
             ])
     }
 
+    @Test func channelsHaveShortNamesForChips() {
+        #expect(
+            Channel.allCases.map(\.shortName) == [
+                "Slack", "Casual Slack", "Talking points", "Formal doc", "AI prompt", "General",
+            ])
+    }
+
     @Test func promptFilesListGlobalThenChannelsThenRefinements() {
         let expected: [PromptFile] =
             [.global] + Channel.allCases.map { .channel($0) }

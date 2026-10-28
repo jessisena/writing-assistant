@@ -29,6 +29,7 @@ struct WritingAssistantApp: App {
         Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
+                .tint(Theme.ink)
                 .task { await model.checkReadiness() }
                 .handsMainWindowOpener(to: appDelegate)
         }
@@ -41,6 +42,7 @@ struct WritingAssistantApp: App {
 
         Settings {
             PromptEditorView(store: store, newerDefaults: newerDefaults)
+                .tint(Theme.ink)
                 .handsMainWindowOpener(to: appDelegate)
         }
     }
@@ -112,15 +114,15 @@ struct LearningLogCommands: Commands {
     }
 }
 
-/// The single stacked column: header, composer, error banner, results.
+/// The single stacked column: composer, error banner, results, on the desk.
 struct MainWindowView: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    Header()
                     ComposerView(model: model)
                     if let message = model.errorMessage {
                         ErrorBanner(message: message)
@@ -134,27 +136,20 @@ struct MainWindowView: View {
             }
             .onChange(of: model.result) { _, newValue in
                 guard newValue != nil else { return }
-                withAnimation { proxy.scrollTo(Self.resultsID, anchor: .bottom) }
+                if reduceMotion {
+                    proxy.scrollTo(Self.resultsID, anchor: .bottom)
+                } else {
+                    withAnimation { proxy.scrollTo(Self.resultsID, anchor: .bottom) }
+                }
             }
         }
+        .background(Theme.desk)
         .toolbar {
             ToolbarItem(placement: .primaryAction) { HistoryButton(model: model) }
         }
     }
 
     private static let resultsID = "results"
-}
-
-private struct Header: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Writing Assistant")
-                .font(.largeTitle.bold())
-                .accessibilityAddTraits(.isHeader)
-            Text("Paste your text, choose a channel, and get polished English.")
-                .foregroundStyle(.secondary)
-        }
-    }
 }
 
 private struct ErrorBanner: View {

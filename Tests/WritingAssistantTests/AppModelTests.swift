@@ -175,6 +175,18 @@ import WritingAssistantCore
         #expect(!model.copied)
     }
 
+    @Test func everyCopyIncrementsTheCopyGeneration() async {
+        let model = AppModel.testing(polisher: FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+        #expect(model.copyGeneration == 0)
+
+        await model.copyResult()
+        await model.copyResult()
+
+        #expect(model.copyGeneration == 2)
+    }
+
     @Test func overlappingCopiesKeepCopiedUntilTheLastDelayEnds() async {
         var pending: [CheckedContinuation<Void, Never>] = []
         let model = AppModel.testing(
@@ -271,7 +283,7 @@ import WritingAssistantCore
         await model.process()
         model.showStartupError(PolishError.claudeNotFound)
 
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(model.input.length == 0)
         #expect(model.output.length == 0)
@@ -287,7 +299,7 @@ import WritingAssistantCore
         while !model.isLoading { await Task.yield() }
 
         #expect(!model.canClear)
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(model.input.string == "Hello")
         await request.value
