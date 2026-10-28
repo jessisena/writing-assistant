@@ -211,3 +211,20 @@ Reuse: `RequestRunner` for the running state, `DiffDisplay`/`TextDiff.words` for
 - `scripts/build_app.sh`, then take screenshots in light and dark mode at 600pt and 820pt
   wide. Check the chips wrap, that ⌘↵ / ⌘K / Esc / ⌘Z work, and that the Polishing timer
   appears after 5 s. With Reduce Motion on, check that the transitions are instant.
+
+## Changes made during implementation
+
+- During a refinement, the result stays on screen at 50% opacity and can't be edited. The
+  refinement button that is running shows a spinner. The skeleton only shows for a polish
+  request.
+- The Polish button stays enabled while a request runs, because the disabled style made the
+  label hard to read. A click or ⌘↵ during a request does nothing: `AppModel` and
+  `RequestRunner` reject a second start. The button is disabled only over the length limit.
+- The Polish label uses `Theme.paper` so it stays readable on the light dark-mode ink.
+- The length meter counts what `PolishService` checks: the unicode scalars of the trimmed
+  Markdown. The count is cached and updated when the input changes.
+- Clear makes the window's first responder resign before it registers the undo, so ⌘Z
+  reaches the window's undo manager instead of the editor's emptied stack. Undoing a Clear
+  saves the newer output to History first.
+- Restoring a History entry also saves its channel as the next-launch selection.
+- Test `UserDefaults` suites are removed when the test process exits.
