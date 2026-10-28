@@ -204,6 +204,36 @@ CI (`.github/workflows/ci.yml`) runs the same checks on every pull request and p
 a build with warnings treated as errors and the test suite on a macOS 26 runner. Dependabot keeps
 the pinned actions up to date.
 
+### Versioning and releases
+
+Versions follow [Semantic Versioning](https://semver.org). The version lives in
+`Resources/Info.plist` (`CFBundleShortVersionString`, shown in **About Writing Assistant**), each
+release is tagged `vX.Y.Z`, and [CHANGELOG.md](CHANGELOG.md) lists what changed.
+
+`scripts/release.sh` works out the next version from the
+[conventional commit](https://www.conventionalcommits.org) subjects since the last tag (merge
+commits are skipped):
+
+| Commit | Bump |
+|--------|------|
+| `type(scope)!: …` or a `BREAKING CHANGE:` footer | major |
+| `feat(…): …` | minor |
+| `fix(…): …`, `perf(…): …` | patch |
+| `docs`, `chore`, `refactor`, `test`, … | none |
+
+To release, after the changes are merged:
+
+```sh
+git switch main && git pull
+git switch -c chore/NOJIRA-000_release
+scripts/release.sh --dry-run   # preview the version and changelog entry
+scripts/release.sh             # update Info.plist and CHANGELOG.md, commit, tag
+git push -u origin chore/NOJIRA-000_release && git push origin vX.Y.Z
+```
+
+Then open and merge the PR. The tag stays on the release commit, which the merge brings into
+`main`. `scripts/test_release.sh` tests the release script against throwaway repositories.
+
 The code is split into `WritingAssistantCore` (logic, no UI, unit-tested) and `WritingAssistant`
 (the SwiftUI app). See [docs/architecture.md](docs/architecture.md).
 
