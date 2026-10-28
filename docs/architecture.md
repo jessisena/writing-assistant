@@ -261,7 +261,9 @@ Contents/
   Resources/WritingAssistant_WritingAssistantCore.bundle/Prompts/...
 ```
 
-After installing, the script runs `/System/Library/CoreServices/pbs -update` so the service shows
+With `--relaunch`, the script quits the running app (by bundle id, through `osascript`) after
+signing and before replacing the install, and runs `open` on the new install at the end. After
+installing, the script runs `/System/Library/CoreServices/pbs -update` so the service shows
 up in the Services menu without logging out.
 
 The SwiftPM resource bundle goes in `Contents/Resources` because `codesign` rejects extra files at

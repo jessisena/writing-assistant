@@ -35,8 +35,17 @@ Trash first. Set `INSTALL_DIR` to install somewhere else:
 INSTALL_DIR=/tmp/wa-test scripts/build_app.sh
 ```
 
-Drag `~/Applications/Writing Assistant.app` to the Dock to pin it. Rerun the script after pulling
-changes.
+Drag `~/Applications/Writing Assistant.app` to the Dock to pin it.
+
+To update the installed app after changing or pulling code, rerun the script with `--relaunch`:
+
+```sh
+scripts/build_app.sh --relaunch
+```
+
+It quits the running app before replacing it and opens the new build afterwards. Without the
+flag, a running app keeps the old version until you quit and reopen it. The app is only quit
+after the build succeeds, so a broken build leaves the running app alone.
 
 ---
 
