@@ -27,7 +27,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 
 @RunWith(AndroidJUnit4::class)
-@Config(sdk = [35])
+@Config(sdk = [36])
 class KeystoreApiKeyStoreTest {
     @get:Rule
     val folder = TemporaryFolder()

@@ -25,7 +25,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
-@Config(sdk = [35])
+@Config(sdk = [36])
 class DataStoreAppSettingsTest {
     @get:Rule
     val folder = TemporaryFolder()
