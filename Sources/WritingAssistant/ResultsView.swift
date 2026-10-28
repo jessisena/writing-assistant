@@ -222,12 +222,7 @@ private struct CopyButton: View {
             .contentTransition(.symbolEffect(.replace))
         }
         .tint(model.copied ? .green : nil)
-        .onChange(of: model.copied) { _, copied in
-            if copied {
-                NSHapticFeedbackManager.defaultPerformer.perform(
-                    .alignment, performanceTime: .now)
-            }
-        }
+        .sensoryFeedback(.alignment, trigger: model.copyGeneration)
     }
 }
 

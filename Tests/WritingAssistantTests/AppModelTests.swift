@@ -175,6 +175,18 @@ import WritingAssistantCore
         #expect(!model.copied)
     }
 
+    @Test func everyCopyIncrementsTheCopyGeneration() async {
+        let model = AppModel.testing(polisher: FakePolisher())
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
+        #expect(model.copyGeneration == 0)
+
+        await model.copyResult()
+        await model.copyResult()
+
+        #expect(model.copyGeneration == 2)
+    }
+
     @Test func overlappingCopiesKeepCopiedUntilTheLastDelayEnds() async {
         var pending: [CheckedContinuation<Void, Never>] = []
         let model = AppModel.testing(

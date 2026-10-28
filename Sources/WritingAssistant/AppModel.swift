@@ -30,6 +30,8 @@ struct ClipboardContent: Equatable, Sendable {
     var showsChanges = false
     private(set) var errorMessage: String?
     private(set) var copied = false
+    /// Counts successful copies, so views can react to every copy, even two within `copiedDuration`.
+    private(set) var copyGeneration = 0
     /// When the running polish or refinement started. Nil when no request is running.
     private(set) var requestStartedAt: Date?
     /// The refinement that is running, or nil when none is (a polish request leaves it nil).
@@ -54,7 +56,6 @@ struct ClipboardContent: Equatable, Sendable {
     @ObservationIgnored let requests = RequestRunner()
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
-    @ObservationIgnored private var copyGeneration = 0
     @ObservationIgnored private var startupErrorMessage: String?
     /// False when the history file exists but couldn't be read or moved aside at launch. Saving
     /// is then skipped until the next launch, so the unread file is never overwritten.
