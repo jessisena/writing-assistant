@@ -1,9 +1,12 @@
 package local.writingassistant.app.ui
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -43,10 +46,18 @@ class ComposerViewModelTest {
     fun setUp() = Dispatchers.setMain(dispatcher)
 
     @After
-    fun tearDown() = Dispatchers.resetMain()
+    fun tearDown() {
+        sessionScope.cancel()
+        Dispatchers.resetMain()
+    }
+
+    private val sessionScope = CoroutineScope(SupervisorJob() + dispatcher)
+
+    private fun newViewModel(): ComposerViewModel =
+        ComposerViewModel(ComposerSession(polisher, settings, keys, sessionScope))
 
     private fun TestScope.viewModel(): ComposerViewModel =
-        ComposerViewModel(polisher, settings, keys).also { advanceUntilIdle() }
+        newViewModel().also { advanceUntilIdle() }
 
     @Test
     fun `blank input does not polish`() =
@@ -216,7 +227,7 @@ class ComposerViewModelTest {
     fun `a channel picked before the restore finishes wins`() =
         runTest(dispatcher) {
             settings.channel = Channel.AI_PROMPT
-            val vm = ComposerViewModel(polisher, settings, keys)
+            val vm = newViewModel()
             vm.onEvent(ChannelSelected(Channel.TALKING_POINTS))
             advanceUntilIdle()
             assertEquals(Channel.TALKING_POINTS, vm.state.value.channel)

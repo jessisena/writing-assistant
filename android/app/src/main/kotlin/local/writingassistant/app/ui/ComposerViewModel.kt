@@ -2,22 +2,13 @@ package local.writingassistant.app.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import local.writingassistant.app.AppGraph
-import local.writingassistant.app.data.ApiKeyStore
-import local.writingassistant.app.data.AppSettings
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.PolishResult
-import local.writingassistant.core.Polishing
 import local.writingassistant.core.Refinement
 
 /** Everything the composer screen and the bottom sheet render. */
@@ -51,6 +42,15 @@ data class ComposerState(
 }
 
 sealed interface ComposerEvent {
+    /**
+     * Loads [text] handed over by another app. The same text as the current input keeps the
+     * session as it is, so reopening the sheet picks up a result that finished meanwhile;
+     * other text cancels any request and starts over.
+     */
+    data class Open(
+        val text: String,
+    ) : ComposerEvent
+
     data class InputChanged(
         val text: String,
     ) : ComposerEvent
@@ -81,129 +81,26 @@ sealed interface ComposerEvent {
 }
 
 /**
- * Drives the composer. One request runs at a time; [ComposerEvent.Cancel] stops it, and a
- * generation number makes sure a cancelled or replaced request can't overwrite newer state.
+ * Connects a screen to the app-wide [ComposerSession] and checks for an API key when the
+ * screen opens. Clearing the view model (closing the sheet or the app) leaves running
+ * requests and their results in the session.
  */
 class ComposerViewModel(
-    private val polisher: Polishing,
-    private val settings: AppSettings,
-    private val apiKeyStore: ApiKeyStore,
+    private val session: ComposerSession,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ComposerState())
-    val state: StateFlow<ComposerState> = mutableState.asStateFlow()
-
-    private var job: Job? = null
-    private var generation = 0
-    private var lastFailed: ComposerEvent? = null
-    private var channelChosen = false
+    val state: StateFlow<ComposerState> = session.state
 
     init {
-        viewModelScope.launch {
-            val restored = settings.lastChannel()
-            if (restored != null &&
-                !channelChosen
-            ) {
-                mutableState.update { it.copy(channel = restored) }
-            }
-        }
-        refreshApiKey()
+        session.onEvent(ComposerEvent.RefreshApiKey)
     }
 
-    fun onEvent(event: ComposerEvent) {
-        when (event) {
-            is ComposerEvent.InputChanged -> mutableState.update { it.copy(input = event.text) }
-            is ComposerEvent.OutputChanged -> mutableState.update { it.copy(output = event.text) }
-            is ComposerEvent.ChannelSelected -> selectChannel(event.channel)
-            ComposerEvent.Polish -> polish()
-            is ComposerEvent.Refine -> refine(event.refinement)
-            ComposerEvent.Cancel -> cancel()
-            ComposerEvent.DismissError -> mutableState.update { it.copy(error = null) }
-            ComposerEvent.Retry -> lastFailed?.let(::onEvent)
-            ComposerEvent.RefreshApiKey -> refreshApiKey()
-        }
-    }
-
-    private fun refreshApiKey() {
-        viewModelScope.launch {
-            val missing = apiKeyStore.read().isNullOrBlank()
-            mutableState.update { it.copy(needsApiKey = missing) }
-        }
-    }
-
-    private fun selectChannel(channel: Channel) {
-        channelChosen = true
-        mutableState.update { it.copy(channel = channel) }
-        viewModelScope.launch { settings.setLastChannel(channel) }
-    }
-
-    private fun polish() {
-        val current = state.value
-        if (!current.canPolish) return
-        start(ComposerEvent.Polish, null) {
-            val result = polisher.polish(current.input, current.channel)
-            return@start { state: ComposerState ->
-                state.copy(result = result, output = result.polishedText)
-            }
-        }
-    }
-
-    private fun refine(refinement: Refinement) {
-        val current = state.value
-        if (!current.canUseOutput) return
-        start(ComposerEvent.Refine(refinement), refinement) {
-            val refined = polisher.refine(current.output, current.channel, refinement)
-            return@start { state: ComposerState -> state.copy(output = refined) }
-        }
-    }
-
-    private fun start(
-        request: ComposerEvent,
-        refinement: Refinement?,
-        work: suspend () -> (ComposerState) -> ComposerState,
-    ) {
-        val requestGeneration = ++generation
-        mutableState.update {
-            it.copy(
-                phase = ComposerState.Phase.Working(refinement),
-                error = null,
-            )
-        }
-        job =
-            viewModelScope.launch {
-                var failure: PolishError? = null
-                val apply =
-                    try {
-                        work()
-                    } catch (error: PolishError) {
-                        failure = error
-                        failed(error)
-                    }
-                if (requestGeneration != generation) return@launch
-                job = null
-                lastFailed = request.takeIf { failure != null }
-                mutableState.update { apply(it.copy(phase = ComposerState.Phase.Idle)) }
-            }
-    }
-
-    private fun failed(error: PolishError): (ComposerState) -> ComposerState =
-        { state ->
-            val missingKey = error == PolishError.MissingApiKey
-            state.copy(error = error, needsApiKey = state.needsApiKey || missingKey)
-        }
-
-    private fun cancel() {
-        val running = job?.takeIf { it.isActive } ?: return
-        generation++
-        job = null
-        running.cancel()
-        mutableState.update { it.copy(phase = ComposerState.Phase.Idle) }
-    }
+    fun onEvent(event: ComposerEvent) = session.onEvent(event)
 
     companion object {
         /** Builds the view model from the app's singletons, for `viewModel(factory = …)`. */
         fun factory(graph: AppGraph): ViewModelProvider.Factory =
             viewModelFactory {
-                initializer { ComposerViewModel(graph.polisher, graph.settings, graph.apiKeyStore) }
+                initializer { ComposerViewModel(graph.composerSession) }
             }
     }
 }
