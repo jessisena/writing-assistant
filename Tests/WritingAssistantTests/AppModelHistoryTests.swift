@@ -374,7 +374,7 @@ import WritingAssistantCore
             historyStore: HistoryStore(fileURL: store.fileURL, limit: 2),
             writeToPasteboard: { _ in },
             sleep: { _ in },
-            defaults: UserDefaults(suiteName: UUID().uuidString)!
+            defaults: TestDefaults.make()
         )
 
         for text in ["One", "Two", "Three"] {

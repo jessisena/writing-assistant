@@ -7,7 +7,7 @@ import WritingAssistantCore
 @MainActor
 @Suite struct AppModelChannelPersistenceTests {
     private func makeDefaults() -> UserDefaults {
-        UserDefaults(suiteName: UUID().uuidString)!
+        TestDefaults.make()
     }
 
     @Test func selectedChannelSurvivesANewModel() {
