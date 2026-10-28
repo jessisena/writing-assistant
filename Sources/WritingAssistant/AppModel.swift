@@ -32,6 +32,8 @@ struct ClipboardContent: Equatable, Sendable {
     private(set) var copied = false
     /// When the running polish or refinement started. Nil when no request is running.
     private(set) var requestStartedAt: Date?
+    /// The refinement that is running, or nil when none is (a polish request leaves it nil).
+    private(set) var runningRefinement: Refinement?
     /// Past requests, newest first. Change it only through the methods in `AppModel+History`.
     var history: [HistoryEntry] = []
     /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
@@ -128,14 +130,17 @@ struct ClipboardContent: Equatable, Sendable {
     func cancel() {
         requests.cancel()
         requestStartedAt = nil
+        runningRefinement = nil
     }
 
     /// Marks a request as running in `requests` and clears the error banner.
     ///
+    /// - Parameter refinement: The refinement this request applies, if it is one.
     /// - Returns: The request's generation for `finishRequest(_:_:)`, or nil when a request is
     ///   already running.
-    func beginRequest() -> Int? {
+    func beginRequest(refinement: Refinement? = nil) -> Int? {
         guard let generation = requests.begin() else { return nil }
+        runningRefinement = refinement
         errorMessage = nil
         requestStartedAt = .now
         return generation
@@ -151,6 +156,7 @@ struct ClipboardContent: Equatable, Sendable {
         let outcome = await requests.finish(generation, operation)
         if !requests.isRunning {
             requestStartedAt = nil
+            runningRefinement = nil
         }
         switch outcome {
         case .success(let value):

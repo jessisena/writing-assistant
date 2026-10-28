@@ -19,7 +19,7 @@ extension AppModel {
         guard canRefine else { return }
         let text = outputMarkdown
         let channel = history.first { $0.id == currentHistoryID }?.channel ?? channel
-        guard let generation = beginRequest() else { return }
+        guard let generation = beginRequest(refinement: refinement) else { return }
         let polisher = polisher
         requests.start { [self] in
             let refined = await finishRequest(generation) { () async throws(PolishError) in
