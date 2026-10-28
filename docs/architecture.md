@@ -178,7 +178,9 @@ clipboard flavor. `RichTextBridge` (app) converts between
 monospaced font, links), and normalizes pasted text: bold, italic, strikethrough, code and links
 are kept; foreign fonts, sizes and colors are dropped, and the foreground is `NSColor.textColor`
 so dark mode works. `FormattingTextView` is an `NSTextView` subclass with the toggle actions and a
-`readSelection(from:type:)` override that normalizes rich text read by paste and drag-and-drop.
+`readSelection(from:type:)` override that normalizes rich text read by paste and drag-and-drop,
+and reads plain text in the base style with `-`/`*` list markers turned into bullets. Its
+`insertNewline(_:)` override continues a bullet list on Return and ends it on an empty bullet.
 `RichTextEditor` wraps it for SwiftUI, and a `RichTextController` per
 editor lets each `FormattingToolbar` act on its own editor. The Format menu sends to the first
 responder.
