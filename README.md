@@ -76,14 +76,53 @@ vocabulary. Translated input has no learning summary.
 
 ### Polish from any app
 
-Select text in another app and choose **Services → Polish with Writing Assistant** from that
-app's menu (or the right-click menu). The app comes forward, loads the selection as input and
-processes it with the selected channel. The selection itself isn't replaced; copy the result
-back. If a request is already running, the app shows a banner and keeps the current input.
+You can polish text where you write it, without copying it into the app first. Select text in
+another app and choose **Services → Polish with Writing Assistant** from that app's menu (or the
+right-click menu). Writing Assistant comes forward, loads the selection as input and processes it
+with the selected channel. If the app isn't running, the service launches it.
 
-To assign a shortcut, open **System Settings → Keyboard → Keyboard Shortcuts → Services**, find
-**Polish with Writing Assistant** under Text, and set a key combination. If the entry is missing
-after installing, log out and back in (the build script already runs `pbs -update`).
+#### Set up a shortcut (once)
+
+The Services menu is slow to reach, so give the service a key combination:
+
+1. Open **System Settings → Keyboard → Keyboard Shortcuts… → Services**.
+2. Under **Text**, find **Polish with Writing Assistant** and make sure it's checked.
+3. Double-click the right side of the row and press a combination, for example **⌃⌥⌘P**.
+
+Pick a combination that apps don't already use: when an app has a menu shortcut with the same keys,
+the app's shortcut wins and the service doesn't run. Combinations with three modifiers rarely
+clash.
+
+If the entry is missing after installing, log out and back in (the build script already runs
+`pbs -update`).
+
+#### Everyday flow
+
+1. **Pick the channel first.** The service uses the channel selected in the main window, and the
+   app remembers it between launches. If you mostly polish Slack messages, leave it on Slack and
+   you'll rarely need to change it.
+2. **Select the text and press your shortcut.** Bold, italic, strikethrough, code and links in the
+   selection carry over; fonts, sizes and colors are dropped.
+3. **Review the result.** Use **Show changes** to see what was edited, and **Shorter**, **More
+   casual** or **More formal** to adjust it. You can also edit the output directly.
+4. **Copy it back.** Press **Copy**, switch back with **⌘Tab** (your selection is usually still
+   there), and paste over it. Pasting into Slack keeps the formatting and emoji.
+
+The service doesn't replace the selection by itself: a request takes 8–20 seconds, and macOS
+services that change text in place freeze the other app while they wait.
+
+#### Tips
+
+- **Draft where you write.** Write the rough version in Slack, Mail or Notes, then polish it
+  there. You don't have to start in the app.
+- **One request at a time.** If a request is already running, the app shows a banner and keeps the
+  current input. Wait for it to finish or press **Esc**, then run the service again.
+- **Nothing is lost.** Every polish from the service is saved to History (**⌘Y**) and its learning
+  summary goes to the learning log, so you can come back to it later.
+- **If the service isn't listed** in an app, the app may not support macOS Services (some apps
+  built on Electron or other cross-platform toolkits don't). Copy the text into Writing Assistant
+  instead.
+- **Empty or whitespace-only selections** are rejected, and the other app shows a short message.
 
 ### Data files
 
