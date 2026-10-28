@@ -42,9 +42,15 @@ struct WritingAssistantApp: App {
         }
 
         Settings {
-            PromptEditorView(store: store, newerDefaults: newerDefaults)
-                .tint(Theme.ink)
-                .handsMainWindowOpener(to: appDelegate)
+            TabView {
+                PromptEditorView(store: store, newerDefaults: newerDefaults)
+                    .tabItem { Label("Prompts", systemImage: "doc.text") }
+                AppearanceSettingsView(settings: themeSettings)
+                    .tabItem { Label("Appearance", systemImage: "paintpalette") }
+            }
+            .environment(\.theme, themeSettings.palette)
+            .tint(themeSettings.palette.ink)
+            .handsMainWindowOpener(to: appDelegate)
         }
     }
 }
