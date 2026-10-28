@@ -198,6 +198,22 @@ import WritingAssistantCore
         #expect(model.currentHistoryID == entryID)
     }
 
+    @Test func undoKeepsEditsMadeToNewerWorkAfterTheClear() async {
+        let model = await polishedModel()
+        let undoManager = UndoManager()
+        model.clear(undoManager: undoManager)
+        model.input = NSAttributedString(string: "Newer text")
+        await model.process()
+        let newerID = model.currentHistoryID
+        model.output = NSAttributedString(string: "Edited newer output")
+
+        undoManager.undo()
+
+        let newer = model.history.first { $0.id == newerID }
+        #expect(newer?.outputMarkdown == "Edited newer output")
+        #expect(model.currentHistoryID != newerID)
+    }
+
     @Test func clearWithoutAnUndoManagerStillClears() async {
         let model = await polishedModel()
 

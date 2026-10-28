@@ -235,6 +235,7 @@ struct ClipboardContent: Equatable, Sendable {
 
     private func restore(_ snapshot: ScreenSnapshot) {
         guard !isLoading else { return }
+        saveOutputToHistory()
         input = snapshot.input
         output = snapshot.output
         result = snapshot.result
