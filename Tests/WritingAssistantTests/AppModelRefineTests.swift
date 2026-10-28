@@ -41,7 +41,7 @@ import WritingAssistantCore
         model.startProcessing()
         await waitUntil(polisher, hasCalls: 1)
         polisher.resume(0, with: .success(.sample))
-        await model.requestTask?.value
+        await model.requests.task?.value
         return (model, polisher)
     }
 
@@ -52,7 +52,7 @@ import WritingAssistantCore
         model.output = AppModel.editorText(fromMarkdown: "  My **edited** *text* 🙂\n- one  \n")
 
         model.refine(.shorter)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(polisher.refineCalls.count == 1)
         #expect(polisher.refineCalls.first?.text == "My **edited** *text* 🙂\n- one")
@@ -68,7 +68,7 @@ import WritingAssistantCore
         model.channel = .slack
 
         model.refine(.moreCasual)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(polisher.refineCalls.first?.channel == .slack)
     }
@@ -79,7 +79,7 @@ import WritingAssistantCore
         polisher.outcome = .success(Self.refined)
 
         model.refine(.moreCasual)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(markdown(model.output) == Self.refined.polishedText)
         #expect(model.result == .sample)
@@ -96,7 +96,7 @@ import WritingAssistantCore
         polisher.outcome = .failure(.timeout(seconds: 120))
 
         model.refine(.moreFormal)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(model.errorMessage == PolishError.timeout(seconds: 120).errorDescription)
         #expect(model.output.isEqual(to: before))
@@ -113,7 +113,7 @@ import WritingAssistantCore
         #expect(model.isLoading)
         model.cancel()
         polisher.resume(1, with: .success(Self.refined))
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(!model.isLoading)
         #expect(model.errorMessage == nil)
@@ -125,7 +125,7 @@ import WritingAssistantCore
         let (model, polisher) = await gatedPolishedModel()
         model.refine(.shorter)
         await waitUntil(polisher, hasCalls: 2)
-        let stale = model.requestTask
+        let stale = model.requests.task
         model.cancel()
 
         model.refine(.moreFormal)
@@ -134,7 +134,7 @@ import WritingAssistantCore
             polishedText: "Newer refinement.", learningSummary: nil, detectedLanguage: "English",
             wasTranslated: false, modelUsed: ModelRouting.haikuModel)
         polisher.resume(2, with: .success(newerText))
-        await model.requestTask?.value
+        await model.requests.task?.value
         polisher.resume(1, with: .success(Self.refined))
         await stale?.value
 
@@ -153,7 +153,7 @@ import WritingAssistantCore
         #expect(polisher.waitingCount == 2)
         #expect(!model.canRefine)
         polisher.resume(1, with: .success(Self.refined))
-        await model.requestTask?.value
+        await model.requests.task?.value
         #expect(model.canRefine)
     }
 

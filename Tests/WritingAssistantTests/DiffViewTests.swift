@@ -120,7 +120,7 @@ import WritingAssistantCore
         model.showsChanges = true
 
         model.refine(.shorter)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(model.showsChanges)
     }

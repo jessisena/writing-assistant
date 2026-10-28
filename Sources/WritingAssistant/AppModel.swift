@@ -16,7 +16,7 @@ struct ClipboardContent: Equatable, Sendable {
     var input = NSAttributedString()
     var output = NSAttributedString()
     var channel: Channel = .formal
-    private(set) var isLoading = false
+    var isLoading: Bool { requests.isRunning }
     private(set) var result: PolishResult? {
         didSet { showsChanges = false }
     }
@@ -41,9 +41,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// Where `process()` writes each learning summary. Append only from the main actor.
     @ObservationIgnored let learningLog: LearningLog
     @ObservationIgnored let historyStore: HistoryStore
-    /// The request started by `startProcessing()`, which `cancel()` stops.
-    @ObservationIgnored var requestTask: Task<Void, Never>?
-    @ObservationIgnored private var requestGeneration = 0
+    /// The running polish or refinement, which `cancel()` stops.
+    @ObservationIgnored let requests = RequestRunner()
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
     @ObservationIgnored private let sleep: @MainActor (Duration) async -> Void
     @ObservationIgnored private var copyGeneration = 0
@@ -100,7 +99,7 @@ struct ClipboardContent: Equatable, Sendable {
     /// running.
     func startProcessing() {
         guard let request = beginProcessing() else { return }
-        requestTask = Task { await polish(request) }
+        requests.start { [self] in await polish(request) }
     }
 
     /// Polishes `input`, sent as Markdown, with the selected channel. Ignored while a request
@@ -113,47 +112,33 @@ struct ClipboardContent: Equatable, Sendable {
     /// Stops the running request and returns to the empty state, with no error banner. A
     /// late answer from the stopped request is ignored.
     func cancel() {
-        guard isLoading else { return }
-        requestTask?.cancel()
-        requestGeneration += 1
-        isLoading = false
+        requests.cancel()
     }
 
-    /// Marks a request as running and clears the error banner.
+    /// Marks a request as running in `requests` and clears the error banner.
     ///
     /// - Returns: The request's generation for `finishRequest(_:_:)`, or nil when a request is
     ///   already running.
     func beginRequest() -> Int? {
-        guard !isLoading else { return nil }
+        guard let generation = requests.begin() else { return nil }
         errorMessage = nil
-        isLoading = true
-        requestGeneration += 1
-        return requestGeneration
+        return generation
     }
 
-    /// Runs the work of the request started as `generation` and ends its loading state.
-    ///
-    /// A request that was cancelled, or replaced by a newer one, changes nothing and shows no
-    /// error. A failure is shown in the error banner.
+    /// Runs the work of the request started as `generation` (see `RequestRunner.finish(_:_:)`)
+    /// and shows a failure in the error banner. A cancelled or replaced request shows no error.
     ///
     /// - Returns: The operation's value, or nil when it failed or was cancelled.
     func finishRequest<Value>(
         _ generation: Int, _ operation: () async throws(PolishError) -> Value
     ) async -> Value? {
-        let outcome: Result<Value, PolishError>
-        do {
-            outcome = .success(try await operation())
-        } catch {
-            outcome = .failure(error)
-        }
-        guard generation == requestGeneration else { return nil }
-        isLoading = false
-        guard !Task.isCancelled else { return nil }
-        switch outcome {
+        switch await requests.finish(generation, operation) {
         case .success(let value):
             return value
         case .failure(let error):
             errorMessage = error.errorDescription
+            return nil
+        case nil:
             return nil
         }
     }

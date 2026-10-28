@@ -76,7 +76,7 @@ import WritingAssistantCore
 
         model.cancel()
         polisher.resume(0, with: .success(.sample))
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(model.history.isEmpty)
         #expect(try saved().isEmpty)
@@ -123,7 +123,7 @@ import WritingAssistantCore
         polisher.outcome = .success(Self.secondResult)
 
         model.refine(.shorter)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(model.history.count == 1)
         #expect(model.currentHistoryID == entryID)
@@ -358,7 +358,7 @@ import WritingAssistantCore
         polisher.outcome = .success(Self.secondResult)
 
         model.refine(.shorter)
-        await model.requestTask?.value
+        await model.requests.task?.value
 
         #expect(markdown(model.output) == "Second answer.")
         #expect(model.history.isEmpty)

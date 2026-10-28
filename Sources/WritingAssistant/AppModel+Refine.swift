@@ -13,7 +13,7 @@ extension AppModel {
     /// polished for), or the selected channel when there is no current entry, and is replaced by
     /// the answer. The result keeps its learning summary and language, since a summary of the
     /// model's own text means nothing. The refined output is saved to the current history entry;
-    /// the learning log is left alone. Runs in `requestTask`, so `cancel()` stops it. Ignored
+    /// the learning log is left alone. Runs in `requests`, so `cancel()` stops it. Ignored
     /// unless `canRefine`.
     func refine(_ refinement: Refinement) {
         guard canRefine else { return }
@@ -21,7 +21,7 @@ extension AppModel {
         let channel = history.first { $0.id == currentHistoryID }?.channel ?? channel
         guard let generation = beginRequest() else { return }
         let polisher = polisher
-        requestTask = Task {
+        requests.start { [self] in
             let refined = await finishRequest(generation) { () async throws(PolishError) in
                 try await polisher.refine(text: text, channel: channel, refinement: refinement)
             }

@@ -111,6 +111,8 @@ Sources/WritingAssistant/            SwiftUI executable
   AppModel+Refine.swift              quick refinements of the edited output
   AppModel+LearningLog.swift         append to and open the learning log
   AppModel+History.swift             record, save, restore and delete history entries
+  RequestRunner.swift                the running request: its task, cancel, and a generation
+                                     check so a stale answer can't overwrite a newer one
   RichTextEditor.swift               RichTextBridge (NSAttributedString ↔ AttributedString,
                                      paste normalization), FormattingTextView, RichTextEditor
   FormattingToolbar.swift            formatting buttons, emoji picker, Format menu
