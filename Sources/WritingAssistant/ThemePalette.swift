@@ -74,6 +74,7 @@ struct ThemePalette: Equatable, Sendable {
                 return NSColor(hex: isDark ? value.dark : value.light)
             }
             let color = Color(nsColor: nsColor)
+            if cache.count >= Self.cacheLimit { cache.removeAll() }
             cache[value] = color
             return color
         }
@@ -81,6 +82,9 @@ struct ThemePalette: Equatable, Sendable {
 
     /// One `Color` per value. Each dynamic `NSColor` is a distinct object, so without this two
     /// colours for the same token compare unequal and SwiftUI sees the tint change on every body.
+    /// Dragging in the colour panel makes a new value per step; starting over past this bound
+    /// keeps the cache small without tracking use.
+    private static let cacheLimit = 256
     private static let cache = OSAllocatedUnfairLock(initialState: [ThemeColor: Color]())
 
     var ink: Color { color(.ink) }
