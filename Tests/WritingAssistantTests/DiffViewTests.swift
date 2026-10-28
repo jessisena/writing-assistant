@@ -129,7 +129,7 @@ import WritingAssistantCore
         let model = await polishedModel()
         model.showsChanges = true
 
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(!model.showsChanges)
     }

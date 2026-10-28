@@ -271,7 +271,7 @@ import WritingAssistantCore
         await model.process()
         model.showStartupError(PolishError.claudeNotFound)
 
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(model.input.length == 0)
         #expect(model.output.length == 0)
@@ -287,7 +287,7 @@ import WritingAssistantCore
         while !model.isLoading { await Task.yield() }
 
         #expect(!model.canClear)
-        model.clear()
+        model.clear(undoManager: nil)
 
         #expect(model.input.string == "Hello")
         await request.value

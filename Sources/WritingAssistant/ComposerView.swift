@@ -4,6 +4,7 @@ import WritingAssistantCore
 /// Text input with its formatting toolbar, channel picker and Process button.
 struct ComposerView: View {
     @Bindable var model: AppModel
+    @Environment(\.undoManager) private var undoManager
     @State private var inputController = RichTextController()
 
     var body: some View {
@@ -27,7 +28,7 @@ struct ComposerView: View {
                 isLoading: model.isLoading,
                 canClear: model.canClear,
                 onProcess: model.startProcessing,
-                onClear: model.clear,
+                onClear: { model.clear(undoManager: undoManager) },
                 onCancel: model.cancel
             )
         }
