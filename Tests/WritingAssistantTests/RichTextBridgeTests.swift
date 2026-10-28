@@ -343,7 +343,7 @@ import WritingAssistantCore
     }
 }
 
-@MainActor private final class UndoDelegate: NSObject, NSTextViewDelegate {
+@MainActor final class UndoDelegate: NSObject, NSTextViewDelegate {
     let undoManager: UndoManager
 
     init(undoManager: UndoManager) {
