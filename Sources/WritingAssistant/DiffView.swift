@@ -9,11 +9,12 @@ struct DiffView: View {
     let input: NSAttributedString
     let output: NSAttributedString
     var minHeight: CGFloat = 80
+    @Environment(\.theme) private var theme
 
     var body: some View {
         let segments = DiffDisplay.segments(input: input, output: output)
         VStack(alignment: .leading, spacing: 12) {
-            Text(DiffDisplay.attributedText(segments))
+            Text(DiffDisplay.attributedText(segments, palette: theme))
                 .font(.system(size: RichTextBridge.bodyFontSize))
                 .lineSpacing(DiffDisplay.lineSpacing)
                 .textSelection(.enabled)
@@ -30,13 +31,14 @@ struct DiffView: View {
 
 private struct DiffFooter: View {
     let changeCount: Int
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 14) {
             Text(DiffDisplay.changeSummary(changeCount))
                 .font(.callout.weight(.medium))
-            LegendSwatch(label: "removed", color: Theme.redPencil)
-            LegendSwatch(label: "added", color: Theme.marginGreen)
+            LegendSwatch(label: "removed", color: theme.redPencil)
+            LegendSwatch(label: "added", color: theme.marginGreen)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -60,11 +62,6 @@ private struct LegendSwatch: View {
 
 /// Turns diff segments into styled text and a spoken description.
 enum DiffDisplay {
-    static let removedColor = Theme.redPencil
-    static let removedBackground = Theme.redPencil.opacity(0.12)
-    static let addedColor = Theme.marginGreen
-    static let addedBackground = Theme.marginGreen.opacity(0.14)
-
     /// Extra space between lines that gives the diff the editor's line height.
     static let lineSpacing = RichTextBridge.bodyFontSize * (RichTextBridge.lineHeightMultiple - 1)
 
@@ -82,21 +79,26 @@ enum DiffDisplay {
         TextDiff.words(from: plainText(input), to: plainText(output))
     }
 
-    /// All segments in order: removed text in red pencil with strikethrough, added text in margin
-    /// green with an underline, each on a faint tint of its colour, and unchanged text unstyled.
-    static func attributedText(_ segments: [DiffSegment]) -> AttributedString {
-        segments.reduce(into: AttributedString()) { text, segment in
+    /// All segments in order: removed text in the palette's red pencil with strikethrough, added
+    /// text in its margin green with an underline, each on a faint tint of its colour, and
+    /// unchanged text unstyled.
+    static func attributedText(
+        _ segments: [DiffSegment], palette: ThemePalette
+    ) -> AttributedString {
+        let removedColor = palette.redPencil
+        let addedColor = palette.marginGreen
+        return segments.reduce(into: AttributedString()) { text, segment in
             var part = AttributedString(segment.text)
             switch segment.kind {
             case .same:
                 break
             case .removed:
                 part.foregroundColor = removedColor
-                part.backgroundColor = removedBackground
+                part.backgroundColor = removedColor.opacity(0.12)
                 part.strikethroughStyle = .single
             case .added:
                 part.foregroundColor = addedColor
-                part.backgroundColor = addedBackground
+                part.backgroundColor = addedColor.opacity(0.14)
                 part.underlineStyle = .single
             }
             text += part
