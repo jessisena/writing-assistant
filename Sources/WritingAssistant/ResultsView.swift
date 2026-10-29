@@ -259,29 +259,32 @@ private struct CopyButton: View {
     }
 }
 
+/// "Refine:" and a button per refinement, wrapping to more rows when the window is narrow.
 private struct RefinementRow: View {
     let model: AppModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Refine:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            ForEach(Refinement.allCases) { refinement in
-                Button {
-                    model.refine(refinement)
-                } label: {
-                    ZStack {
-                        Text(refinement.displayName)
-                            .opacity(model.runningRefinement == refinement ? 0 : 1)
-                        if model.runningRefinement == refinement {
-                            ProgressView().controlSize(.small)
+            FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                ForEach(Refinement.allCases) { refinement in
+                    Button {
+                        model.refine(refinement)
+                    } label: {
+                        ZStack {
+                            Text(refinement.displayName)
+                                .opacity(model.runningRefinement == refinement ? 0 : 1)
+                            if model.runningRefinement == refinement {
+                                ProgressView().controlSize(.small)
+                            }
                         }
                     }
+                    .accessibilityLabel("Refine: \(refinement.displayName)")
+                    .help("Rewrites the polished text, including your edits")
                 }
-                .accessibilityLabel("Refine: \(refinement.displayName)")
-                .help("Rewrites the polished text, including your edits")
             }
         }
         .disabled(!model.canRefine)

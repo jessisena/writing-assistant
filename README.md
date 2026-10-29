@@ -65,8 +65,9 @@ vocabulary. Translated input has no learning summary.
 - **Editable output:** edit the polished text in place. **Copy** puts HTML and plain text on the
   clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
   targets as `label (url)`.
-- **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
-  output for the channel it was polished for, and keep the learning summary.
+- **Refine:** **Shorter**, **More casual**, **More formal**, **More diplomatic** and **More
+  assertive** rewrite the current (edited) output for the channel it was polished for, and keep
+  the learning summary.
 - **Show changes:** highlights what changed between your input and the output (hidden for
   translated input).
 - **Clear** empties the input and the results; **Cancel** stops a running request.
@@ -116,8 +117,9 @@ If the entry is missing after installing, log out and back in (the build script 
 2. **Select the text and press your shortcut.** Bold, italic, strikethrough, code and links in the
    selection carry over; fonts, sizes and colors are dropped. Nothing is sent yet.
 3. **Click Polish** (**⌘↩**), changing the channel first if this text needs another one.
-4. **Review the result.** Use **Show changes** to see what was edited, and **Shorter**, **More
-   casual** or **More formal** to adjust it. You can also edit the output directly.
+4. **Review the result.** Use **Show changes** to see what was edited, and the **Refine** buttons
+   (**Shorter**, **More casual**, **More diplomatic** and so on) to adjust it. You can also edit
+   the output directly.
 5. **Copy it back.** Press **Copy**, switch back with **⌘Tab** (your selection is usually still
    there), and paste over it. Pasting into Slack keeps the formatting and emoji.
 
