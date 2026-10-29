@@ -126,7 +126,13 @@ class GroqClient(
         private const val JSON_OBJECT = "json_object"
         private const val JSON_VALIDATE_FAILED = "json_validate_failed"
         private val CHECK_TIMEOUT = 20.seconds
-        private val OVERLOADED_STATUSES = setOf(413, 429, 503)
+        private val OVERLOADED_STATUSES = setOf(429, 503)
+
+        /**
+         * Groq sends 413 when the prompt plus [MAX_COMPLETION_TOKENS] exceeds the tokens-per-minute
+         * limit (8k on the free tier). That depends on the text's length, so retrying never helps.
+         */
+        private const val REQUEST_TOO_LARGE = 413
 
         private fun chatRequest(
             model: String,
@@ -180,6 +186,10 @@ class GroqClient(
             return when {
                 reply.status == 401 || reply.status == 403 -> {
                     PolishError.InvalidApiKey
+                }
+
+                reply.status == REQUEST_TOO_LARGE -> {
+                    PolishError.TooLongForProvider
                 }
 
                 reply.status in OVERLOADED_STATUSES -> {

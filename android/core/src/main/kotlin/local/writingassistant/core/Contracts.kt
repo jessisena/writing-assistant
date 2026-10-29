@@ -102,6 +102,13 @@ sealed class PolishError(
     data object Overloaded :
         PolishError("The AI service is busy or you've hit its rate limit. Try again shortly.")
 
+    /** The provider's per-request token limit is lower than this text needs, so retrying fails. */
+    data object TooLongForProvider :
+        PolishError(
+            "This text is too long for the selected provider's limits. Try a shorter selection " +
+                "or switch provider in Settings.",
+        )
+
     data class Timeout(
         val seconds: Int,
     ) : PolishError("The AI service took longer than $seconds seconds. Please try again.")
@@ -214,8 +221,8 @@ interface LlmClient {
      * Runs [prompt] on [model].
      *
      * @throws PolishError MissingApiKey, MalformedApiKey, InvalidApiKey, NoCredits, Overloaded,
-     *   Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or any error the key
-     *   provider throws.
+     *   TooLongForProvider, Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or
+     *   any error the key provider throws.
      */
     suspend fun run(
         prompt: String,

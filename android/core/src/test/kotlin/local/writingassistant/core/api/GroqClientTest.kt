@@ -231,13 +231,21 @@ class GroqClientTest {
         }
 
     @Test
-    fun `429 413 and 503 are overloaded`() =
+    fun `429 and 503 are overloaded`() =
         runTest {
-            for (status in listOf(429, 413, 503)) {
+            for (status in listOf(429, 503)) {
                 enqueue(status, errorBody("Rate limit reached for model", "rate_limit_exceeded"))
 
                 assertFails<PolishError.Overloaded> { runPolish() }
             }
+        }
+
+    @Test
+    fun `413 is too long for the provider`() =
+        runTest {
+            enqueue(413, errorBody("Request too large for model", "rate_limit_exceeded"))
+
+            assertFails<PolishError.TooLongForProvider> { runPolish() }
         }
 
     @Test
