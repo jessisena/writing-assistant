@@ -1,6 +1,9 @@
 package local.writingassistant.core
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
 /** Why a prompt couldn't be saved. Mirrors `PromptValidationError` in `Contracts.swift`. */
 sealed class PromptValidationException(
@@ -23,16 +26,20 @@ class PromptOverrideStore(
     private val directory: File,
     private val defaults: PromptReading,
 ) : PromptReading {
-    override fun read(file: PromptFile): String = TODO()
+    override fun read(file: PromptFile): String {
+        val override = overrideFile(file)
+        return if (override.exists()) override.readText(Charsets.UTF_8) else defaults.read(file)
+    }
 
     /** The bundled text of [file], ignoring any edit. */
-    fun readDefault(file: PromptFile): String = TODO()
+    fun readDefault(file: PromptFile): String = defaults.read(file)
 
     /** Whether [file] has an edited copy. */
-    fun isCustomized(file: PromptFile): Boolean = TODO()
+    fun isCustomized(file: PromptFile): Boolean = overrideFile(file).exists()
 
     /**
-     * Stores [text] as the edited copy of [file].
+     * Stores [text] as the edited copy of [file]. Text identical to the default removes the edited
+     * copy instead, so the file doesn't show as edited.
      *
      * @throws PromptValidationException when [text] is blank, or is the global file without
      *   [PromptFile.CHANNEL_PLACEHOLDER].
@@ -41,8 +48,46 @@ class PromptOverrideStore(
     fun save(
         file: PromptFile,
         text: String,
-    ): Unit = TODO()
+    ) {
+        validate(file, text)
+        if (text == readDefault(file)) {
+            reset(file)
+            return
+        }
+        val target = overrideFile(file).absoluteFile.toPath()
+        val folder = Files.createDirectories(target.parent)
+        val temp = Files.createTempFile(folder, ".prompt", ".tmp")
+        try {
+            Files.writeString(temp, text, Charsets.UTF_8)
+            Files.move(temp, target, ATOMIC_MOVE, REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
 
-    /** Deletes the edited copy of [file], so the bundled default applies again. */
-    fun reset(file: PromptFile): Unit = TODO()
+    /**
+     * Deletes the edited copy of [file], so the bundled default applies again.
+     *
+     * @throws java.io.IOException when the edited copy exists but can't be deleted.
+     */
+    fun reset(file: PromptFile) {
+        Files.deleteIfExists(overrideFile(file).toPath())
+    }
+
+    private fun overrideFile(file: PromptFile) = File(directory, file.relativePath)
+
+    private companion object {
+        /** Mirrors `PromptFile.validate` in `Contracts.swift`. */
+        fun validate(
+            file: PromptFile,
+            text: String,
+        ) {
+            if (text.isBlank()) {
+                throw PromptValidationException.Empty
+            }
+            if (file == PromptFile.Global && !text.contains(PromptFile.CHANNEL_PLACEHOLDER)) {
+                throw PromptValidationException.MissingPlaceholder
+            }
+        }
+    }
 }
