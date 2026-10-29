@@ -346,6 +346,7 @@ What it does:
   the polished version, when the app allows editing; **Copy** copies it.
 - **Share target.** Where **Polish** isn't offered, use **Share → Writing Assistant**. The same
   sheet opens, with **Copy** only (Android can't replace shared text).
+  Closing a sheet mid-request doesn't cancel it; the result shows when you open the app.
 - **Full-screen composer** from the launcher icon: input, channel chips (the last-used channel is
   remembered), **Polish** with **Cancel**, the editable polished text with **Copy**, **Shorter**,
   **More casual** and **More formal**, and a collapsible learning summary for English input.

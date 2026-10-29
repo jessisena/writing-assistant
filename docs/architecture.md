@@ -408,10 +408,12 @@ android/
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
       data/DataStoreAppSettings.kt     last-used channel, in Preferences DataStore
       data/AssetPromptReader.kt        PromptReading from the bundled assets
-      intents/                         ProcessTextActivity, ShareActivity
+      intents/                         ProcessTextActivity, ShareActivity, SheetHost (the
+                                       bottom sheet both activities show)
       ui/Composer.kt                   input, channel chips, Polish/Cancel, result, refinements,
                                        learning summary, Copy and Replace
-      ui/ComposerViewModel.kt          composer state and events, one request at a time
+      ui/ComposerSession.kt            composer state and the one in-flight request, app-scoped
+      ui/ComposerViewModel.kt          thin wrapper exposing the session to a screen
       ui/SettingsScreen.kt             API key entry with Save, Test and Clear
       ui/SettingsViewModel.kt          reads and writes the key, runs the test call
       ui/Markdown.kt, InlineParser.kt  Markdown subset → AnnotatedString, HTML and plain text
@@ -474,9 +476,13 @@ the user saves or tests it. Release builds set `DEBUG_API_KEY` to an empty strin
 
 ### Composer
 
-`ComposerViewModel` runs one request at a time in its `viewModelScope`. Cancel cancels the job,
-and a generation number keeps a cancelled or replaced request from overwriting newer state, as
-`RequestRunner.swift` does. A failed request can be retried from the error banner. Polish is
+`ComposerSession` holds the composer state and runs one request at a time in an app-wide
+coroutine scope owned by `AppGraph`, so the full-screen app and the sheets share one composer.
+`ComposerViewModel` only exposes the session to a screen. Closing a sheet mid-request doesn't
+cancel the request: opening the app (or selecting the same text again) shows the result. Cancel
+cancels the job, and a generation number keeps a cancelled or replaced request from overwriting
+newer state, as `RequestRunner.swift` does. Opening a sheet with different text cancels any
+request and starts over, so Replace never returns a result for other text. A failed request can be retried from the error banner. Polish is
 disabled while the key store holds no key, and `MainActivity` opens Settings once in that case.
 
 ### System integration
@@ -486,6 +492,8 @@ disabled while the key store holds no key, and `MainActivity` opens Settings onc
   bottom sheet, prefilled with the selection. **Replace** returns the polished text as
   `EXTRA_PROCESS_TEXT`, and is hidden when the caller sets `EXTRA_PROCESS_TEXT_READONLY`.
 - `ShareActivity` handles `ACTION_SEND` with `text/plain` and opens the same sheet with Copy only.
+- Copy and Replace close the sheet, as do swiping it down, back and tapping outside it. With no
+  key stored, the sheet shows Settings first and returns to the composer once a key is saved.
 
 Unlike the macOS service, PROCESS_TEXT can return replacement text, because the calling app isn't
 blocked while the sheet is open.
