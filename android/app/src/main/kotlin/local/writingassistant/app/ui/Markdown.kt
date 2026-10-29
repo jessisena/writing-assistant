@@ -21,6 +21,7 @@ import androidx.compose.ui.text.withStyle
  * written as `[text](url)` or `<url>` (bare URLs stay plain text), `- `/`* ` bullet lines and
  * `#` headings. Anything else, including numbered lines, images and unclosed markers, stays
  * literal text. Only http, https and mailto links are kept; others keep just their label.
+ * Lines break wherever Swift's `Character.isNewline` does, with `\r\n` as one break.
  */
 object Markdown {
     private const val BULLET_PREFIX = "• "
@@ -73,8 +74,23 @@ object Markdown {
             linePrefix(line.kind) + line.spans.joinToString("") { plainSpan(it) }
         }
 
-    internal fun parse(markdown: String): List<MarkdownLine> =
-        markdown.replace("\r\n", "\n").split('\n').map(::parseLine)
+    internal fun parse(markdown: String): List<MarkdownLine> = splitLines(markdown).map(::parseLine)
+
+    private fun splitLines(text: String): List<String> {
+        val lines = mutableListOf<String>()
+        var start = 0
+        var index = 0
+        while (index < text.length) {
+            val char = text[index]
+            index++
+            if (char !in NEWLINES) continue
+            lines += text.substring(start, index - 1)
+            if (char == '\r' && text.getOrNull(index) == '\n') index++
+            start = index
+        }
+        lines += text.substring(start)
+        return lines
+    }
 
     private fun parseLine(line: String): MarkdownLine {
         HEADING.matchAt(line, 0)?.let { match ->
@@ -187,6 +203,7 @@ object Markdown {
 
     private val UNDERLINE = TextDecoration.Underline
     private val HEADING = Regex("(#{1,6}) ")
+    private const val NEWLINES = "\n\u000B\u000C\r\u0085\u2028\u2029"
 }
 
 internal sealed interface LineKind {

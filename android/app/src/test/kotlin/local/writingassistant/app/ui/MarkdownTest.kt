@@ -268,5 +268,21 @@ class MarkdownTest {
     @Test
     fun `crlf line endings are normalised`() {
         assertEquals("a\nb", Markdown.toClipboardText("a\r\nb"))
+        assertEquals("a\n\nb", Markdown.toClipboardText("a\r\n\r\nb"))
+    }
+
+    @Test
+    fun `lines split on every unicode newline`() {
+        assertEquals("a\nb", Markdown.toClipboardText("a\rb"))
+        assertEquals(listOf("a", "", "b"), Markdown.toClipboardText("a\n\rb").split('\n'))
+        for (separator in listOf("\u2028", "\u2029", "\u0085", "\u000B", "\u000C")) {
+            assertEquals("a\n• b", Markdown.toClipboardText("a$separator- b"))
+        }
+        assertEquals("<meta charset=\"utf-8\">a<ul><li>b</li></ul>", Markdown.toHtml("a\u2028- b"))
+    }
+
+    @Test
+    fun `trailing newline keeps an empty last line`() {
+        assertEquals(listOf(LineKind.Plain, LineKind.Plain), Markdown.parse("a\r").map { it.kind })
     }
 }
