@@ -10,9 +10,12 @@ public struct PolishService: Polishing {
     private static let refinementNote =
         "The input is already-polished English: apply the additional instruction on top of the "
         + "rules above, set was_translated to false and set learning_summary to null."
+    public static let summaryOffNote =
+        "The learning summary is turned off: skip Step 4 and set learning_summary to null."
 
     private let runner: any ClaudeRunning
     private let prompts: any PromptStoring
+    private let usage: (any UsageRecording)?
     private let timeout: Duration
 
     /// Creates a service.
@@ -20,33 +23,48 @@ public struct PolishService: Polishing {
     /// - Parameters:
     ///   - runner: Executes prompts against the claude CLI.
     ///   - prompts: Supplies the assembled system prompt for each channel.
+    ///   - usage: Gets the tokens of every reply, including replies that then fail to parse.
     ///   - timeout: Upper bound for a single Claude call.
     public init(
         runner: any ClaudeRunning,
         prompts: any PromptStoring,
+        usage: (any UsageRecording)? = nil,
         timeout: Duration = PolishService.defaultTimeout
     ) {
         self.runner = runner
         self.prompts = prompts
+        self.usage = usage
         self.timeout = timeout
     }
 
     /// Polishes (or translates, then polishes) `text` for `channel`.
     ///
-    /// When the model reports `was_translated: true`, the result never carries a learning
-    /// summary, whatever the model returned.
+    /// When the model reports `was_translated: true`, or `includeLearningSummary` is false, the
+    /// result never carries a learning summary, whatever the model returned.
     ///
     /// - Parameters:
     ///   - text: The user's input. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
+    ///   - includeLearningSummary: False tells the model to skip the summary.
+    ///   - onPreview: Gets the polished text once it is complete, before the summary.
     /// - Returns: The parsed result, including the model that produced it.
     /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
     ///   error thrown by the runner, unchanged.
-    public func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
+    public func polish(
+        text: String, channel: Channel, includeLearningSummary: Bool,
+        onPreview: @escaping @Sendable (PolishPreview) -> Void
+    ) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
-        let systemPrompt = try assemblePrompt(for: channel)
+        var systemPrompt = try assemblePrompt(for: channel)
+        if !includeLearningSummary {
+            systemPrompt += "\n\n\(Self.summaryOffNote)"
+        }
         let (raw, model) = try await send(systemPrompt, input: input)
-        return try Self.parse(raw, model: model)
+        var result = try Self.parse(raw, model: model)
+        if !includeLearningSummary {
+            result.learningSummary = nil
+        }
+        return result
     }
 
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
@@ -100,14 +118,28 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
-    /// Runs the prompt on the routed model, returning the raw reply and the model used.
-    private func send(_ systemPrompt: String, input: String) async throws(PolishError)
-        -> (raw: String, model: String)
-    {
+    /// Runs the prompt on the routed model, returning the raw reply and the model used. The
+    /// reply's tokens are recorded; a recording failure is logged and doesn't fail the request.
+    private func send(
+        _ systemPrompt: String, input: String,
+        onText: @escaping @Sendable (String) -> Void = { _ in }
+    ) async throws(PolishError) -> (raw: String, model: String) {
         let model = ModelRouting.pickModel(for: input)
-        let raw = try await runner.run(
-            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout)
-        return (raw, model)
+        let reply = try await runner.run(
+            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout,
+            onText: onText)
+        record(reply.usage)
+        return (reply.text, model)
+    }
+
+    private func record(_ tokens: TokenUsage?) {
+        guard let usage, let tokens else { return }
+        do {
+            try usage.record(tokens)
+        } catch {
+            Self.logger.error(
+                "Couldn't record token usage: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func assemblePrompt(for channel: Channel) throws(PolishError) -> String {

@@ -112,7 +112,8 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         let output = try await fake.cli.run(
-            prompt: "system\n\n---\n\nhello", model: "haiku", timeout: .seconds(10))
+            prompt: "system\n\n---\n\nhello", model: "haiku", timeout: .seconds(10)
+        ).text
 
         #expect(output == "polished text")
         #expect(try fake.contents(of: "stdin") == "system\n\n---\n\nhello")
@@ -224,7 +225,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
 
-        let output = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        let output = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text
 
         #expect(output == "recovered")
         #expect(try fake.invocationCount() == 2)
@@ -265,6 +266,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let prompt = String(repeating: "p", count: 200_000)
 
         let output = try await fake.cli.run(prompt: prompt, model: "haiku", timeout: .seconds(10))
+            .text
 
         #expect(output.utf8.count == 1_048_576)
         #expect(try fake.contents(of: "stdin").utf8.count == 200_000)
@@ -276,6 +278,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let prompt = String(repeating: "p", count: 500_000)
 
         let output = try await fake.cli.run(prompt: prompt, model: "haiku", timeout: .seconds(10))
+            .text
 
         #expect(output == "early")
     }
@@ -312,12 +315,17 @@ private func setEnvironment(_ name: String, _ value: String?) {
                 searchDirectories: [preferred.directory, fallback.directory],
                 useLoginShell: false))
 
-        #expect(try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "fallback")
+        #expect(
+            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
+        )
         try preferred.install()
-        #expect(try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "fallback")
+        #expect(
+            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
+        )
         try fallback.uninstall()
         #expect(
-            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) == "preferred")
+            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text
+                == "preferred")
     }
 
     @Test func cancellingTheTaskKillsTheProcess() async throws {
@@ -329,7 +337,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     private func expectStopsSleepingFake(
-        _ stop: (Task<String, any Error>) -> Void
+        _ stop: (Task<ClaudeReply, any Error>) -> Void
     ) async throws {
         let fake = try FakeClaude(script: #"echo $$ > "$DIR/pid"; exec sleep 10"#)
         defer { fake.remove() }

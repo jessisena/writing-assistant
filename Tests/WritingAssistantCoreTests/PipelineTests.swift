@@ -5,21 +5,25 @@ import WritingAssistantCore
 private actor FakeRunner: ClaudeRunning {
     private let output: Result<String, PolishError>
     private let availability: Result<Void, PolishError>
+    private let usage: TokenUsage?
     private(set) var calls: [(prompt: String, model: String, timeout: Duration)] = []
 
     init(
         output: Result<String, PolishError>,
-        availability: Result<Void, PolishError> = .success(())
+        availability: Result<Void, PolishError> = .success(()),
+        usage: TokenUsage? = nil
     ) {
         self.output = output
         self.availability = availability
+        self.usage = usage
     }
 
-    func run(prompt: String, model: String, timeout: Duration) async throws(PolishError)
-        -> String
-    {
+    func run(
+        prompt: String, model: String, timeout: Duration,
+        onText: @escaping @Sendable (String) -> Void
+    ) async throws(PolishError) -> ClaudeReply {
         calls.append((prompt, model, timeout))
-        return try output.get()
+        return ClaudeReply(text: try output.get(), usage: usage)
     }
 
     func checkAvailable() async throws(PolishError) {
@@ -503,5 +507,104 @@ private func expectBadFormat(_ output: String) async {
         let refined = try await service(runner).refine(
             text: "Hello", channel: .slack, refinement: .moreCasual)
         #expect(refined == "Hey there")
+    }
+}
+
+@Suite struct LearningSummaryToggleTests {
+    @Test func turnedOffAddsTheNoteAndDropsAnySummary() async throws {
+        let runner = FakeRunner(output: .success(englishResponse))
+        let service = PolishService(runner: runner, prompts: StubPromptStore())
+
+        let result = try await service.polish(
+            text: "Hello there", channel: .slack, includeLearningSummary: false,
+            onPreview: { _ in })
+
+        #expect(result.learningSummary == nil)
+        #expect(result.polishedText == "Please send me the report by end of day.")
+        #expect(
+            await runner.calls.first?.prompt
+                == "SYSTEM PROMPT\n\n\(PolishService.summaryOffNote)\n\n---\n\nHello there")
+    }
+
+    @Test func turnedOnKeepsThePromptAndTheSummary() async throws {
+        let runner = FakeRunner(output: .success(englishResponse))
+        let service = PolishService(runner: runner, prompts: StubPromptStore())
+
+        let result = try await service.polish(
+            text: "Hello there", channel: .slack, includeLearningSummary: true,
+            onPreview: { _ in })
+
+        #expect(result.learningSummary != nil)
+        #expect(await runner.calls.first?.prompt == "SYSTEM PROMPT\n\n---\n\nHello there")
+    }
+}
+
+private final class RecordingUsage: UsageRecording, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _recorded: [TokenUsage] = []
+    private let failure: (any Error)?
+
+    init(failure: (any Error)? = nil) {
+        self.failure = failure
+    }
+
+    var recorded: [TokenUsage] { lock.withLock { _recorded } }
+
+    func record(_ usage: TokenUsage) throws {
+        if let failure { throw failure }
+        lock.withLock { _recorded.append(usage) }
+    }
+}
+
+@Suite struct UsageRecordingTests {
+    private let tokens = TokenUsage(input: 3, output: 40, cacheCreation: 100, cacheRead: 2_000)
+
+    private func service(
+        responding output: String, usage reported: TokenUsage?, into usage: RecordingUsage
+    ) -> PolishService {
+        PolishService(
+            runner: FakeRunner(output: .success(output), usage: reported),
+            prompts: StubPromptStore(), usage: usage)
+    }
+
+    @Test func polishAndRefineRecordTheReplyTokens() async throws {
+        let usage = RecordingUsage()
+        let service = service(responding: englishResponse, usage: tokens, into: usage)
+
+        _ = try await service.polish(text: "Hello", channel: .slack)
+        _ = try await service.refine(text: "Hello", channel: .slack, refinement: .shorter)
+
+        #expect(usage.recorded == [tokens, tokens])
+    }
+
+    @Test func replyThatFailsToParseIsStillRecorded() async {
+        let usage = RecordingUsage()
+        let service = service(responding: "not json", usage: tokens, into: usage)
+
+        await #expect {
+            _ = try await service.polish(text: "Hello", channel: .slack)
+        } throws: { error in
+            guard case .badFormat = error as? PolishError else { return false }
+            return true
+        }
+        #expect(usage.recorded == [tokens])
+    }
+
+    @Test func replyWithoutUsageRecordsNothing() async throws {
+        let usage = RecordingUsage()
+        let service = service(responding: englishResponse, usage: nil, into: usage)
+
+        _ = try await service.polish(text: "Hello", channel: .slack)
+
+        #expect(usage.recorded.isEmpty)
+    }
+
+    @Test func recordingFailureDoesNotFailTheRequest() async throws {
+        let usage = RecordingUsage(failure: CocoaError(.fileWriteNoPermission))
+        let service = service(responding: englishResponse, usage: tokens, into: usage)
+
+        let result = try await service.polish(text: "Hello", channel: .slack)
+
+        #expect(result.polishedText == "Please send me the report by end of day.")
     }
 }

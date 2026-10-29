@@ -40,9 +40,10 @@ public struct ClaudeCLI: ClaudeRunning {
     ///   - timeout: Limit for each attempt; the process is terminated when it is exceeded.
     /// - Throws: `PolishError.claudeNotFound`, `.timeout(seconds:)`, or `.cliFailed(stderr:)`
     ///   (`"Cancelled"` when the task is cancelled or `terminateRunningProcesses()` is called).
-    public func run(prompt: String, model: String, timeout: Duration) async throws(PolishError)
-        -> String
-    {
+    public func run(
+        prompt: String, model: String, timeout: Duration,
+        onText: @escaping @Sendable (String) -> Void
+    ) async throws(PolishError) -> ClaudeReply {
         let invocation = Invocation(
             locator: locator, cache: cache, prompt: prompt, model: model, timeout: timeout)
         let control = SubprocessControl()
@@ -51,7 +52,7 @@ public struct ClaudeCLI: ClaudeRunning {
         } onCancel: {
             control.cancel()
         }
-        return try result.get()
+        return ClaudeReply(text: try result.get(), usage: nil)
     }
 
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
