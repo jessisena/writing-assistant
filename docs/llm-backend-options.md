@@ -8,7 +8,8 @@ output tokens, returned as a JSON object. Input may be Spanish or Catalan and mu
 English. Texts are private (emails, Slack messages), so providers that train on prompts are out.
 
 Figures marked *(unverified)* come from third-party sites or search summaries, not the provider's
-own docs. Nobody has tested Spanish or Catalan → English quality for any option here yet.
+own docs. Apart from Groq (see the recommendation), nobody has tested Spanish or Catalan → English
+quality for any option here yet.
 
 ## Recommendation
 
@@ -16,8 +17,10 @@ own docs. Nobody has tested Spanish or Catalan → English quality for any optio
    tenth as much. Re-measure its latency over the API first: the Mac kept Haiku 4.5 because 5.5
    was ~2× slower through the CLI. Routing is shared logic, so change `ModelRouting` in both apps.
 2. **Best free option: Groq's free tier.** It doesn't retain inference data by default, and its
-   limits fit personal use. JSON support and Catalan quality are still untested. The Android app
-   offers Groq as a provider in Settings (plan: `docs/plans/2026-10-29-groq-provider.md`).
+   limits fit personal use. The Android app offers Groq as a provider in Settings (plan:
+   `docs/plans/2026-10-29-groq-provider.md`), with `openai/gpt-oss-20b` as the small model and
+   `openai/gpt-oss-120b` as the large one; `llama-3.1-8b-instant` was shut down on the free tier on
+   2026-08-16. Live tests passed for English, Spanish and Catalan on 2026-10-29.
 3. **Best on-device option: Gemma 4 E2B via LiteRT-LM.** It's free and private, but it's a 2.6 GB
    download and untested on Catalan and JSON. It would be an experiment or offline fallback.
 4. **Paid fallback provider: Gemini Flash-Lite with billing enabled.** Never use the free key.
@@ -71,7 +74,7 @@ Cost per request assumes 2.5k tokens in and 0.5k out. Prices are in dollars per 
 
 | Provider | Free limits | Privacy | Notes |
 |---|---|---|---|
-| **Groq** | ~30 RPM, 1,000 RPD, 8K TPM, 200K TPD ([limits](https://console.groq.com/docs/rate-limits)). ~65 of our requests/day | No retention by default; abuse logs up to 30 days; zero data retention available ([your data](https://console.groq.com/docs/your-data)) | Llama / GPT-OSS models. No-training claim needs confirming in the Services Agreement |
+| **Groq** | ~30 RPM, 1,000 RPD, 8K TPM, 200K TPD ([limits](https://console.groq.com/docs/rate-limits)). ~65 of our requests/day | No retention by default; abuse logs up to 30 days; zero data retention available ([your data](https://console.groq.com/docs/your-data)) | In the app: gpt-oss-20b (small), gpt-oss-120b (large). No-training claim needs confirming in the Services Agreement |
 | **Cerebras** | 5 RPM, 1M tokens/day ([limits](https://inference-docs.cerebras.ai/support/rate-limits)). ~330 requests/day | Not checked | gpt-oss-120b, Qwen. Also mentions "$5 free credits" expiring in 30 days, so it may be a trial |
 | Gemini free tier | Not published; 500–1,000 RPD *(unverified)* | **Used to improve Google products** ([pricing](https://ai.google.dev/gemini-api/docs/pricing)) | Ruled out for private text |
 | OpenRouter `:free` | 20 RPM; 50 RPD, or 1,000 RPD after buying $10 ([limits](https://openrouter.ai/docs/api-reference/limits)) | About half the free models run on hosts that train on prompts *(unverified)*. Filtering them out in settings removes those | Usable only with the training filter on |
@@ -122,7 +125,7 @@ Cost per request assumes 2.5k tokens in and 0.5k out. Prices are in dollars per 
 ## Open questions
 
 - Haiku 5.5 latency through the API.
-- JSON reliability and Catalan → English quality on Groq, Gemini Flash-Lite and Gemma 4 E2B. A
+- JSON reliability and Catalan → English quality on Gemini Flash-Lite and Gemma 4 E2B. A
   shared `liveTest`-style run over the same texts would answer this.
 - Groq's Services Agreement (training) and paid prices.
 - Gemini Nano Prompt API output cap and device list.
