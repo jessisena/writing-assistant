@@ -293,15 +293,6 @@ public protocol ClaudeRunning: Sendable {
     func checkAvailable() async throws(PolishError)
 }
 
-extension ClaudeRunning {
-    /// Runs `prompt` without watching the reply as it is generated.
-    public func run(prompt: String, model: String, timeout: Duration) async throws(PolishError)
-        -> ClaudeReply
-    {
-        try await run(prompt: prompt, model: model, timeout: timeout, onText: { _ in })
-    }
-}
-
 /// Keeps count of the tokens Claude requests use.
 public protocol UsageRecording: Sendable {
     func record(_ usage: TokenUsage) throws
@@ -343,12 +334,4 @@ public protocol Polishing: Sendable {
         -> String
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
     func checkReady() async throws(PolishError)
-}
-
-extension Polishing {
-    /// Polishes `text` for `channel` with a learning summary and no preview.
-    public func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
-        try await polish(
-            text: text, channel: channel, includeLearningSummary: true, onPreview: { _ in })
-    }
 }

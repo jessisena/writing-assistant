@@ -161,6 +161,12 @@ struct MainWindowView: View {
             }
         }
         .background(theme.desk)
+        // A new month can start while the app stays open between requests.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            model.refreshMonthlyUsage()
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 MonthlyUsageLabel(model: model)

@@ -72,6 +72,12 @@ private final class TestClock: @unchecked Sendable {
         #expect(saved.contains("\"2026-11\""))
     }
 
+    @Test func defaultCalendarIsGregorianWhateverTheUserPicked() {
+        let calendar = UsageStore.gregorianInUserTimeZone
+        #expect(calendar.identifier == .gregorian)
+        #expect(calendar.timeZone == .autoupdatingCurrent)
+    }
+
     @Test func damagedFileIsMovedAsideOnRead() throws {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)

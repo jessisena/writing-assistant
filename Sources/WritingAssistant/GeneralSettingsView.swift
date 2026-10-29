@@ -30,5 +30,6 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear { model.refreshMonthlyUsage() }
     }
 }

@@ -47,10 +47,11 @@ struct ResultsView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phase)
     }
 
-    /// With the summary setting off, the card is left out, unless the result has a summary
-    /// anyway (a history entry from before the setting changed).
+    /// The card shows a summary whenever the result has one (even a history entry from before the
+    /// setting was turned off), and explains a translation's missing summary while the setting is
+    /// on. English text without a summary (setting off, cancelled or failed) gets no card.
     private func showsSummary(of result: PolishResult) -> Bool {
-        model.includesLearningSummary || result.learningSummary != nil
+        result.learningSummary != nil || (result.wasTranslated && model.includesLearningSummary)
     }
 }
 

@@ -23,7 +23,7 @@ public enum UsageStoreError: LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Token totals per calendar month, stored as JSON keyed by "yyyy-MM" in the user's calendar.
+/// Token totals per calendar month, stored as JSON keyed by "yyyy-MM".
 public struct UsageStore: UsageRecording {
     /// `~/Library/Application Support/Writing Assistant/usage.json`.
     public static func standard() -> UsageStore {
@@ -35,6 +35,12 @@ public struct UsageStore: UsageRecording {
 
     private struct File: Codable {
         var months: [String: MonthlyUsage]
+    }
+
+    public static var gregorianInUserTimeZone: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        return calendar
     }
 
     /// Serializes read-modify-write cycles across every copy of a store.
@@ -53,11 +59,12 @@ public struct UsageStore: UsageRecording {
     ///
     /// - Parameters:
     ///   - fileURL: The JSON file. It and its folder are created on the first record.
-    ///   - calendar: Decides where a month starts. Defaults to the user's calendar.
+    ///   - calendar: Decides where a month starts. Defaults to the Gregorian calendar in the user's
+    ///     time zone, so keys stay "yyyy-MM" whatever calendar the user picked in System Settings.
     ///   - now: The current date. Defaults to the system clock.
     public init(
         fileURL: URL,
-        calendar: Calendar = .autoupdatingCurrent,
+        calendar: Calendar = UsageStore.gregorianInUserTimeZone,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.fileURL = fileURL

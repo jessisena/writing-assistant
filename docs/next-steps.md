@@ -222,3 +222,8 @@ added that were not in the original.
 - Pasted URLs (`public.url`) still take the typing style.
 - Option-Return doesn't continue a bullet list.
 - Image titles aren't kept.
+- If the model writes `polished_text` before `detected_language`/`was_translated` (the prompt asks
+  for the opposite order), the preview shows "Unknown" until the final result, and a cancel at
+  that point saves "Unknown" to history.
+- The preview's model name is routed again in `AppModel` rather than passed from `PolishService`.
+- Tokens of cancelled, timed-out and retried runs aren't counted (see architecture.md).

@@ -299,9 +299,12 @@ summary.
 Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
 When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
 
-`PolishService` records every reply's usage in `UsageStore` (`usage.json`, totals per
-"yyyy-MM" in the user's calendar), even when the reply then fails to parse. The toolbar and
-Settings › General show the current month.
+`PolishService` records the usage of every reply the CLI completes in `UsageStore` (`usage.json`,
+totals per Gregorian "yyyy-MM" in the user's time zone), even when the reply then fails to parse.
+Runs that end without a `result` event (cancelled, timed out, crashed) report no usage and aren't
+counted, and neither is a failed first attempt that was retried, so the count is a slight
+undercount. The toolbar and Settings › General show the current month, re-read after each request,
+when the app becomes active and when Settings opens.
 
 ### Logging
 
