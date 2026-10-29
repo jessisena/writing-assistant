@@ -72,7 +72,7 @@ fun Composer(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ChannelChips(state.enabledChannels, state.channel) {
+        ChannelChips(state.chipChannels, state.channel) {
             onEvent(ComposerEvent.ChannelSelected(it))
         }
         OutlinedTextField(

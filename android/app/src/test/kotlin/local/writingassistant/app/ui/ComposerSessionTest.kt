@@ -383,6 +383,26 @@ class ComposerSessionTest {
         }
 
     @Test
+    fun `a restored entry keeps its channel even when that channel is turned off`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            settings.disabledChannels.value = setOf(Channel.EMAIL)
+            val session = session(settings, testHistory(saved = listOf(savedEntry)))
+            advanceUntilIdle()
+
+            session.onEvent(RestoreHistory("saved"))
+            advanceUntilIdle()
+
+            val state = session.state.value
+            assertEquals(Channel.EMAIL, state.channel)
+            assertTrue(Channel.EMAIL !in state.enabledChannels)
+            assertTrue(Channel.EMAIL in state.chipChannels)
+            session.onEvent(Refine(Refinement.SHORTER))
+            advanceUntilIdle()
+            assertEquals(Channel.EMAIL, polisher.calls.last().channel)
+        }
+
+    @Test
     fun `restoring an entry loads its texts, channel and result`() =
         runTest(dispatcher) {
             val history = testHistory(saved = listOf(savedEntry))

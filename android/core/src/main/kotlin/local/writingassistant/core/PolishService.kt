@@ -1,5 +1,8 @@
 package local.writingassistant.core
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,11 +25,13 @@ import kotlin.time.Duration.Companion.seconds
  *   unchanged.
  * @param prompts Supplies the prompt files.
  * @param timeout Upper bound for a single model call.
+ * @param io Where prompt files are read, so callers on the main thread don't touch the disk.
  */
 class PolishService(
     private val backend: suspend () -> Backend,
     private val prompts: PromptReading,
     private val timeout: Duration = DEFAULT_TIMEOUT,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : Polishing {
     /** Always uses [client] with Anthropic's models. */
     constructor(
@@ -36,6 +41,13 @@ class PolishService(
     ) : this({ Backend(client, Provider.ANTHROPIC.models) }, prompts, timeout)
 
     private val assembler = PromptAssembler(prompts)
+
+    private suspend fun loadPrompt(body: () -> String): String =
+        try {
+            withContext(io) { body() }
+        } catch (e: IOException) {
+            throw PolishError.PromptUnavailable(e.message ?: e.toString())
+        }
 
     /**
      * Polishes (or translates, then polishes) [text] for [channel].
@@ -121,13 +133,6 @@ class PolishService(
             }
             return trimmed
         }
-
-        private fun loadPrompt(body: () -> String): String =
-            try {
-                body()
-            } catch (e: IOException) {
-                throw PolishError.PromptUnavailable(e.message ?: e.toString())
-            }
 
         private fun parse(
             raw: String,

@@ -132,7 +132,7 @@ class ComposerSession(
                     channel = entry.channel,
                     result = entry.toResult(),
                     error = null,
-                ).withEnabledChannel()
+                )
         }
     }
 

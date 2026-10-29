@@ -27,6 +27,18 @@ data class ComposerState(
     /** False when the user turned the learning summary off in Settings. */
     val showLearningSummary: Boolean = true,
 ) {
+    /**
+     * The chips to show: [enabledChannels], plus [channel] when it is turned off (a restored
+     * history entry keeps its channel), in [Channel] order.
+     */
+    val chipChannels: List<Channel>
+        get() =
+            if (channel in enabledChannels) {
+                enabledChannels
+            } else {
+                Channel.entries.filter { it in enabledChannels || it == channel }
+            }
+
     val isWorking: Boolean get() = phase is Phase.Working
 
     /** Whether the Polish action is available. */

@@ -55,7 +55,8 @@ I commit the contracts, then parallel worktree subagents, then review and merge.
   limit, missing file → empty, corrupt file → backup, unknown channel.
 - `PromptOverrideStore`: override file in `directory/<relativePath>` wins over the bundled
   default; `reset` deletes it; `save` refuses a `polish.txt` without `{{CHANNEL_GUIDELINES}}`
-  (clear error naming the placeholder) and treats blank text as reset. Tests with temp dirs.
+  (clear error naming the placeholder) and, like the Mac's `PromptFile.validate`, rejects blank
+  text (Restore default undoes an edit). Tests with temp dirs.
 - `RefineTest.kt` / `PromptAssemblerTest.kt` cover the new channel/refinement files.
 
 ## 3. Worker B — app data + composer session
