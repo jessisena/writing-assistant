@@ -34,19 +34,20 @@ class AnthropicClient(
     ): String {
         val request =
             MessagesRequest(model, MAX_TOKENS, listOf(Message(prompt)), thinkingOff(model))
-        val body = send(request, timeout)
-        return extractText(body)
+        return send(request, timeout, ::extractText)
     }
 
     override suspend fun checkAvailable() {
         val request = MessagesRequest(Provider.ANTHROPIC.models.small, 1, listOf(Message("Hi")))
-        send(request, CHECK_TIMEOUT)
+        send(request, CHECK_TIMEOUT) { _, _ -> }
     }
 
-    private suspend fun send(
+    /** Sends [payload] and hands a 2xx reply body to [handle]; throws for any other status. */
+    private suspend fun <T> send(
         payload: MessagesRequest,
         timeout: Duration,
-    ): String {
+        handle: (body: String, redactor: Redactor) -> T,
+    ): T {
         val key = apiKey()?.takeIf { it.isNotBlank() } ?: throw PolishError.MissingApiKey
         if (!isWellFormedKey(key)) throw PolishError.MalformedApiKey
         val request =
@@ -60,7 +61,7 @@ class AnthropicClient(
         val redactor = Redactor(key)
         val reply = httpClient.execute(request, timeout, redactor)
         if (reply.status !in 200..299) throw failureFor(reply, redactor)
-        return reply.body
+        return handle(reply.body, redactor)
     }
 
     @Serializable
@@ -125,12 +126,16 @@ class AnthropicClient(
         private fun thinkingOff(model: String): Thinking? =
             if (model == Provider.ANTHROPIC.models.large) Thinking("between_tools") else null
 
-        private fun extractText(body: String): String {
+        private fun extractText(
+            body: String,
+            redactor: Redactor,
+        ): String {
             val response =
                 try {
                     apiJson.decodeFromString<MessagesResponse>(body)
                 } catch (e: IllegalArgumentException) {
-                    throw PolishError.BadFormat("Unparseable response: ${e.message}")
+                    val detail = redactor.clean("Unparseable response: ${e.message}")
+                    throw PolishError.BadFormat(detail)
                 }
             when (response.stopReason) {
                 "max_tokens" -> throw PolishError.OutputTooLong

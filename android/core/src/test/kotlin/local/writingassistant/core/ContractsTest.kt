@@ -30,6 +30,7 @@ class ContractsTest {
                 PolishError.MalformedApiKey,
                 PolishError.KeyStorageFailed("detail"),
                 PolishError.Overloaded,
+                PolishError.TooLongForProvider,
                 PolishError.Timeout(120),
                 PolishError.Network("detail"),
                 PolishError.ApiFailed(500, "detail"),

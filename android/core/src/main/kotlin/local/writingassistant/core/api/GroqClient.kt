@@ -34,18 +34,20 @@ class GroqClient(
     ): String {
         val request =
             chatRequest(model, MAX_COMPLETION_TOKENS, prompt, ResponseFormat(JSON_OBJECT))
-        val body = send(request, timeout)
-        return extractText(body)
+        return send(request, timeout, ::extractText)
     }
 
     override suspend fun checkAvailable() {
-        send(chatRequest(Provider.GROQ.models.small, 1, "Hi", responseFormat = null), CHECK_TIMEOUT)
+        val request = chatRequest(Provider.GROQ.models.small, 1, "Hi", responseFormat = null)
+        send(request, CHECK_TIMEOUT) { _, _ -> }
     }
 
-    private suspend fun send(
+    /** Sends [payload] and hands a 2xx reply body to [handle]; throws for any other status. */
+    private suspend fun <T> send(
         payload: ChatRequest,
         timeout: Duration,
-    ): String {
+        handle: (body: String, redactor: Redactor) -> T,
+    ): T {
         val key = apiKey()?.takeIf { it.isNotBlank() } ?: throw PolishError.MissingApiKey
         if (!isWellFormedKey(key)) throw PolishError.MalformedApiKey
         val request =
@@ -58,7 +60,7 @@ class GroqClient(
         val redactor = Redactor(key)
         val reply = httpClient.execute(request, timeout, redactor)
         if (reply.status !in 200..299) throw failureFor(reply, redactor)
-        return reply.body
+        return handle(reply.body, redactor)
     }
 
     @Serializable
@@ -124,7 +126,13 @@ class GroqClient(
         private const val JSON_OBJECT = "json_object"
         private const val JSON_VALIDATE_FAILED = "json_validate_failed"
         private val CHECK_TIMEOUT = 20.seconds
-        private val OVERLOADED_STATUSES = setOf(413, 429, 503)
+        private val OVERLOADED_STATUSES = setOf(429, 503)
+
+        /**
+         * Groq sends 413 when the prompt plus [MAX_COMPLETION_TOKENS] exceeds the tokens-per-minute
+         * limit (8k on the free tier). That depends on the text's length, so retrying never helps.
+         */
+        private const val REQUEST_TOO_LARGE = 413
 
         private fun chatRequest(
             model: String,
@@ -150,12 +158,16 @@ class GroqClient(
          */
         private fun isReasoningModel(model: String): Boolean = model.startsWith("openai/gpt-oss-")
 
-        private fun extractText(body: String): String {
+        private fun extractText(
+            body: String,
+            redactor: Redactor,
+        ): String {
             val response =
                 try {
                     apiJson.decodeFromString<ChatResponse>(body)
                 } catch (e: IllegalArgumentException) {
-                    throw PolishError.BadFormat("Unparseable response: ${e.message}")
+                    val detail = redactor.clean("Unparseable response: ${e.message}")
+                    throw PolishError.BadFormat(detail)
                 }
             val choice =
                 response.choices.firstOrNull()
@@ -174,6 +186,10 @@ class GroqClient(
             return when {
                 reply.status == 401 || reply.status == 403 -> {
                     PolishError.InvalidApiKey
+                }
+
+                reply.status == REQUEST_TOO_LARGE -> {
+                    PolishError.TooLongForProvider
                 }
 
                 reply.status in OVERLOADED_STATUSES -> {

@@ -231,13 +231,21 @@ class GroqClientTest {
         }
 
     @Test
-    fun `429 413 and 503 are overloaded`() =
+    fun `429 and 503 are overloaded`() =
         runTest {
-            for (status in listOf(429, 413, 503)) {
+            for (status in listOf(429, 503)) {
                 enqueue(status, errorBody("Rate limit reached for model", "rate_limit_exceeded"))
 
                 assertFails<PolishError.Overloaded> { runPolish() }
             }
+        }
+
+    @Test
+    fun `413 is too long for the provider`() =
+        runTest {
+            enqueue(413, errorBody("Request too large for model", "rate_limit_exceeded"))
+
+            assertFails<PolishError.TooLongForProvider> { runPolish() }
         }
 
     @Test
@@ -273,6 +281,26 @@ class GroqClientTest {
             enqueue(404, errorBody("No such key $API_KEY", "model_not_found"))
 
             val error = assertFails<PolishError.ApiFailed> { runPolish() }
+
+            assertTrue(error.detail.contains("[redacted]"))
+        }
+
+    @Test
+    fun `a non-JSON error body echoing the key is redacted`() =
+        runTest {
+            enqueue(502, "<html>Bad gateway for Bearer $API_KEY</html>")
+
+            val error = assertFails<PolishError.ApiFailed> { runPolish() }
+
+            assertTrue(error.detail.contains("[redacted]"))
+        }
+
+    @Test
+    fun `a malformed reply echoing the key is redacted`() =
+        runTest {
+            enqueue(200, """{"choices": "$API_KEY"}""")
+
+            val error = assertFails<PolishError.BadFormat> { runPolish() }
 
             assertTrue(error.detail.contains("[redacted]"))
         }
