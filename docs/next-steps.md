@@ -197,6 +197,20 @@ added that were not in the original.
   default is available" with **Restore Default** and **Keep mine**.
 - **Keep mine** removes the badge and the banner, and they don't come back on relaunch.
 
+## 17. Progressive display, summary setting, tokens
+
+- A long English paragraph: the polished text appears while the summary card is still a
+  placeholder. Copy works then. Edit the text before the summary arrives: the edit survives and the
+  view doesn't scroll again.
+- Spanish text: no summary placeholder after the text appears.
+- Cancel after the text appears: the text stays and History has the entry, without a summary.
+- Settings › General: turn off **Show English learning summary**. English text gets no summary
+  card, nothing is added to the learning log, and the reply is faster. Turn it back on.
+- The toolbar token count rises after a polish and after a refinement, and matches Settings ›
+  General. `~/Library/Application Support/Writing Assistant/usage.json` has the current month.
+- **More diplomatic** and **More assertive** visibly change the tone, both prompts are listed in
+  Settings › Prompts, and the Refine row wraps at the minimum window width.
+
 ---
 
 ## Known gaps

@@ -54,10 +54,12 @@ after the build succeeds, so a broken build leaves the running app alone.
 
 ## Using the app
 
-Paste text, pick a channel (Formal is the default), and press **Process** or **⌘↩**. The Polished
+Paste text, pick a channel (Formal is the default), and press **Polish** or **⌘↩**. The Polished
 Text card shows the result, the detected language (or "Translated from X") and the model used.
 When you wrote in English, the Learning Summary card lists corrections, a grammar insight and
-vocabulary. Translated input has no learning summary.
+vocabulary. Translated input has no learning summary. The polished text appears as soon as it is
+ready; the summary follows a few seconds later. To skip it (faster, fewer tokens), turn off
+**Show English learning summary** in Settings › General.
 
 - **Formatting:** both editors support bold, italic, strikethrough, inline code, bullet lists and
   emoji, from the toolbar above each editor or the Format menu. Pasted text keeps bold, italic,
@@ -75,17 +77,20 @@ vocabulary. Translated input has no learning summary.
   and the learning summary.
 - **Learning log:** each learning summary is also appended to `learning-log.md`. Open it with
   **Writing Assistant → Open Learning Log**.
+- **Token usage:** the toolbar shows the tokens used this month (hover for input, output and
+  cache); Settings › General shows the same breakdown. Totals live in `usage.json` next to the
+  history.
 
 ### Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
-| ⌘↩ | Process |
+| ⌘↩ | Polish |
 | ⌘B / ⌘I / ⌘⇧X | Bold / Italic / Strikethrough in the focused editor |
 | ⌘K | Clear |
 | Esc | Cancel a running request |
 | ⌘Y | History |
-| ⌘, | Settings (prompts and appearance) |
+| ⌘, | Settings (general, prompts and appearance) |
 
 ### Polish from any app
 

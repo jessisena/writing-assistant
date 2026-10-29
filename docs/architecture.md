@@ -252,6 +252,8 @@ delegate when they appear. The activation step is injected, so tests run without
   prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
   history.json             the newest 50 requests
   history.corrupt.json     a history file that couldn't be read, moved aside
+  usage.json               token totals per month
+  usage.corrupt.json       a usage file that couldn't be read, moved aside
   learning-log.md          learning summaries, newest last
 ```
 
@@ -267,15 +269,39 @@ installing `claude` works without relaunching. Those directories are prefixed on
 `ClaudeCLI` runs:
 
 ```
-claude --print --output-format text --model <model> \
-  --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
+claude --print --output-format stream-json --verbose --include-partial-messages \
+  --model <model> --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
 ```
 
 with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
 `MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
-stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. After 120 s the
-process gets SIGTERM, then SIGKILL after a 2 s grace. A non-zero exit is retried once; a timeout is
-never retried. Cancelling the request or quitting the app terminates a running `claude` process.
+stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. stdout is read as
+one JSON event per line (`StreamJSONReader`): `text_delta` events go to the caller's `onText` as
+they arrive, and the final `result` event gives the reply text and its `usage` (input, output,
+cache write and cache read tokens). After 120 s the process gets SIGTERM, then SIGKILL after a 2 s
+grace. A non-zero exit is retried once, but only if no text was streamed yet; a timeout is never
+retried. Cancelling the request or quitting the app terminates a running `claude` process.
+
+The `result` event arrives about 2.5 s after the model's last token (CLI shutdown), and each call
+also carries about 24K tokens of Claude Code's own system prompt, mostly cache reads. Both show in
+the token count; the preview makes the first.
+
+### Progressive display, summary setting and token count
+
+`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which reports the
+top-level `polished_text` the moment its JSON string closes (with `detected_language` and
+`was_translated` if they came first). `AppModel` shows it as the result with no summary and a
+placeholder summary card; the final result fills in the summary but keeps the output editor's
+text, so edits made during the wait survive. A preview for a request that is no longer current is
+ignored. After a cancel or failure the previewed text stays and is saved to history without a
+summary.
+
+Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
+When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
+
+`PolishService` records every reply's usage in `UsageStore` (`usage.json`, totals per
+"yyyy-MM" in the user's calendar), even when the reply then fails to parse. The toolbar and
+Settings › General show the current month.
 
 ### Logging
 
@@ -321,8 +347,9 @@ paste + channel, Process (⌘↩)
 │ PromptStore.assemble(for: channel)     │
 └────────────────────────────────────────┘
       │
-      ▼  one ClaudeCLI.run() call
+      ▼  one ClaudeCLI.run() call, stream-json
          MAX_THINKING_TOKENS=0, MCP disabled
+         polished_text closes → onPreview (shown at once)
 ┌────────────────────────────────────────┐
 │ polish.txt  (4 steps)                  │
 │  1. detect language                    │
