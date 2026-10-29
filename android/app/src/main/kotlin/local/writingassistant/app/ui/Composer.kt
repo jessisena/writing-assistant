@@ -151,14 +151,8 @@ private fun PolishRow(
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         Spacer(Modifier.width(12.dp))
-        val label =
-            if (phase.refinement ==
-                null
-            ) {
-                R.string.composer_polishing
-            } else {
-                R.string.composer_refining
-            }
+        val isRefining = phase.refinement != null
+        val label = if (isRefining) R.string.composer_refining else R.string.composer_polishing
         Text(stringResource(label), Modifier.weight(1f))
         TextButton(onClick = { onEvent(ComposerEvent.Cancel) }) {
             Text(stringResource(R.string.composer_cancel))
