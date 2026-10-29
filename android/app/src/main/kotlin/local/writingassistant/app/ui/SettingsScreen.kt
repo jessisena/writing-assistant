@@ -2,6 +2,7 @@ package local.writingassistant.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -40,12 +41,15 @@ import local.writingassistant.core.Provider
 /**
  * The provider choice, then the selected provider's API key with Save, Test and Clear, a line
  * on why the key is needed and a link to where it's created.
+ *
+ * @param below More settings shown after the key, in the same scrolling column.
  */
 @Composable
 fun SettingsScreen(
     state: SettingsState,
     viewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
+    below: @Composable ColumnScope.() -> Unit = {},
 ) {
     var revealed by rememberSaveable { mutableStateOf(false) }
     Column(
@@ -93,6 +97,7 @@ fun SettingsScreen(
             }
         }
         StatusLine(state.status)
+        below()
     }
 }
 

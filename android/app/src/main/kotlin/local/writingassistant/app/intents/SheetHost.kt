@@ -37,10 +37,10 @@ import local.writingassistant.app.ui.Composer
 import local.writingassistant.app.ui.ComposerEvent
 import local.writingassistant.app.ui.ComposerViewModel
 import local.writingassistant.app.ui.Markdown
+import local.writingassistant.app.ui.SavedPaletteTheme
 import local.writingassistant.app.ui.SettingsScreen
 import local.writingassistant.app.ui.SettingsState
 import local.writingassistant.app.ui.SettingsViewModel
-import local.writingassistant.app.ui.WritingAssistantTheme
 import local.writingassistant.app.ui.copyPolishedText
 
 /**
@@ -74,7 +74,7 @@ fun ComponentActivity.showComposerSheet(
         composer.onEvent(ComposerEvent.Open(text))
     }
     setContent {
-        WritingAssistantTheme {
+        SavedPaletteTheme(graph.settings.palette) {
             ComposerSheet(graph, composer, onReplace, onFinish = ::finish)
         }
     }

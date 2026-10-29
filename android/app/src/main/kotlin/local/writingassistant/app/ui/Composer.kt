@@ -46,7 +46,8 @@ import local.writingassistant.core.Refinement
 /**
  * The composer shared by the full-screen app and the bottom sheet: channel chips, input,
  * Polish with progress and Cancel, then the editable result, the learning summary,
- * refinements, Copy and (when the host supports it) Replace.
+ * refinements, Copy and (when the host supports it) Replace. Copy and Replace send
+ * [ComposerEvent.SaveOutput] before calling the host, so the history keeps the text as shown.
  *
  * @param state What to render, from [ComposerViewModel.state].
  * @param onEvent Receives every user action; pass [ComposerViewModel.onEvent].
@@ -66,7 +67,9 @@ fun Composer(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ChannelChips(state.channel) { onEvent(ComposerEvent.ChannelSelected(it)) }
+        ChannelChips(state.enabledChannels, state.channel) {
+            onEvent(ComposerEvent.ChannelSelected(it))
+        }
         OutlinedTextField(
             value = state.input,
             onValueChange = { onEvent(ComposerEvent.InputChanged(it)) },
@@ -91,6 +94,7 @@ fun Composer(
 
 @Composable
 private fun ChannelChips(
+    channels: List<Channel>,
     selected: Channel,
     onSelect: (Channel) -> Unit,
 ) {
@@ -98,7 +102,7 @@ private fun ChannelChips(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (channel in Channel.entries) {
+        for (channel in channels) {
             val isSelected = channel == selected
             FilterChip(
                 selected = isSelected,
@@ -180,10 +184,12 @@ private fun ResultSection(
         state.output,
         enabled = !state.isWorking,
     ) { onEvent(ComposerEvent.OutputChanged(it)) }
-    state.result
-        ?.learningSummary
-        ?.takeUnless { it.isEmpty }
-        ?.let { LearningSummarySection(it) }
+    if (state.showLearningSummary) {
+        state.result
+            ?.learningSummary
+            ?.takeUnless { it.isEmpty }
+            ?.let { LearningSummarySection(it) }
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (refinement in Refinement.entries) {
             OutlinedButton(
@@ -196,12 +202,22 @@ private fun ResultSection(
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        Button(onClick = onCopy, enabled = state.canUseOutput, modifier = Modifier.weight(1f)) {
+        Button(
+            onClick = {
+                onEvent(ComposerEvent.SaveOutput)
+                onCopy()
+            },
+            enabled = state.canUseOutput,
+            modifier = Modifier.weight(1f),
+        ) {
             Text(stringResource(R.string.composer_copy))
         }
         if (onReplace != null) {
             Button(
-                onClick = onReplace,
+                onClick = {
+                    onEvent(ComposerEvent.SaveOutput)
+                    onReplace()
+                },
                 enabled = state.canUseOutput,
                 modifier = Modifier.weight(1f),
             ) {

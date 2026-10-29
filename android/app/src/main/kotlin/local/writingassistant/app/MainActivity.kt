@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -15,8 +16,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -27,70 +30,97 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import local.writingassistant.app.ui.Composer
 import local.writingassistant.app.ui.ComposerEvent
 import local.writingassistant.app.ui.ComposerViewModel
+import local.writingassistant.app.ui.HistoryActions
+import local.writingassistant.app.ui.HistoryScreen
+import local.writingassistant.app.ui.HistoryViewModel
+import local.writingassistant.app.ui.PreferencesSection
+import local.writingassistant.app.ui.PreferencesViewModel
+import local.writingassistant.app.ui.PromptEditorScreen
+import local.writingassistant.app.ui.PromptEditorViewModel
+import local.writingassistant.app.ui.PromptListScreen
+import local.writingassistant.app.ui.SavedPaletteTheme
 import local.writingassistant.app.ui.SettingsScreen
 import local.writingassistant.app.ui.SettingsViewModel
-import local.writingassistant.app.ui.WritingAssistantTheme
 import local.writingassistant.app.ui.copyPolishedText
+import local.writingassistant.app.ui.rememberCustomizedPrompts
+import local.writingassistant.core.PromptFile
 
-/** Full-screen composer with Settings. */
+/** Full-screen composer with History, Settings and the prompt editor. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val graph = (application as WritingAssistantApp).graph
         setContent {
-            WritingAssistantTheme { MainScreen(graph) }
+            SavedPaletteTheme(graph.settings.palette) { MainScreen(graph) }
         }
     }
 }
 
-private enum class Screen { Composer, Settings }
+/** The app's screens; Back goes to [parent]. Parents are declared before their children. */
+private enum class Screen(
+    @StringRes val title: Int,
+    val parent: Screen?,
+) {
+    Composer(R.string.app_name, null),
+    Settings(R.string.settings_title, Composer),
+    History(R.string.history_title, Composer),
+    Prompts(R.string.prompts_title, Settings),
+    PromptEditor(R.string.prompts_title, Prompts),
+}
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Where the main screen is: the screen, and on [Screen.PromptEditor] the edited prompt's path.
+ * Both survive recreation; [onLeaveSettings] runs whenever Back leaves Settings.
+ */
+private class Navigation(
+    private val screenState: MutableState<Screen>,
+    private val promptPathState: MutableState<String?>,
+    private val onLeaveSettings: () -> Unit,
+) {
+    val screen: Screen get() = screenState.value
+
+    /** The prompt being edited; null when the saved path no longer names one. */
+    val prompt: PromptFile? get() = promptPathState.value?.let(PromptFile::fromRelativePath)
+
+    fun open(target: Screen) {
+        screenState.value = target
+    }
+
+    fun openPrompt(file: PromptFile) {
+        promptPathState.value = file.relativePath
+        screenState.value = Screen.PromptEditor
+    }
+
+    fun up() {
+        if (screen == Screen.Settings) onLeaveSettings()
+        screenState.value = screen.parent ?: return
+    }
+}
+
+@Composable
+private fun rememberNavigation(onLeaveSettings: () -> Unit): Navigation {
+    val screen = rememberSaveable { mutableStateOf(Screen.Composer) }
+    val promptPath = rememberSaveable { mutableStateOf<String?>(null) }
+    return remember(screen, promptPath) { Navigation(screen, promptPath, onLeaveSettings) }
+}
+
 @Composable
 private fun MainScreen(graph: AppGraph) {
     val composer: ComposerViewModel = viewModel(factory = ComposerViewModel.factory(graph))
     val state by composer.state.collectAsStateWithLifecycle()
-    var screen by rememberSaveable { mutableStateOf(Screen.Composer) }
+    val navigation = rememberNavigation { composer.onEvent(ComposerEvent.RefreshApiKey) }
     var askedForKey by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.needsApiKey) {
         if (state.needsApiKey && !askedForKey) {
             askedForKey = true
-            screen = Screen.Settings
+            navigation.open(Screen.Settings)
         }
     }
-    val closeSettings = {
-        screen = Screen.Composer
-        composer.onEvent(ComposerEvent.RefreshApiKey)
-    }
-    BackHandler(enabled = screen == Screen.Settings, onBack = closeSettings)
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    val inSettings = screen == Screen.Settings
-                    val title = if (inSettings) R.string.settings_title else R.string.app_name
-                    Text(stringResource(title))
-                },
-                navigationIcon = {
-                    if (screen == Screen.Settings) {
-                        TextButton(
-                            onClick = closeSettings,
-                        ) { Text(stringResource(R.string.main_back)) }
-                    }
-                },
-                actions = {
-                    if (screen == Screen.Composer) {
-                        TextButton(onClick = { screen = Screen.Settings }) {
-                            Text(stringResource(R.string.main_settings))
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
+    BackHandler(enabled = navigation.screen != Screen.Composer, onBack = navigation::up)
+    Scaffold(topBar = { MainTopBar(navigation) }) { padding ->
         val content = Modifier.fillMaxSize().padding(padding).imePadding()
-        when (screen) {
+        when (navigation.screen) {
             Screen.Composer -> {
                 val context = LocalContext.current
                 Composer(
@@ -103,11 +133,108 @@ private fun MainScreen(graph: AppGraph) {
             }
 
             Screen.Settings -> {
-                val settings: SettingsViewModel =
-                    viewModel(factory = SettingsViewModel.factory(graph))
-                val settingsState by settings.state.collectAsStateWithLifecycle()
-                SettingsScreen(settingsState, settings, content)
+                MainSettings(graph, navigation, content)
+            }
+
+            Screen.History -> {
+                MainHistory(graph, composer, navigation, content)
+            }
+
+            Screen.Prompts -> {
+                PromptListScreen(
+                    rememberCustomizedPrompts(graph.promptStore),
+                    navigation::openPrompt,
+                    content,
+                )
+            }
+
+            Screen.PromptEditor -> {
+                MainPromptEditor(graph, navigation, content)
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainTopBar(navigation: Navigation) {
+    val screen = navigation.screen
+    TopAppBar(
+        title = {
+            val prompt = navigation.prompt
+            if (screen == Screen.PromptEditor && prompt != null) {
+                Text(prompt.displayName)
+            } else {
+                Text(stringResource(screen.title))
+            }
+        },
+        navigationIcon = {
+            if (screen != Screen.Composer) {
+                TextButton(onClick = navigation::up) { Text(stringResource(R.string.main_back)) }
+            }
+        },
+        actions = {
+            if (screen == Screen.Composer) {
+                TextButton(onClick = { navigation.open(Screen.History) }) {
+                    Text(stringResource(R.string.main_history))
+                }
+                TextButton(onClick = { navigation.open(Screen.Settings) }) {
+                    Text(stringResource(R.string.main_settings))
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun MainSettings(
+    graph: AppGraph,
+    navigation: Navigation,
+    modifier: Modifier,
+) {
+    val settings: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(graph))
+    val settingsState by settings.state.collectAsStateWithLifecycle()
+    val preferences: PreferencesViewModel =
+        viewModel(factory = PreferencesViewModel.factory(graph))
+    SettingsScreen(settingsState, settings, modifier) {
+        PreferencesSection(preferences, onOpenPrompts = { navigation.open(Screen.Prompts) })
+    }
+}
+
+@Composable
+private fun MainHistory(
+    graph: AppGraph,
+    composer: ComposerViewModel,
+    navigation: Navigation,
+    modifier: Modifier,
+) {
+    val history: HistoryViewModel = viewModel(factory = HistoryViewModel.factory(graph))
+    val entries by history.entries.collectAsStateWithLifecycle()
+    val failure by history.failure.collectAsStateWithLifecycle()
+    val actions =
+        HistoryActions(
+            onRestore = { id ->
+                composer.onEvent(ComposerEvent.RestoreHistory(id))
+                navigation.up()
+            },
+            onDelete = history::delete,
+            onClear = history::clear,
+        )
+    HistoryScreen(entries, failure, actions, modifier)
+}
+
+@Composable
+private fun MainPromptEditor(
+    graph: AppGraph,
+    navigation: Navigation,
+    modifier: Modifier,
+) {
+    val file = navigation.prompt
+    if (file == null) {
+        LaunchedEffect(Unit) { navigation.up() }
+        return
+    }
+    val editor: PromptEditorViewModel =
+        viewModel(key = file.relativePath, factory = PromptEditorViewModel.factory(graph, file))
+    PromptEditorScreen(editor, modifier)
 }
