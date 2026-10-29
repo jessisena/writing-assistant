@@ -148,8 +148,11 @@ struct MainWindowView: View {
                 .padding(32)
                 .frame(maxWidth: .infinity)
             }
-            .onChange(of: model.result) { _, newValue in
-                guard newValue != nil else { return }
+            .onChange(of: model.result) { oldValue, newValue in
+                // Not when only the summary arrives after a preview: the user may be editing.
+                guard let newValue, oldValue?.polishedText != newValue.polishedText else {
+                    return
+                }
                 if reduceMotion {
                     proxy.scrollTo(Self.resultsID, anchor: .bottom)
                 } else {
