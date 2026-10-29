@@ -6,16 +6,20 @@ private actor FakeRunner: ClaudeRunning {
     private let output: Result<String, PolishError>
     private let availability: Result<Void, PolishError>
     private let usage: TokenUsage?
+    private let streamed: [String]
     private(set) var calls: [(prompt: String, model: String, timeout: Duration)] = []
 
+    /// - Parameter streamed: Pieces passed to `onText`, in order, before `output` is returned.
     init(
         output: Result<String, PolishError>,
         availability: Result<Void, PolishError> = .success(()),
-        usage: TokenUsage? = nil
+        usage: TokenUsage? = nil,
+        streamed: [String] = []
     ) {
         self.output = output
         self.availability = availability
         self.usage = usage
+        self.streamed = streamed
     }
 
     func run(
@@ -23,6 +27,7 @@ private actor FakeRunner: ClaudeRunning {
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
         calls.append((prompt, model, timeout))
+        streamed.forEach(onText)
         return ClaudeReply(text: try output.get(), usage: usage)
     }
 
@@ -536,6 +541,90 @@ private func expectBadFormat(_ output: String) async {
 
         #expect(result.learningSummary != nil)
         #expect(await runner.calls.first?.prompt == "SYSTEM PROMPT\n\n---\n\nHello there")
+    }
+}
+
+/// What happened during a polish call, in order: each preview, then the return.
+private final class PreviewLog: @unchecked Sendable {
+    enum Event: Equatable {
+        case preview(PolishPreview)
+        case returned
+    }
+
+    private let lock = NSLock()
+    private var _events: [Event] = []
+
+    var events: [Event] { lock.withLock { _events } }
+
+    func record(_ event: Event) {
+        lock.withLock { _events.append(event) }
+    }
+}
+
+@Suite struct PolishPreviewTests {
+    /// `text` cut into pieces of `size` characters, the way a reply streams in.
+    private func pieces(of text: String, size: Int) -> [String] {
+        stride(from: 0, to: text.count, by: size).map { start in
+            let from = text.index(text.startIndex, offsetBy: start)
+            let to = text.index(from, offsetBy: size, limitedBy: text.endIndex) ?? text.endIndex
+            return String(text[from..<to])
+        }
+    }
+
+    private func polish(streaming streamed: [String], reply: String, log: PreviewLog)
+        async throws(PolishError) -> PolishResult
+    {
+        let runner = FakeRunner(output: .success(reply), streamed: streamed)
+        let service = PolishService(runner: runner, prompts: StubPromptStore())
+        let result = try await service.polish(
+            text: "Hello", channel: .slack, includeLearningSummary: true,
+            onPreview: { log.record(.preview($0)) })
+        log.record(.returned)
+        return result
+    }
+
+    @Test(arguments: [1, 7, 1_000])
+    func previewIsSentOnceBeforeTheResult(pieceSize: Int) async throws {
+        let reply = "```json\n\(englishResponse)\n```"
+        let log = PreviewLog()
+
+        let result = try await polish(
+            streaming: pieces(of: reply, size: pieceSize), reply: reply, log: log)
+
+        let preview = PolishPreview(
+            polishedText: "Please send me the report by end of day.", detectedLanguage: "English",
+            wasTranslated: nil)
+        #expect(log.events == [.preview(preview), .returned])
+        #expect(result.polishedText == preview.polishedText)
+        #expect(result.learningSummary != nil)
+    }
+
+    @Test func replyThatNeverClosesThePolishedTextSendsNoPreview() async throws {
+        let log = PreviewLog()
+
+        let result = try await polish(
+            streaming: [#"{"polished_text": "Please send"#, " me the report"],
+            reply: englishResponse, log: log)
+
+        #expect(log.events == [.returned])
+        #expect(result.polishedText == "Please send me the report by end of day.")
+    }
+
+    @Test func finalReplyIsStillParsedOnItsOwnAfterAPreview() async {
+        let log = PreviewLog()
+
+        await #expect {
+            _ = try await polish(
+                streaming: [#"{"polished_text": "Hi", "#], reply: "not json", log: log)
+        } throws: { error in
+            guard case .badFormat = error as? PolishError else { return false }
+            return true
+        }
+        #expect(
+            log.events == [
+                .preview(
+                    PolishPreview(polishedText: "Hi", detectedLanguage: nil, wasTranslated: nil))
+            ])
     }
 }
 

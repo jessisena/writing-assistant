@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WritingAssistantCore
+import os
 
 /// A temporary directory holding a fake `claude` shell script. The script can write files next
 /// to itself (`$DIR`) so tests can inspect what the real process received.
@@ -71,6 +72,56 @@ extension FakeClaude {
 
 private let countInvocation = #"echo x >> "$DIR/count""#
 
+/// One stream-json line, serialized so any text is escaped the way claude escapes it.
+private func jsonLine(_ object: [String: Any]) -> String {
+    let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return String(decoding: data, as: UTF8.self)
+}
+
+private func deltaEvent(_ text: String, type: String = "text_delta") -> String {
+    let textKey = type == "thinking_delta" ? "thinking" : "text"
+    return jsonLine([
+        "type": "stream_event",
+        "event": [
+            "type": "content_block_delta", "index": 0,
+            "delta": ["type": type, textKey: text],
+        ],
+    ])
+}
+
+private func resultEvent(_ text: String, isError: Bool = false, usage: [String: Int]? = nil)
+    -> String
+{
+    var event: [String: Any] = [
+        "type": "result", "subtype": isError ? "error" : "success", "is_error": isError,
+        "result": text,
+    ]
+    event["usage"] = usage
+    return jsonLine(event)
+}
+
+private func shellQuoted(_ text: String) -> String {
+    "'" + text.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+}
+
+/// A shell command that prints each line followed by `\n`.
+private func printLines(_ lines: String...) -> String {
+    "printf '%s\\n'" + lines.map { " " + shellQuoted($0) }.joined()
+}
+
+private let printOK = printLines(resultEvent("ok"))
+
+/// Collects what `onText` receives, from whichever thread calls it.
+private final class TextLog: Sendable {
+    private let pieces = OSAllocatedUnfairLock(initialState: [String]())
+
+    var received: [String] { pieces.withLock { $0 } }
+
+    func append(_ piece: String) {
+        pieces.withLock { $0.append(piece) }
+    }
+}
+
 /// Applies `overrides` to this process's environment (nil unsets) for the duration of `body`.
 /// Callers must be in a `.serialized` suite.
 private func withEnvironment(
@@ -107,20 +158,20 @@ private func setEnvironment(_ name: String, _ value: String?) {
 }
 
 @Suite(.serialized) struct ClaudeCLITests {
-    @Test func successReturnsTrimmedStdoutAndReceivesPromptOnStdin() async throws {
-        let fake = try FakeClaude(script: #"cat > "$DIR/stdin"; printf '\n  polished text \n\n'"#)
+    @Test func successReturnsTrimmedResultAndReceivesPromptOnStdin() async throws {
+        let script = #"cat > "$DIR/stdin"; "# + printLines(resultEvent("\n  polished text \n\n"))
+        let fake = try FakeClaude(script: script)
         defer { fake.remove() }
 
-        let output = try await fake.cli.run(
-            prompt: "system\n\n---\n\nhello", model: "haiku", timeout: .seconds(10)
-        ).text
+        let reply = try await fake.cli.run(
+            prompt: "system\n\n---\n\nhello", model: "haiku", timeout: .seconds(10))
 
-        #expect(output == "polished text")
+        #expect(reply == ClaudeReply(text: "polished text", usage: nil))
         #expect(try fake.contents(of: "stdin") == "system\n\n---\n\nhello")
     }
 
     @Test func passesExactHeadlessArguments() async throws {
-        let fake = try FakeClaude(script: #"printf '%s\n' "$@" > "$DIR/args"; echo ok"#)
+        let fake = try FakeClaude(script: #"printf '%s\n' "$@" > "$DIR/args"; "# + printOK)
         defer { fake.remove() }
 
         _ = try await fake.cli.run(prompt: "p", model: "claude-sonnet-5-5", timeout: .seconds(10))
@@ -128,14 +179,170 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let arguments = try fake.contents(of: "args").split(separator: "\n").map(String.init)
         #expect(
             arguments == [
-                "--print", "--output-format", "text", "--model", "claude-sonnet-5-5",
+                "--print", "--output-format", "stream-json", "--verbose",
+                "--include-partial-messages", "--model", "claude-sonnet-5-5",
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--no-session-persistence",
             ])
     }
 
+    @Test func textDeltasReachOnTextInOrderAndUsageIsParsed() async throws {
+        let script = printLines(
+            jsonLine(["type": "system", "subtype": "init"]),
+            deltaEvent("Hel"),
+            deltaEvent("thinking about it", type: "thinking_delta"),
+            jsonLine(["type": "stream_event", "event": ["type": "content_block_stop"]]),
+            deltaEvent("lo \"wörld\" 👋"),
+            deltaEvent("\n!"),
+            jsonLine(["type": "assistant", "message": ["content": []]]),
+            resultEvent(
+                "Hello \"wörld\" 👋\n!",
+                usage: [
+                    "input_tokens": 3, "output_tokens": 27, "cache_creation_input_tokens": 100,
+                    "cache_read_input_tokens": 2_000,
+                ]))
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+        let log = TextLog()
+
+        let reply = try await fake.cli.run(
+            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+
+        #expect(log.received == ["Hel", "lo \"wörld\" 👋", "\n!"])
+        #expect(reply.text == "Hello \"wörld\" 👋\n!")
+        #expect(
+            reply.usage == TokenUsage(input: 3, output: 27, cacheCreation: 100, cacheRead: 2_000))
+    }
+
+    @Test func deltasArriveWhileTheProcessIsStillRunning() async throws {
+        // The fake only prints its result once the test has seen the first delta.
+        let script = """
+            \(printLines(deltaEvent("early")))
+            i=0
+            while [ ! -f "$DIR/seen" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+            if [ -f "$DIR/seen" ]; then \(printLines(resultEvent("streamed")))
+            else \(printLines(resultEvent("buffered"))); fi
+            """
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+        let seen = fake.directory.appending(path: "seen")
+
+        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) {
+            _ in _ = try? Data().write(to: seen)
+        }
+
+        #expect(reply.text == "streamed")
+    }
+
+    @Test func linesSplitAcrossWritesAndAFinalLineWithoutNewlineAreRead() async throws {
+        let delta = deltaEvent("split")
+        let result = resultEvent("done")
+        let middle = delta.index(delta.startIndex, offsetBy: delta.count / 2)
+        let script = """
+            printf '%s' \(shellQuoted(String(delta[..<middle])))
+            sleep 0.2
+            printf '%s\\n%s' \(shellQuoted(String(delta[middle...]))) \(shellQuoted(result))
+            """
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+        let log = TextLog()
+
+        let reply = try await fake.cli.run(
+            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+
+        #expect(log.received == ["split"])
+        #expect(reply.text == "done")
+    }
+
+    @Test func capturedTranscriptParsesIntoTextAndUsage() async throws {
+        let fixture = try #require(
+            Bundle.module.url(forResource: "Fixtures/stream-json-reply", withExtension: "jsonl"))
+        let fake = try FakeClaude(script: "cat \(shellQuoted(fixture.path))")
+        defer { fake.remove() }
+        let log = TextLog()
+
+        let reply = try await fake.cli.run(
+            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+
+        let expected =
+            "```json\n{\"polished_text\": \"Hi \\\"there\\\"\", \"learning_summary\": null}\n```"
+        #expect(reply.text == expected)
+        #expect(log.received.joined() == expected)
+        #expect(log.received.count == 4)
+        #expect(
+            reply.usage
+                == TokenUsage(input: 3, output: 27, cacheCreation: 10_175, cacheRead: 14_585))
+    }
+
+    @Test func errorResultFailsWithItsText() async throws {
+        let fake = try FakeClaude(
+            script: printLines(resultEvent("API Error: overloaded", isError: true)))
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "API Error: overloaded")) {
+            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+    }
+
+    @Test func errorResultIsTheDetailOfAFailedExit() async throws {
+        let error = printLines(resultEvent("Credit balance too low", isError: true))
+        let script = "\(countInvocation); \(error); exit 1"
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "Credit balance too low")) {
+            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+        #expect(try fake.invocationCount() == 2)
+    }
+
+    @Test func missingResultEventFailsWithTheOutput() async throws {
+        let fake = try FakeClaude(script: printLines(deltaEvent("half a reply"), "stray line"))
+        defer { fake.remove() }
+
+        await #expect(
+            throws: PolishError.cliFailed(
+                stderr: "claude CLI printed no result event. Output: stray line")
+        ) {
+            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        }
+    }
+
+    @Test func missingResultEventDetailIsCapped() async throws {
+        let fake = try FakeClaude(script: "head -c 5000 /dev/zero | tr '\\0' 's'")
+        defer { fake.remove() }
+
+        do {
+            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            Issue.record("expected cliFailed")
+        } catch {
+            guard case .cliFailed(let detail) = error else {
+                Issue.record("expected cliFailed, got \(error)")
+                return
+            }
+            #expect(detail.hasPrefix("claude CLI printed no result event. Output: sss"))
+            #expect(detail.count < 520)
+        }
+    }
+
+    @Test func failedExitIsNotRetriedOnceTextWasStreamed() async throws {
+        let script =
+            "\(countInvocation); \(printLines(deltaEvent("partial"))); "
+            + "echo 'connection reset' >&2; exit 1"
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+        let log = TextLog()
+
+        await #expect(throws: PolishError.cliFailed(stderr: "connection reset")) {
+            try await fake.cli.run(
+                prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+        }
+        #expect(try fake.invocationCount() == 1)
+        #expect(log.received == ["partial"])
+    }
+
     @Test func runsInTemporaryDirectoryNotCallersDirectory() async throws {
-        let fake = try FakeClaude(script: #"pwd -P > "$DIR/cwd"; echo ok"#)
+        let fake = try FakeClaude(script: #"pwd -P > "$DIR/cwd"; "# + printOK)
         defer { fake.remove() }
 
         _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
@@ -146,7 +353,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func stripsApiKeyAndSetsHeadlessEnvironment() async throws {
-        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; "# + printOK)
         defer { fake.remove() }
 
         try await withEnvironment(["ANTHROPIC_API_KEY": "sk-test-should-not-leak"]) {
@@ -163,7 +370,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func fillsInMissingUserAndHome() async throws {
-        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; "# + printOK)
         defer { fake.remove() }
 
         try await withEnvironment(["USER": nil, "HOME": nil]) {
@@ -176,7 +383,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func keepsUserAndHomeThatAreAlreadySet() async throws {
-        let fake = try FakeClaude(script: #"env > "$DIR/env"; echo ok"#)
+        let fake = try FakeClaude(script: #"env > "$DIR/env"; "# + printOK)
         defer { fake.remove() }
 
         try await withEnvironment(["USER": "someone-else", "HOME": "/tmp/elsewhere"]) {
@@ -220,7 +427,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let script = """
             \(countInvocation)
             if [ "$(wc -l < "$DIR/count")" -lt 2 ]; then echo boom >&2; exit 1; fi
-            echo recovered
+            \(printLines(resultEvent("recovered")))
             """
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
@@ -258,8 +465,10 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func largeOutputAndInputDoNotDeadlock() async throws {
+        // One 1 MiB result line, read in many chunks.
         let script =
-            #"cat > "$DIR/stdin"; head -c 1048576 /dev/zero | tr '\0' 'a'; "#
+            #"cat > "$DIR/stdin"; printf '{"type":"result","is_error":false,"result":"'; "#
+            + #"head -c 1048576 /dev/zero | tr '\0' 'a'; printf '"}\n'; "#
             + #"head -c 262144 /dev/zero | tr '\0' 'e' >&2"#
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
@@ -273,7 +482,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func childThatIgnoresStdinStillSucceeds() async throws {
-        let fake = try FakeClaude(script: "echo early")
+        let fake = try FakeClaude(script: printLines(resultEvent("early")))
         defer { fake.remove() }
         let prompt = String(repeating: "p", count: 500_000)
 
@@ -284,7 +493,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func missingBinaryThrowsNotFoundFromRunAndCheckAvailable() async throws {
-        let fake = try FakeClaude(script: "echo ok", executable: false)
+        let fake = try FakeClaude(script: printOK, executable: false)
         defer { fake.remove() }
 
         await #expect(throws: PolishError.claudeNotFound) {
@@ -296,15 +505,15 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func checkAvailableSucceedsWhenBinaryExists() async throws {
-        let fake = try FakeClaude(script: "echo ok")
+        let fake = try FakeClaude(script: printOK)
         defer { fake.remove() }
 
         try await fake.cli.checkAvailable()
     }
 
     @Test func foundBinaryIsCachedUntilItStopsBeingExecutable() async throws {
-        let preferred = try FakeClaude(script: "echo preferred")
-        let fallback = try FakeClaude(script: "echo fallback")
+        let preferred = try FakeClaude(script: printLines(resultEvent("preferred")))
+        let fallback = try FakeClaude(script: printLines(resultEvent("fallback")))
         defer {
             preferred.remove()
             fallback.remove()
