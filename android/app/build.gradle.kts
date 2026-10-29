@@ -27,11 +27,15 @@ android {
     buildTypes {
         debug {
             // Prefills Settings on debug builds only; release builds never embed a key.
-            val key = localProperties.get().getProperty("ANTHROPIC_API_KEY", "")
+            val properties = localProperties.get()
+            val key = properties.getProperty("ANTHROPIC_API_KEY", "")
             buildConfigField("String", "DEBUG_API_KEY", "\"$key\"")
+            val groqKey = properties.getProperty("GROQ_API_KEY", "")
+            buildConfigField("String", "DEBUG_GROQ_API_KEY", "\"$groqKey\"")
         }
         release {
             buildConfigField("String", "DEBUG_API_KEY", "\"\"")
+            buildConfigField("String", "DEBUG_GROQ_API_KEY", "\"\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))

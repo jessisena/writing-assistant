@@ -14,7 +14,7 @@
     <string name="composer_replace">Replace</string>
     <string name="composer_retry">Retry</string>
     <string name="composer_dismiss">Dismiss</string>
-    <string name="composer_needs_key">Add your Anthropic API key in Settings to start polishing.</string>
+    <string name="composer_needs_key">Add your API key in Settings to start polishing.</string>
     <plurals name="composer_what_changed">
         <item quantity="one">What changed (%d tip)</item>
         <item quantity="other">What changed (%d tips)</item>
@@ -29,8 +29,11 @@
     <string name="main_back">Back</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_api_key">Anthropic API key</string>
-    <string name="settings_why">Writing Assistant sends your text to Claude using your own Anthropic API key. Create one at console.anthropic.com. The key is stored encrypted on this device.</string>
+    <string name="settings_provider">AI provider</string>
+    <string name="settings_api_key">%1$s API key</string>
+    <string name="settings_why_anthropic">Writing Assistant sends your text to Claude using your own Anthropic API key. The key is stored encrypted on this device.</string>
+    <string name="settings_why_groq">Writing Assistant sends the text you polish to Groq using your own Groq API key. Groq\'s free tier has daily limits. The key is stored encrypted on this device.</string>
+    <string name="settings_get_key">Create a key in the %1$s console</string>
     <string name="settings_show_key">Show</string>
     <string name="settings_hide_key">Hide</string>
     <string name="settings_save">Save</string>
