@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -98,10 +99,18 @@ private fun ChannelChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         for (channel in Channel.entries) {
+            val isSelected = channel == selected
             FilterChip(
-                selected = channel == selected,
+                selected = isSelected,
                 onClick = { onSelect(channel) },
                 label = { Text(channel.shortName) },
+                leadingIcon = if (isSelected) ({ Text("✓") }) else null,
+                border =
+                    FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected,
+                        borderColor = MaterialTheme.colorScheme.outline,
+                    ),
             )
         }
     }
@@ -175,11 +184,14 @@ private fun ResultSection(
         ?.learningSummary
         ?.takeUnless { it.isEmpty }
         ?.let { LearningSummarySection(it) }
+    val outline = MaterialTheme.colorScheme.outline
+    val refineBorder = if (state.canUseOutput) outline else outline.copy(alpha = DISABLED_BORDER)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (refinement in Refinement.entries) {
             OutlinedButton(
                 onClick = { onEvent(ComposerEvent.Refine(refinement)) },
                 enabled = state.canUseOutput,
+                border = BorderStroke(1.dp, refineBorder),
             ) {
                 Text(refinement.displayName)
             }
@@ -305,3 +317,6 @@ private fun SummaryHeading(
         color = MaterialTheme.colorScheme.primary,
     )
 }
+
+/** Material 3's alpha for a disabled outlined button's border. */
+private const val DISABLED_BORDER = 0.12f
