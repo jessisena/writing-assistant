@@ -47,6 +47,8 @@ struct WritingAssistantApp: App {
 
         Settings {
             TabView {
+                GeneralSettingsView(model: model)
+                    .tabItem { Label("General", systemImage: "gearshape") }
                 PromptEditorView(store: store, newerDefaults: newerDefaults)
                     .tabItem { Label("Prompts", systemImage: "doc.text") }
                 AppearanceSettingsView(settings: themeSettings)
