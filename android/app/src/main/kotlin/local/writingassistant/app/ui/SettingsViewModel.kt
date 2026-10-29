@@ -16,7 +16,8 @@ import local.writingassistant.app.BuildConfig
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Polishing
-import local.writingassistant.core.api.AnthropicClient
+import local.writingassistant.core.Provider
+import local.writingassistant.core.api.isWellFormedKey
 
 /** What the Settings screen renders. */
 data class SettingsState(
@@ -59,7 +60,7 @@ class SettingsViewModel(
 
     init {
         launchReporting {
-            val stored = apiKeyStore.read()
+            val stored = apiKeyStore.read(Provider.ANTHROPIC)
             val key = stored ?: debugApiKey.takeIf { it.isNotBlank() }.orEmpty()
             mutableState.update { it.copy(key = key, hasStoredKey = stored != null) }
         }
@@ -85,7 +86,7 @@ class SettingsViewModel(
 
     fun clear() {
         launchReporting {
-            apiKeyStore.clear()
+            apiKeyStore.clear(Provider.ANTHROPIC)
             mutableState.update {
                 SettingsState(key = "", hasStoredKey = false, status = SettingsState.Status.Cleared)
             }
@@ -114,8 +115,8 @@ class SettingsViewModel(
     private suspend fun store(): Boolean {
         val key = state.value.key.trim()
         if (key.isEmpty()) return false
-        if (!AnthropicClient.isWellFormedKey(key)) throw PolishError.MalformedApiKey
-        apiKeyStore.write(key)
+        if (!isWellFormedKey(key)) throw PolishError.MalformedApiKey
+        apiKeyStore.write(Provider.ANTHROPIC, key)
         mutableState.update {
             it.copy(key = key, hasStoredKey = true, status = SettingsState.Status.Saved)
         }

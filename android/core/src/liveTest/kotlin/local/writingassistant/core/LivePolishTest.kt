@@ -23,7 +23,7 @@ class LivePolishTest {
             val result =
                 service.polish("hey can u check the PR before tomorow? thx", Channel.SLACK)
 
-            assertEquals(ModelRouting.HAIKU_MODEL, result.modelUsed)
+            assertEquals(Provider.ANTHROPIC.models.small, result.modelUsed)
             assertTrue(result.polishedText.isNotBlank())
             assertTrue(result.polishedText.contains("tomorrow", ignoreCase = true))
         }
@@ -37,7 +37,7 @@ class LivePolishTest {
                     Channel.SLACK,
                 )
 
-            assertEquals(ModelRouting.SONNET_MODEL, result.modelUsed)
+            assertEquals(Provider.ANTHROPIC.models.large, result.modelUsed)
             assertTrue(result.wasTranslated)
             assertNull(result.learningSummary)
             assertTrue(result.polishedText.isNotBlank())

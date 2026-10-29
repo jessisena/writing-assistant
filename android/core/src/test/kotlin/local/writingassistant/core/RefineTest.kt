@@ -19,7 +19,7 @@ class RefineTest {
         )
 
     private fun service(
-        client: ClaudeClient,
+        client: LlmClient,
         prompts: PromptReading = StubPromptReader(),
     ) = PolishService(client, prompts, 9.seconds)
 
@@ -64,7 +64,7 @@ class RefineTest {
             service.refine("word ".repeat(100), Channel.SLACK, Refinement.SHORTER)
 
             assertEquals(
-                listOf(ModelRouting.HAIKU_MODEL, ModelRouting.SONNET_MODEL),
+                listOf(Provider.ANTHROPIC.models.small, Provider.ANTHROPIC.models.large),
                 client.calls.map { it.model },
             )
             assertTrue(client.calls.all { it.timeout == 9.seconds })
@@ -143,7 +143,7 @@ class RefineTest {
     fun clientErrorPropagatesUnchanged() =
         runTest {
             val failure = PolishError.ApiFailed(500, "boom")
-            val client = FakeClaudeClient(listOf(Result.failure(failure)))
+            val client = FakeLlmClient(listOf(Result.failure(failure)))
 
             assertSame(failure, thrownBy { service(client).refineHello() })
         }

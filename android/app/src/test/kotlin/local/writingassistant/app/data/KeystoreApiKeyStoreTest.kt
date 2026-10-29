@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,30 +54,30 @@ class KeystoreApiKeyStoreTest {
     @Test
     fun `an empty store has no key`() =
         runTest {
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
         }
 
     @Test
     fun `a written key reads back`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
 
-            assertEquals(API_KEY, store.read())
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
         }
 
     @Test
     fun `a new write replaces the old key`() =
         runTest {
-            store.write(API_KEY)
-            store.write("sk-ant-second")
+            store.write(Provider.ANTHROPIC, API_KEY)
+            store.write(Provider.ANTHROPIC, "sk-ant-second")
 
-            assertEquals("sk-ant-second", store.read())
+            assertEquals("sk-ant-second", store.read(Provider.ANTHROPIC))
         }
 
     @Test
     fun `the key is not stored in plain text`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
 
             val stored = storedValue()!!
             assertFalse(stored.contains(API_KEY))
@@ -86,20 +87,20 @@ class KeystoreApiKeyStoreTest {
     @Test
     fun `clear removes the key`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
 
-            store.clear()
+            store.clear(Provider.ANTHROPIC)
 
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
             assertNull(storedValue())
         }
 
     @Test
     fun `clear on an empty store is a no-op`() =
         runTest {
-            store.clear()
+            store.clear(Provider.ANTHROPIC)
 
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
         }
 
     @Test
@@ -107,7 +108,7 @@ class KeystoreApiKeyStoreTest {
         runTest {
             putStoredValue("%%% not base64 %%%")
 
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
             assertNull(storedValue())
         }
 
@@ -116,31 +117,31 @@ class KeystoreApiKeyStoreTest {
         runTest {
             putStoredValue(Base64.getEncoder().encodeToString(ByteArray(8)))
 
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
             assertNull(storedValue())
         }
 
     @Test
     fun `tampered ciphertext reads as no key and is cleared`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
             val bytes = Base64.getDecoder().decode(storedValue()!!)
             bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
             putStoredValue(Base64.getEncoder().encodeToString(bytes))
 
-            assertNull(store.read())
+            assertNull(store.read(Provider.ANTHROPIC))
             assertNull(storedValue())
         }
 
     @Test
     fun `a value encrypted with a replaced device key reads as no key and is cleared`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
             val replacedKey = newAesKey()
 
             val reopened = KeystoreApiKeyStore(dataStore) { replacedKey }
 
-            assertNull(reopened.read())
+            assertNull(reopened.read(Provider.ANTHROPIC))
             assertNull(storedValue())
         }
 
@@ -149,7 +150,7 @@ class KeystoreApiKeyStoreTest {
         runTest {
             val failing = KeystoreApiKeyStore(dataStore) { throw ProviderException("boom") }
 
-            val error = storageError { failing.write(API_KEY) }
+            val error = storageError { failing.write(Provider.ANTHROPIC, API_KEY) }
 
             assertEquals(PolishError.KeyStorageFailed("ProviderException"), error)
             assertNull(storedValue())
@@ -158,20 +159,20 @@ class KeystoreApiKeyStoreTest {
     @Test
     fun `a Keystore failure while decrypting is a key storage error and keeps the key`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
             val stored = storedValue()
             val failing = KeystoreApiKeyStore(dataStore) { throw ProviderException("boom") }
 
-            storageError { failing.read() }
+            storageError { failing.read(Provider.ANTHROPIC) }
 
             assertEquals(stored, storedValue())
-            assertEquals(API_KEY, store.read())
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
         }
 
     @Test
     fun `a cipher runtime failure while decrypting is a key storage error`() =
         runTest {
-            store.write(API_KEY)
+            store.write(Provider.ANTHROPIC, API_KEY)
             val broken =
                 object : SecretKey {
                     override fun getAlgorithm() = "AES"
@@ -182,15 +183,15 @@ class KeystoreApiKeyStoreTest {
                 }
             val failing = KeystoreApiKeyStore(dataStore) { broken }
 
-            storageError { failing.read() }
+            storageError { failing.read(Provider.ANTHROPIC) }
 
-            assertEquals(API_KEY, store.read())
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
         }
 
     @Test
     fun `writing a blank key is rejected`() =
         runTest {
-            val error = runCatching { store.write(" ") }.exceptionOrNull()
+            val error = runCatching { store.write(Provider.ANTHROPIC, " ") }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException)
             assertNull(storedValue())

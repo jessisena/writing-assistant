@@ -26,7 +26,7 @@ import kotlin.time.Duration.Companion.seconds
 
 class PolishServiceTest {
     private fun service(
-        client: ClaudeClient,
+        client: LlmClient,
         timeout: Duration = PolishService.DEFAULT_TIMEOUT,
     ) = PolishService(client, StubPromptReader(), timeout)
 
@@ -253,7 +253,7 @@ class PolishServiceTest {
     fun clientErrorPropagatesUnchanged() =
         runTest {
             val error = PolishError.Timeout(120)
-            val service = service(FakeClaudeClient(listOf(Result.failure(error))))
+            val service = service(FakeLlmClient(listOf(Result.failure(error))))
 
             assertSame(error, thrownBy { service.polish("Hello", Channel.SLACK) })
         }
@@ -278,7 +278,7 @@ class PolishServiceTest {
     @Test
     fun checkReadyForwardsClientAvailability() =
         runTest {
-            val client = FakeClaudeClient()
+            val client = FakeLlmClient()
             val service = service(client)
             service.checkReady()
 
@@ -349,15 +349,15 @@ class PolishServiceTest {
 
             assertEquals(
                 listOf(
-                    FakeClaudeClient.Call(
+                    FakeLlmClient.Call(
                         "SYSTEM FORMAL RULES\n\n---\n\nHello there",
-                        ModelRouting.HAIKU_MODEL,
+                        Provider.ANTHROPIC.models.small,
                         7.seconds,
                     ),
                 ),
                 client.calls,
             )
-            assertEquals(ModelRouting.HAIKU_MODEL, result.modelUsed)
+            assertEquals(Provider.ANTHROPIC.models.small, result.modelUsed)
         }
 
     @Test
@@ -378,8 +378,8 @@ class PolishServiceTest {
 
             val result = service(client).polish(text, Channel.SLACK)
 
-            assertEquals(ModelRouting.SONNET_MODEL, client.calls.single().model)
-            assertEquals(ModelRouting.SONNET_MODEL, result.modelUsed)
+            assertEquals(Provider.ANTHROPIC.models.large, client.calls.single().model)
+            assertEquals(Provider.ANTHROPIC.models.large, result.modelUsed)
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -399,12 +399,12 @@ class PolishServiceTest {
     fun cancellationFromTheClientIsNotWrapped() =
         runTest {
             val cancellation = CancellationException("stopped")
-            val service = service(FakeClaudeClient(listOf(Result.failure(cancellation))))
+            val service = service(FakeLlmClient(listOf(Result.failure(cancellation))))
 
             assertSame(cancellation, thrownBy { service.polish("Hello", Channel.SLACK) })
         }
 
-    private class HangingClient : ClaudeClient {
+    private class HangingClient : LlmClient {
         override suspend fun run(
             prompt: String,
             model: String,

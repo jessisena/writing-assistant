@@ -1,36 +1,25 @@
 package local.writingassistant.core.api
 
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import local.writingassistant.core.ClaudeClient
-import local.writingassistant.core.ModelRouting
+import local.writingassistant.core.LlmClient
 import local.writingassistant.core.PolishError
-import okhttp3.Call
-import okhttp3.Callback
+import local.writingassistant.core.Provider
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
-import java.io.IOException
-import java.io.InterruptedIOException
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.math.ceil
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.DurationUnit
-import kotlin.time.toJavaDuration
 
 /**
- * [ClaudeClient] backed by one `POST /v1/messages` call to the Anthropic API.
+ * [LlmClient] backed by one `POST /v1/messages` call to the Anthropic API.
  *
- * The request runs on OkHttp's dispatcher threads, and cancelling the calling coroutine cancels
- * the HTTP call. The API key is redacted from every error this client throws.
+ * Cancelling the calling coroutine cancels the HTTP call. The API key is redacted from every
+ * error this client throws.
  *
  * @param apiKey Returns the current key, or null when none is stored. Read on every call.
  * @param baseUrl Overridden in tests to point at MockWebServer.
@@ -39,7 +28,7 @@ class AnthropicClient(
     private val apiKey: suspend () -> String?,
     private val httpClient: OkHttpClient = OkHttpClient(),
     private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
-) : ClaudeClient {
+) : LlmClient {
     override suspend fun run(
         prompt: String,
         model: String,
@@ -52,7 +41,8 @@ class AnthropicClient(
     }
 
     override suspend fun checkAvailable() {
-        send(MessagesRequest(ModelRouting.HAIKU_MODEL, 1, listOf(Message("Hi"))), CHECK_TIMEOUT)
+        val request = MessagesRequest(Provider.ANTHROPIC.models.small, 1, listOf(Message("Hi")))
+        send(request, CHECK_TIMEOUT)
     }
 
     private suspend fun send(
@@ -70,64 +60,9 @@ class AnthropicClient(
                 .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         val redactor = Redactor(key)
-        val reply = execute(request, timeout, redactor)
+        val reply = httpClient.execute(request, timeout, redactor)
         if (reply.status !in 200..299) throw failureFor(reply, redactor)
         return reply.body
-    }
-
-    private suspend fun execute(
-        request: Request,
-        timeout: Duration,
-        redactor: Redactor,
-    ): HttpReply =
-        suspendCancellableCoroutine { continuation ->
-            val call = clientFor(timeout).newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(
-                object : Callback {
-                    override fun onFailure(
-                        call: Call,
-                        e: IOException,
-                    ) {
-                        continuation.resumeWithException(ioFailure(e, timeout, redactor))
-                    }
-
-                    override fun onResponse(
-                        call: Call,
-                        response: Response,
-                    ) {
-                        val reply =
-                            try {
-                                response.use { HttpReply(it.code, it.body.string()) }
-                            } catch (e: IOException) {
-                                continuation.resumeWithException(ioFailure(e, timeout, redactor))
-                                return
-                            }
-                        continuation.resume(reply)
-                    }
-                },
-            )
-        }
-
-    private fun clientFor(timeout: Duration): OkHttpClient {
-        val javaTimeout = timeout.toJavaDuration()
-        return httpClient
-            .newBuilder()
-            .callTimeout(javaTimeout)
-            .readTimeout(javaTimeout)
-            .writeTimeout(javaTimeout)
-            .build()
-    }
-
-    private class HttpReply(
-        val status: Int,
-        val body: String,
-    )
-
-    private class Redactor(
-        private val key: String,
-    ) {
-        fun clean(text: String): String = text.replace(key, "[redacted]")
     }
 
     @Serializable
@@ -198,13 +133,7 @@ class AnthropicClient(
          * rejects `disabled`, so it gets `between_tools`; Haiku 4.5 doesn't think by default.
          */
         private fun thinkingOff(model: String): Thinking? =
-            if (model == ModelRouting.SONNET_MODEL) Thinking("between_tools") else null
-
-        /**
-         * Returns whether [key] can be sent as an HTTP header: printable ASCII only, so no
-         * spaces, newlines, zero-width characters or smart quotes picked up while pasting.
-         */
-        fun isWellFormedKey(key: String): Boolean = key.isNotEmpty() && key.all { it in '!'..'~' }
+            if (model == Provider.ANTHROPIC.models.large) Thinking("between_tools") else null
 
         private fun extractText(body: String): String {
             val response =
@@ -265,19 +194,5 @@ class AnthropicClient(
             body.trim().take(EXCERPT_LENGTH).ifEmpty {
                 "Empty response body"
             }
-
-        private fun ioFailure(
-            e: IOException,
-            timeout: Duration,
-            redactor: Redactor,
-        ): PolishError =
-            if (e is InterruptedIOException) {
-                PolishError.Timeout(wholeSecondsRoundedUp(timeout))
-            } else {
-                PolishError.Network(redactor.clean(e.message ?: e.javaClass.simpleName))
-            }
-
-        private fun wholeSecondsRoundedUp(timeout: Duration): Int =
-            ceil(timeout.toDouble(DurationUnit.SECONDS)).toInt()
     }
 }

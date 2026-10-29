@@ -154,8 +154,60 @@ sealed class PromptFile(
     }
 }
 
-/** Sends one prompt to Claude and returns the text of the reply. */
-interface ClaudeClient {
+/** Which of a provider's two models handles a piece of text; see [ModelRouting.pickTier]. */
+enum class ModelTier {
+    SMALL,
+    LARGE,
+}
+
+/** A provider's fast model for short English text and its stronger model for everything else. */
+data class Models(
+    val small: String,
+    val large: String,
+) {
+    fun forTier(tier: ModelTier): String =
+        when (tier) {
+            ModelTier.SMALL -> small
+            ModelTier.LARGE -> large
+        }
+}
+
+/** An LLM service the user can pick in Settings, each with its own API key. */
+enum class Provider(
+    /** Stable identifier used in storage keys; never change it. */
+    val id: String,
+    val displayName: String,
+    /** Where the user creates an API key. */
+    val keyUrl: String,
+    val models: Models,
+) {
+    ANTHROPIC(
+        "anthropic",
+        "Anthropic",
+        "https://console.anthropic.com/settings/keys",
+        Models(small = "claude-haiku-4-5-20251001", large = "claude-sonnet-5-5"),
+    ),
+    GROQ(
+        "groq",
+        "Groq",
+        "https://console.groq.com/keys",
+        Models(small = "llama-3.1-8b-instant", large = "openai/gpt-oss-120b"),
+    ),
+    ;
+
+    companion object {
+        fun fromId(id: String): Provider? = entries.firstOrNull { it.id == id }
+    }
+}
+
+/** The client and models that handle one request. */
+data class Backend(
+    val client: LlmClient,
+    val models: Models,
+)
+
+/** Sends one prompt to an LLM provider and returns the text of the reply. */
+interface LlmClient {
     /**
      * Runs [prompt] on [model].
      *
@@ -193,6 +245,6 @@ interface Polishing {
         refinement: Refinement,
     ): String
 
-    /** Throws [PolishError] when Claude can't be reached with the current key. */
+    /** Throws [PolishError] when the current provider can't be reached with its key. */
     suspend fun checkReady()
 }

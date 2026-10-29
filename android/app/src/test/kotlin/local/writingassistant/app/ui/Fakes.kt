@@ -5,6 +5,7 @@ import local.writingassistant.app.data.AppSettings
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
+import local.writingassistant.core.Provider
 import local.writingassistant.core.Refinement
 
 /** [Polishing] whose answers are supplied by each test; records every call. */
@@ -56,11 +57,18 @@ class FakePolishing : Polishing {
 
 class FakeAppSettings(
     var channel: Channel? = null,
+    var provider: Provider = Provider.ANTHROPIC,
 ) : AppSettings {
     override suspend fun lastChannel(): Channel? = channel
 
     override suspend fun setLastChannel(channel: Channel) {
         this.channel = channel
+    }
+
+    override suspend fun provider(): Provider = provider
+
+    override suspend fun setProvider(provider: Provider) {
+        this.provider = provider
     }
 }
 
@@ -68,23 +76,42 @@ class FakeAppSettings(
 class FailingKeyStore(
     private val error: Exception,
 ) : ApiKeyStore {
-    override suspend fun read(): String? = throw error
+    override suspend fun read(provider: Provider): String? = throw error
 
-    override suspend fun write(key: String) = throw error
+    override suspend fun write(
+        provider: Provider,
+        key: String,
+    ) = throw error
 
-    override suspend fun clear() = throw error
+    override suspend fun clear(provider: Provider) = throw error
 }
 
+/** In-memory [ApiKeyStore]; [key] is the Anthropic key, the one most tests care about. */
 class FakeApiKeyStore(
-    var key: String? = "sk-test",
+    key: String? = "sk-test",
 ) : ApiKeyStore {
-    override suspend fun read(): String? = key
+    val keys = mutableMapOf<Provider, String>()
 
-    override suspend fun write(key: String) {
+    var key: String?
+        get() = keys[Provider.ANTHROPIC]
+        set(value) {
+            if (value == null) keys.remove(Provider.ANTHROPIC) else keys[Provider.ANTHROPIC] = value
+        }
+
+    init {
         this.key = key
     }
 
-    override suspend fun clear() {
-        key = null
+    override suspend fun read(provider: Provider): String? = keys[provider]
+
+    override suspend fun write(
+        provider: Provider,
+        key: String,
+    ) {
+        keys[provider] = key
+    }
+
+    override suspend fun clear(provider: Provider) {
+        keys.remove(provider)
     }
 }

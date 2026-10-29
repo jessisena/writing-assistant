@@ -12,6 +12,7 @@ import local.writingassistant.app.data.KeystoreApiKeyStore
 import local.writingassistant.app.ui.ComposerSession
 import local.writingassistant.core.PolishService
 import local.writingassistant.core.Polishing
+import local.writingassistant.core.Provider
 import local.writingassistant.core.api.AnthropicClient
 
 /** App-wide singletons, built once by [WritingAssistantApp]. */
@@ -34,7 +35,7 @@ class DefaultAppGraph(
     override val settings: AppSettings by lazy { DataStoreAppSettings(appContext) }
     override val polisher: Polishing by lazy {
         PolishService(
-            client = AnthropicClient(apiKey = { apiKeyStore.read() }),
+            client = AnthropicClient(apiKey = { apiKeyStore.read(Provider.ANTHROPIC) }),
             prompts = AssetPromptReader(appContext.assets),
         )
     }

@@ -9,8 +9,8 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import local.writingassistant.core.ModelRouting
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
@@ -314,12 +314,12 @@ class AnthropicClientTest {
 
     @Test
     fun `isWellFormedKey accepts printable ASCII only`() {
-        assertTrue(AnthropicClient.isWellFormedKey(API_KEY))
-        assertTrue(AnthropicClient.isWellFormedKey("!~"))
-        assertFalse(AnthropicClient.isWellFormedKey(""))
-        assertFalse(AnthropicClient.isWellFormedKey("sk\tant"))
-        assertFalse(AnthropicClient.isWellFormedKey("sk-ant-é"))
-        assertFalse(AnthropicClient.isWellFormedKey("sk-ant\u007F"))
+        assertTrue(isWellFormedKey(API_KEY))
+        assertTrue(isWellFormedKey("!~"))
+        assertFalse(isWellFormedKey(""))
+        assertFalse(isWellFormedKey("sk\tant"))
+        assertFalse(isWellFormedKey("sk-ant-é"))
+        assertFalse(isWellFormedKey("sk-ant\u007F"))
     }
 
     @Test
@@ -384,7 +384,7 @@ class AnthropicClientTest {
         runTest {
             enqueue(200, textResponse("Polished."))
 
-            client().run("Fix this text", ModelRouting.HAIKU_MODEL, 5.seconds)
+            client().run("Fix this text", Provider.ANTHROPIC.models.small, 5.seconds)
 
             val body = Json.parseToJsonElement(takeRequest().body!!.utf8()).jsonObject
             assertEquals(setOf("model", "max_tokens", "messages"), body.keys)
@@ -398,7 +398,7 @@ class AnthropicClientTest {
             client().checkAvailable()
 
             val body = Json.parseToJsonElement(takeRequest().body!!.utf8()).jsonObject
-            assertEquals(ModelRouting.HAIKU_MODEL, body["model"]!!.jsonPrimitive.content)
+            assertEquals(Provider.ANTHROPIC.models.small, body["model"]!!.jsonPrimitive.content)
             assertEquals(1, body["max_tokens"]!!.jsonPrimitive.int)
         }
 

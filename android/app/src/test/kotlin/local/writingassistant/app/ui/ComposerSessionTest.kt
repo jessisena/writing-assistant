@@ -25,6 +25,7 @@ import local.writingassistant.app.ui.ComposerEvent.Polish
 import local.writingassistant.app.ui.ComposerState.Phase
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -184,6 +185,10 @@ class ComposerSessionTest {
 
                     override suspend fun setLastChannel(channel: Channel) =
                         throw IOException("disk")
+
+                    override suspend fun provider(): Provider = Provider.ANTHROPIC
+
+                    override suspend fun setProvider(provider: Provider) = Unit
                 }
             val session = ComposerSession(polisher, settings, FakeApiKeyStore(), sessionScope)
             advanceUntilIdle()
