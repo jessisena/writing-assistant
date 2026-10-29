@@ -382,9 +382,55 @@ class PolishServiceTest {
             assertEquals(Provider.ANTHROPIC.models.large, result.modelUsed)
         }
 
+    @Test
+    fun backendModelsArePickedPerTierAndReported() =
+        runTest {
+            val client = replying(englishResponse, translatedResponse("Spanish"))
+            val service =
+                PolishService({ Backend(client, Models("s", "l")) }, StubPromptReader())
+
+            val english = service.polish("Hello there", Channel.SLACK)
+            val spanish = service.polish("Por favor envíame el informe hoy.", Channel.SLACK)
+
+            assertEquals(listOf("s", "l"), client.calls.map { it.model })
+            assertEquals("s", english.modelUsed)
+            assertEquals("l", spanish.modelUsed)
+        }
+
+    @Test
+    fun backendIsResolvedOnEveryCall() =
+        runTest {
+            val first = replying(englishResponse)
+            val second = replying(englishResponse, englishResponse)
+            var current = Backend(first, Models("first-s", "first-l"))
+            val service = PolishService({ current }, StubPromptReader())
+
+            service.polish("Hello", Channel.SLACK)
+            current = Backend(second, Models("second-s", "second-l"))
+            val result = service.polish("Hello", Channel.SLACK)
+            service.refine("Hello", Channel.SLACK, Refinement.SHORTER)
+
+            assertEquals(listOf("first-s"), first.calls.map { it.model })
+            assertEquals(listOf("second-s", "second-s"), second.calls.map { it.model })
+            assertEquals("second-s", result.modelUsed)
+        }
+
+    @Test
+    fun checkReadyUsesTheCurrentBackendsClient() =
+        runTest {
+            val healthy = FakeLlmClient()
+            val rejected = FakeLlmClient().apply { availabilityError = PolishError.InvalidApiKey }
+            var current = Backend(rejected, Models("s", "l"))
+            val service = PolishService({ current }, StubPromptReader())
+
+            assertSame(PolishError.InvalidApiKey, thrownBy { service.checkReady() })
+            current = Backend(healthy, Models("s", "l"))
+            service.checkReady()
+        }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun cancellationPropagatesWhileWaitingForClaude() =
+    fun cancellationPropagatesWhileWaitingForTheModel() =
         runTest {
             val service = service(HangingClient())
             val pending = async { service.polish("Hello", Channel.SLACK) }
