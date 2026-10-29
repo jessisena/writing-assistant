@@ -1,13 +1,18 @@
 package local.writingassistant.app.ui
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
+import local.writingassistant.app.data.HistoryRepository
+import local.writingassistant.app.data.PalettePreset
 import local.writingassistant.core.Channel
+import local.writingassistant.core.HistoryStore
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Provider
 import local.writingassistant.core.Refinement
+import java.nio.file.Files
 
 /** [Polishing] whose answers are supplied by each test; records every call. */
 class FakePolishing : Polishing {
@@ -18,6 +23,9 @@ class FakePolishing : Polishing {
     )
 
     val calls = mutableListOf<Call>()
+
+    /** The `learningSummary` argument of every [polish] call. */
+    val learningSummaryRequests = mutableListOf<Boolean>()
     var onPolish: suspend (String) -> PolishResult = { result(it) }
     var onRefine: suspend (
         String,
@@ -28,8 +36,10 @@ class FakePolishing : Polishing {
     override suspend fun polish(
         text: String,
         channel: Channel,
+        learningSummary: Boolean,
     ): PolishResult {
         calls += Call(text, channel)
+        learningSummaryRequests += learningSummary
         return onPolish(text)
     }
 
@@ -60,6 +70,26 @@ class FakeAppSettings(
     var channel: Channel? = null,
     var provider: Provider = Provider.ANTHROPIC,
 ) : AppSettings {
+    override val disabledChannels = MutableStateFlow(emptySet<Channel>())
+    override val learningSummaryEnabled = MutableStateFlow(true)
+    override val palette = MutableStateFlow(PalettePreset.WRITING_DESK)
+
+    override suspend fun setChannelEnabled(
+        channel: Channel,
+        enabled: Boolean,
+    ) {
+        disabledChannels.value =
+            if (enabled) disabledChannels.value - channel else disabledChannels.value + channel
+    }
+
+    override suspend fun setLearningSummaryEnabled(enabled: Boolean) {
+        learningSummaryEnabled.value = enabled
+    }
+
+    override suspend fun setPalette(palette: PalettePreset) {
+        this.palette.value = palette
+    }
+
     override suspend fun lastChannel(): Channel? = channel
 
     override suspend fun setLastChannel(channel: Channel) {
@@ -126,3 +156,9 @@ class FakeApiKeyStore(
         keys.remove(provider)
     }
 }
+
+/** A history kept in a fresh temp directory, so tests never touch each other's files. */
+fun testHistory(): HistoryRepository =
+    HistoryRepository(
+        HistoryStore(Files.createTempDirectory("history").resolve("history.json").toFile()),
+    )

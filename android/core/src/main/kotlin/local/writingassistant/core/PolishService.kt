@@ -49,6 +49,7 @@ class PolishService(
     override suspend fun polish(
         text: String,
         channel: Channel,
+        learningSummary: Boolean,
     ): PolishResult {
         val input = validatedInput(text)
         val systemPrompt = loadPrompt { assembler.assemble(channel) }

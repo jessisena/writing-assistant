@@ -22,6 +22,10 @@ data class ComposerState(
     val error: PolishError? = null,
     /** True once the key store was read and holds no API key; Polish is disabled meanwhile. */
     val needsApiKey: Boolean = false,
+    /** The channels offered as chips, in [Channel] order; never empty. */
+    val enabledChannels: List<Channel> = Channel.entries,
+    /** False when the user turned the learning summary off in Settings. */
+    val showLearningSummary: Boolean = true,
 ) {
     val isWorking: Boolean get() = phase is Phase.Working
 
@@ -78,6 +82,14 @@ sealed interface ComposerEvent {
 
     /** Reads the key store again, e.g. after returning from Settings. */
     data object RefreshApiKey : ComposerEvent
+
+    /** Writes the output on screen into its history entry; sent before Copy and Replace. */
+    data object SaveOutput : ComposerEvent
+
+    /** Loads history entry [id] (input, output, channel and result); ignored while working. */
+    data class RestoreHistory(
+        val id: String,
+    ) : ComposerEvent
 }
 
 /**

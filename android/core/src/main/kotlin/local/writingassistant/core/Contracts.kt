@@ -17,6 +17,9 @@ enum class Channel(
     TALKING_POINTS("talking_points", "Sync / meeting talking points", "Talking points"),
     FORMAL("formal", "Formal document", "Formal doc"),
     AI_PROMPT("ai_prompt", "AI prompt", "AI prompt"),
+    EMAIL("email", "Email", "Email"),
+    PERSONAL_MESSAGE("personal_message", "Personal message (text, WhatsApp)", "Personal"),
+    PROOFREAD("proofread", "Proofread only", "Proofread"),
     OTHER("other", "Other / general", "General"),
     ;
 
@@ -33,6 +36,8 @@ enum class Refinement(
     SHORTER("shorter", "Shorter"),
     MORE_CASUAL("more_casual", "More casual"),
     MORE_FORMAL("more_formal", "More formal"),
+    MORE_DIPLOMATIC("more_diplomatic", "More diplomatic"),
+    MORE_ASSERTIVE("more_assertive", "More assertive"),
 }
 
 @Serializable
@@ -147,19 +152,30 @@ sealed class PolishError(
 sealed class PromptFile(
     /** Path relative to the prompts directory, e.g. `channels/slack.txt`. */
     val relativePath: String,
+    /** Name shown in the prompt editor. */
+    val displayName: String,
 ) {
-    data object Global : PromptFile("polish.txt")
+    data object Global : PromptFile("polish.txt", "Global rules")
 
     data class ForChannel(
         val channel: Channel,
-    ) : PromptFile("channels/${channel.id}.txt")
+    ) : PromptFile("channels/${channel.id}.txt", channel.displayName)
 
     data class ForRefinement(
         val refinement: Refinement,
-    ) : PromptFile("refinements/${refinement.id}.txt")
+    ) : PromptFile("refinements/${refinement.id}.txt", refinement.displayName)
 
     companion object {
         const val CHANNEL_PLACEHOLDER = "{{CHANNEL_GUIDELINES}}"
+
+        /** Every prompt file: the global rules, then channels, then refinements. */
+        val all: List<PromptFile>
+            get() =
+                listOf(Global) + Channel.entries.map(::ForChannel) +
+                    Refinement.entries.map(::ForRefinement)
+
+        fun fromRelativePath(path: String): PromptFile? =
+            all.firstOrNull { it.relativePath == path }
     }
 }
 
@@ -241,10 +257,16 @@ fun interface PromptReading {
 }
 
 interface Polishing {
-    /** Polishes (or translates, then polishes) [text] for [channel]. Throws [PolishError]. */
+    /**
+     * Polishes (or translates, then polishes) [text] for [channel]. Throws [PolishError].
+     *
+     * @param learningSummary False asks the model to skip the learning summary, and the result
+     *   never carries one.
+     */
     suspend fun polish(
         text: String,
         channel: Channel,
+        learningSummary: Boolean = true,
     ): PolishResult
 
     /** Rewrites already-polished [text] with one extra instruction; returns only the new text. */

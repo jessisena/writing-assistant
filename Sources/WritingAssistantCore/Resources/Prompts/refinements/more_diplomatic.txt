@@ -1,0 +1,6 @@
+Make the tone more diplomatic and tactful, suitable for a sensitive topic or a disagreement.
+Turn demands into requests, acknowledge the reader's point of view where it fits, and frame
+problems around the work, not the person. Keep every request, decision and deadline.
+Do not become vague, apologetic or wordy. Keep the same structure and meaning.
+Do not add facts that are not in the text. Never use em dashes.
+Keep any emoji and Markdown formatting (bold, italic, lists, links).

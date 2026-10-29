@@ -5,14 +5,16 @@ import WritingAssistantCore
     @Test func channelsMatchPromptFileNames() {
         #expect(
             Channel.allCases.map(\.rawValue) == [
-                "slack", "slack_informal", "talking_points", "formal", "ai_prompt", "other",
+                "slack", "slack_informal", "talking_points", "formal", "ai_prompt", "email",
+                "personal_message", "proofread", "other",
             ])
     }
 
     @Test func channelsHaveShortNamesForChips() {
         #expect(
             Channel.allCases.map(\.shortName) == [
-                "Slack", "Casual Slack", "Talking points", "Formal doc", "AI prompt", "General",
+                "Slack", "Casual Slack", "Talking points", "Formal doc", "AI prompt", "Email",
+                "Personal", "Proofread", "General",
             ])
     }
 
@@ -25,18 +27,24 @@ import WritingAssistantCore
     }
 
     @Test func refinementsMatchPromptFileNames() {
-        #expect(Refinement.allCases.map(\.rawValue) == ["shorter", "more_casual", "more_formal"])
+        #expect(
+            Refinement.allCases.map(\.rawValue) == [
+                "shorter", "more_casual", "more_formal", "more_diplomatic", "more_assertive",
+            ])
         #expect(Refinement.allCases.map(\.id) == Refinement.allCases.map(\.rawValue))
         #expect(
             Refinement.allCases.map { PromptFile.refinement($0).relativePath } == [
                 "refinements/shorter.txt", "refinements/more_casual.txt",
-                "refinements/more_formal.txt",
+                "refinements/more_formal.txt", "refinements/more_diplomatic.txt",
+                "refinements/more_assertive.txt",
             ])
     }
 
     @Test func refinementDisplayNamesAreUsedByPromptFiles() {
         #expect(
-            Refinement.allCases.map(\.displayName) == ["Shorter", "More casual", "More formal"])
+            Refinement.allCases.map(\.displayName) == [
+                "Shorter", "More casual", "More formal", "More diplomatic", "More assertive",
+            ])
         #expect(PromptFile.refinement(.moreFormal).displayName == "More formal")
     }
 

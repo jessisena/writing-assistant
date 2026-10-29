@@ -9,12 +9,7 @@ class ContractsTest {
     @Test
     fun everyPromptFileExistsInTheSharedPromptsDirectory() {
         val dir = File(System.getProperty("prompts.dir"))
-        val files =
-            listOf(PromptFile.Global) +
-                Channel.entries.map { PromptFile.ForChannel(it) } +
-                Refinement.entries.map { PromptFile.ForRefinement(it) }
-
-        val missing = files.filterNot { File(dir, it.relativePath).isFile }
+        val missing = PromptFile.all.filterNot { File(dir, it.relativePath).isFile }
 
         assertEquals(emptyList<PromptFile>(), missing)
     }
@@ -64,6 +59,40 @@ class ContractsTest {
     fun providerFromIdRoundTripsAndRejectsUnknownIds() {
         Provider.entries.forEach { assertEquals(it, Provider.fromId(it.id)) }
         assertEquals(null, Provider.fromId("nope"))
+    }
+
+    @Test
+    fun promptFilesListGlobalThenChannelsThenRefinements() {
+        val expected =
+            listOf(PromptFile.Global) +
+                Channel.entries.map { PromptFile.ForChannel(it) } +
+                Refinement.entries.map { PromptFile.ForRefinement(it) }
+
+        assertEquals(expected, PromptFile.all)
+        PromptFile.all.forEach { assertEquals(it, PromptFile.fromRelativePath(it.relativePath)) }
+        assertEquals(null, PromptFile.fromRelativePath("channels/nope.txt"))
+    }
+
+    @Test
+    fun idsMatchTheMacApp() {
+        assertEquals(
+            listOf(
+                "slack",
+                "slack_informal",
+                "talking_points",
+                "formal",
+                "ai_prompt",
+                "email",
+                "personal_message",
+                "proofread",
+                "other",
+            ),
+            Channel.entries.map { it.id },
+        )
+        assertEquals(
+            listOf("shorter", "more_casual", "more_formal", "more_diplomatic", "more_assertive"),
+            Refinement.entries.map { it.id },
+        )
     }
 
     @Test

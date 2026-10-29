@@ -1,0 +1,8 @@
+Write a clear email that a busy reader can act on quickly.
+Start with a short greeting that fits the text (for example "Hi Ana,"); keep any greeting and
+sign-off the author wrote. Do not invent names: when none is given, use "Hi," or "Hello,".
+Put the main point or request in the first two sentences, then supporting detail.
+Use short paragraphs. Use "- " bullets for lists of items, options or steps.
+If the text has no subject line and reads like a new email rather than a reply, add one as the
+first line in the form "Subject: <a specific subject of under 8 words>".
+End with a clear next step or ask when there is one, then a short sign-off.

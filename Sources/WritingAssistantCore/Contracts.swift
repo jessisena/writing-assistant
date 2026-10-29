@@ -8,6 +8,9 @@ public enum Channel: String, CaseIterable, Sendable, Identifiable {
     case talkingPoints = "talking_points"
     case formal
     case aiPrompt = "ai_prompt"
+    case email
+    case personalMessage = "personal_message"
+    case proofread
     case other
 
     public var id: String { rawValue }
@@ -19,6 +22,9 @@ public enum Channel: String, CaseIterable, Sendable, Identifiable {
         case .talkingPoints: "Sync / meeting talking points"
         case .formal: "Formal document"
         case .aiPrompt: "AI prompt"
+        case .email: "Email"
+        case .personalMessage: "Personal message (text, WhatsApp)"
+        case .proofread: "Proofread only"
         case .other: "Other / general"
         }
     }
@@ -31,6 +37,9 @@ public enum Channel: String, CaseIterable, Sendable, Identifiable {
         case .talkingPoints: "Talking points"
         case .formal: "Formal doc"
         case .aiPrompt: "AI prompt"
+        case .email: "Email"
+        case .personalMessage: "Personal"
+        case .proofread: "Proofread"
         case .other: "General"
         }
     }
@@ -41,6 +50,8 @@ public enum Refinement: String, CaseIterable, Sendable, Identifiable {
     case shorter
     case moreCasual = "more_casual"
     case moreFormal = "more_formal"
+    case moreDiplomatic = "more_diplomatic"
+    case moreAssertive = "more_assertive"
 
     public var id: String { rawValue }
 
@@ -49,6 +60,8 @@ public enum Refinement: String, CaseIterable, Sendable, Identifiable {
         case .shorter: "Shorter"
         case .moreCasual: "More casual"
         case .moreFormal: "More formal"
+        case .moreDiplomatic: "More diplomatic"
+        case .moreAssertive: "More assertive"
         }
     }
 }

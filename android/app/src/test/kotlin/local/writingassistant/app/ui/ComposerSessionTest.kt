@@ -59,7 +59,7 @@ class ComposerSessionTest {
     private val sessionScope = CoroutineScope(SupervisorJob() + dispatcher)
 
     private fun session() =
-        ComposerSession(polisher, FakeAppSettings(), FakeApiKeyStore(), sessionScope)
+        ComposerSession(polisher, FakeAppSettings(), FakeApiKeyStore(), testHistory(), sessionScope)
 
     /** A view model owned by [store], the way an activity owns it. */
     private fun viewModelIn(
@@ -152,7 +152,13 @@ class ComposerSessionTest {
         runTest(dispatcher) {
             val failure = PolishError.KeyStorageFailed("ProviderException")
             val session =
-                ComposerSession(polisher, FakeAppSettings(), FailingKeyStore(failure), sessionScope)
+                ComposerSession(
+                    polisher,
+                    FakeAppSettings(),
+                    FailingKeyStore(failure),
+                    testHistory(),
+                    sessionScope,
+                )
 
             session.onEvent(ComposerEvent.RefreshApiKey)
             advanceUntilIdle()
@@ -182,17 +188,14 @@ class ComposerSessionTest {
     fun `a settings failure is shown instead of crashing`() =
         runTest(dispatcher) {
             val settings =
-                object : AppSettings {
+                object : AppSettings by FakeAppSettings() {
                     override suspend fun lastChannel(): Channel? = throw IOException("disk")
 
                     override suspend fun setLastChannel(channel: Channel) =
                         throw IOException("disk")
-
-                    override suspend fun provider(): Provider = Provider.ANTHROPIC
-
-                    override suspend fun setProvider(provider: Provider) = Unit
                 }
-            val session = ComposerSession(polisher, settings, FakeApiKeyStore(), sessionScope)
+            val session =
+                ComposerSession(polisher, settings, FakeApiKeyStore(), testHistory(), sessionScope)
             advanceUntilIdle()
 
             assertEquals(PolishError.Unexpected("IOException"), session.state.value.error)
@@ -208,7 +211,7 @@ class ComposerSessionTest {
         runTest(dispatcher) {
             val keys = FakeApiKeyStore(key = "sk-ant-fake")
             val settings = FakeAppSettings(provider = Provider.GROQ)
-            val session = ComposerSession(polisher, settings, keys, sessionScope)
+            val session = ComposerSession(polisher, settings, keys, testHistory(), sessionScope)
 
             session.onEvent(ComposerEvent.RefreshApiKey)
             advanceUntilIdle()

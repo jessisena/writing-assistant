@@ -54,7 +54,7 @@ class ComposerViewModelTest {
     private val sessionScope = CoroutineScope(SupervisorJob() + dispatcher)
 
     private fun newViewModel(): ComposerViewModel =
-        ComposerViewModel(ComposerSession(polisher, settings, keys, sessionScope))
+        ComposerViewModel(ComposerSession(polisher, settings, keys, testHistory(), sessionScope))
 
     private fun TestScope.viewModel(): ComposerViewModel =
         newViewModel().also { advanceUntilIdle() }

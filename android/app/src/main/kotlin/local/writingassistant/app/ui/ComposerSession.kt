@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
+import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Polishing
@@ -26,6 +27,7 @@ class ComposerSession(
     private val polisher: Polishing,
     private val settings: AppSettings,
     private val apiKeyStore: ApiKeyStore,
+    private val history: HistoryRepository,
     private val scope: CoroutineScope,
 ) {
     private val mutableState = MutableStateFlow(ComposerState())
@@ -57,6 +59,8 @@ class ComposerSession(
             ComposerEvent.DismissError -> mutableState.update { it.copy(error = null) }
             ComposerEvent.Retry -> lastFailed?.let(::onEvent)
             ComposerEvent.RefreshApiKey -> refreshApiKey()
+            ComposerEvent.SaveOutput -> TODO()
+            is ComposerEvent.RestoreHistory -> TODO()
         }
     }
 
