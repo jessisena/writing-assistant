@@ -158,6 +158,9 @@ class KeystoreApiKeyStore internal constructor(
 
 private object AndroidKeystoreKey {
     private const val PROVIDER = "AndroidKeyStore"
+
+    // Encrypts every provider's key despite the name. Never rename it: keys already stored
+    // under the old alias could no longer be decrypted.
     private const val ALIAS = "anthropic_api_key"
     private const val KEY_SIZE_BITS = 256
 
