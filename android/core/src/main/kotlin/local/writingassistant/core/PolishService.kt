@@ -87,7 +87,6 @@ class PolishService(
         private const val REFINEMENT_NOTE =
             "The input is already-polished English: apply the additional instruction on top of " +
                 "the rules above, set was_translated to false and set learning_summary to null."
-        private val SUMMARY_KEYS = listOf("corrections", "grammar_insight", "vocabulary")
         private val json = Json { ignoreUnknownKeys = true }
 
         private fun validatedInput(text: String): String {
@@ -149,10 +148,6 @@ class PolishService(
             }
             if (element !is JsonObject) {
                 throw PolishError.BadFormat("learning_summary is not an object")
-            }
-            val missing = SUMMARY_KEYS.filterNot { it in element }
-            if (missing.isNotEmpty()) {
-                throw PolishError.BadFormat("invalid learning_summary: missing $missing")
             }
             return try {
                 json.decodeFromJsonElement(LearningSummary.serializer(), element)

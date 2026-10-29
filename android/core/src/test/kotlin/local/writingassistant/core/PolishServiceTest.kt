@@ -7,6 +7,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -151,6 +152,18 @@ class PolishServiceTest {
 
             assertNull(polish(absent).learningSummary)
             assertNull(polish(explicitNull).learningSummary)
+        }
+
+    @Test
+    fun learningSummaryMissingAnyFieldIsBadFormat() =
+        runTest {
+            for (field in listOf("corrections", "grammar_insight", "vocabulary")) {
+                val summary = JsonObject(summaryObject() - field)
+
+                assertBadFormat(
+                    json("polished_text" to JsonPrimitive("Hi"), "learning_summary" to summary),
+                )
+            }
         }
 
     @Test

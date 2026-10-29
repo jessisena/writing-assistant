@@ -51,9 +51,9 @@ data class VocabularyItem(
 
 @Serializable
 data class LearningSummary(
-    val corrections: List<Correction> = emptyList(),
-    @SerialName("grammar_insight") val grammarInsight: String = "",
-    val vocabulary: List<VocabularyItem> = emptyList(),
+    val corrections: List<Correction>,
+    @SerialName("grammar_insight") val grammarInsight: String,
+    val vocabulary: List<VocabularyItem>,
 ) {
     val isEmpty: Boolean
         get() = corrections.isEmpty() && grammarInsight.isEmpty() && vocabulary.isEmpty()
