@@ -58,7 +58,11 @@ fun SettingsScreen(
             Button(onClick = viewModel::save, enabled = canSubmit) {
                 Text(stringResource(R.string.settings_save))
             }
-            OutlinedButton(onClick = viewModel::test, enabled = canSubmit) {
+            OutlinedButton(
+                onClick = viewModel::test,
+                enabled = canSubmit,
+                border = outlinedButtonBorder(canSubmit),
+            ) {
                 Text(stringResource(R.string.settings_test))
             }
             TextButton(

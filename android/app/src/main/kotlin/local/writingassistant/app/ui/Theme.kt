@@ -1,5 +1,6 @@
 package local.writingassistant.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -7,6 +8,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 /**
  * The Writing Desk palette from `ThemePalette.swift`, one value per appearance, plus Android-only
@@ -82,3 +84,13 @@ fun WritingAssistantTheme(content: @Composable () -> Unit) {
         content = content,
     )
 }
+
+/** Border for outlined buttons; Material 3's default uses the pale divider colour. */
+@Composable
+fun outlinedButtonBorder(enabled: Boolean): BorderStroke {
+    val outline = MaterialTheme.colorScheme.outline
+    return BorderStroke(1.dp, if (enabled) outline else outline.copy(alpha = DISABLED_BORDER_ALPHA))
+}
+
+/** Material 3's alpha for a disabled outlined button's border. */
+private const val DISABLED_BORDER_ALPHA = 0.12f

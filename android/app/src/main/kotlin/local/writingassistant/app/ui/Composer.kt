@@ -184,14 +184,12 @@ private fun ResultSection(
         ?.learningSummary
         ?.takeUnless { it.isEmpty }
         ?.let { LearningSummarySection(it) }
-    val outline = MaterialTheme.colorScheme.outline
-    val refineBorder = if (state.canUseOutput) outline else outline.copy(alpha = DISABLED_BORDER)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (refinement in Refinement.entries) {
             OutlinedButton(
                 onClick = { onEvent(ComposerEvent.Refine(refinement)) },
                 enabled = state.canUseOutput,
-                border = BorderStroke(1.dp, refineBorder),
+                border = outlinedButtonBorder(state.canUseOutput),
             ) {
                 Text(refinement.displayName)
             }
@@ -317,6 +315,3 @@ private fun SummaryHeading(
         color = MaterialTheme.colorScheme.primary,
     )
 }
-
-/** Material 3's alpha for a disabled outlined button's border. */
-private const val DISABLED_BORDER = 0.12f
