@@ -32,6 +32,18 @@ input and to Sonnet for everything else. A Haiku triage call would have been the
 "intelligent routing" design but adds a full round-trip to every request to save quota on some of
 them. The local heuristic gets the same result for free.
 
+### Haiku 4.5, not Haiku 5.5, for short English
+
+Re-measured on 2026-10-29 through the CLI with the real polish prompt (5 short English Slack
+messages × 3 runs, stream-json): Haiku 4.5 finished `polished_text` after a median 2.6 s (8.1 s
+for the whole process), Haiku 5.5 after 10.0 s (14.8 s). Haiku 5.5 always uses adaptive thinking
+(about 1,000–2,800 thinking tokens per request here): `MAX_THINKING_TOKENS=0`, `--effort low`
+(7.8 s) and `alwaysThinkingEnabled: false` (11.1 s) don't turn it off, and the Claude Code docs
+list no switch that does. Its learning summaries were better (it named Spanish/Portuguese
+interference such as "assist" for "attend"), but its polished Slack text was wordier. Haiku is in
+the routing for speed, so `ModelRouting.haikuModel` stays on Haiku 4.5. Re-check when Claude Code
+offers a way to disable thinking for 5.x models.
+
 ### `learning_summary` gate — enforced in code
 
 When input was not in English (`was_translated: true`), the learning summary is always nil. This is
