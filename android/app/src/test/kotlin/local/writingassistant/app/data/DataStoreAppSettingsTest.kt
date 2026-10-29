@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -65,6 +66,30 @@ class DataStoreAppSettingsTest {
             dataStore.edit { it[stringPreferencesKey("last_channel")] = "carrier_pigeon" }
 
             assertNull(settings.lastChannel())
+        }
+
+    @Test
+    fun `the provider is Anthropic until one is chosen`() =
+        runTest {
+            assertEquals(Provider.ANTHROPIC, settings.provider())
+        }
+
+    @Test
+    fun `every provider round-trips`() =
+        runTest {
+            for (provider in Provider.entries.reversed()) {
+                settings.setProvider(provider)
+
+                assertEquals(provider, settings.provider())
+            }
+        }
+
+    @Test
+    fun `an unknown stored provider id reads as Anthropic`() =
+        runTest {
+            dataStore.edit { it[stringPreferencesKey("provider")] = "carrier_pigeon" }
+
+            assertEquals(Provider.ANTHROPIC, settings.provider())
         }
 
     @Test

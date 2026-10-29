@@ -12,6 +12,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -21,13 +24,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import local.writingassistant.app.R
+import local.writingassistant.core.Provider
 
-/** API key entry with Save, Test and Clear, plus a line on why the key is needed. */
+/**
+ * The provider choice, then the selected provider's API key with Save, Test and Clear, a line
+ * on why the key is needed and a link to where it's created.
+ */
 @Composable
 fun SettingsScreen(
     state: SettingsState,
@@ -39,11 +52,18 @@ fun SettingsScreen(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(stringResource(R.string.settings_why), style = MaterialTheme.typography.bodyMedium)
+        ProviderPicker(state.provider, enabled = !state.isTesting, viewModel::selectProvider)
+        Text(
+            stringResource(whyText(state.provider)),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        KeyLink(state.provider)
         OutlinedTextField(
             value = state.key,
             onValueChange = viewModel::onKeyChange,
-            label = { Text(stringResource(R.string.settings_api_key)) },
+            label = {
+                Text(stringResource(R.string.settings_api_key, state.provider.displayName))
+            },
             singleLine = true,
             visualTransformation =
                 if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
@@ -74,6 +94,50 @@ fun SettingsScreen(
         }
         StatusLine(state.status)
     }
+}
+
+@Composable
+private fun ProviderPicker(
+    selected: Provider,
+    enabled: Boolean,
+    onSelect: (Provider) -> Unit,
+) {
+    Text(stringResource(R.string.settings_provider), style = MaterialTheme.typography.labelLarge)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        Provider.entries.forEachIndexed { index, provider ->
+            SegmentedButton(
+                selected = provider == selected,
+                onClick = { onSelect(provider) },
+                shape = SegmentedButtonDefaults.itemShape(index, Provider.entries.size),
+                enabled = enabled,
+            ) {
+                Text(provider.displayName)
+            }
+        }
+    }
+}
+
+private fun whyText(provider: Provider): Int =
+    when (provider) {
+        Provider.ANTHROPIC -> R.string.settings_why_anthropic
+        Provider.GROQ -> R.string.settings_why_groq
+    }
+
+@Composable
+private fun KeyLink(provider: Provider) {
+    val label = stringResource(R.string.settings_get_key, provider.displayName)
+    val style =
+        TextLinkStyles(
+            SpanStyle(
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline,
+            ),
+        )
+    val text =
+        buildAnnotatedString {
+            withLink(LinkAnnotation.Url(provider.keyUrl, style)) { append(label) }
+        }
+    Text(text, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable

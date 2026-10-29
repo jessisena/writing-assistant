@@ -189,6 +189,55 @@ class KeystoreApiKeyStoreTest {
         }
 
     @Test
+    fun `the Anthropic key keeps its original preference name`() =
+        runTest {
+            store.write(Provider.ANTHROPIC, API_KEY)
+            val legacyValue = storedValue()!!
+            dataStore.edit { it.clear() }
+
+            putStoredValue(legacyValue)
+
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
+            assertEquals(
+                setOf(STORED),
+                storedNames(),
+            )
+        }
+
+    @Test
+    fun `each provider's key is stored separately`() =
+        runTest {
+            store.write(Provider.ANTHROPIC, API_KEY)
+            store.write(Provider.GROQ, GROQ_KEY)
+
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
+            assertEquals(GROQ_KEY, store.read(Provider.GROQ))
+            assertEquals(
+                setOf(STORED, stringPreferencesKey("groq_api_key")),
+                storedNames(),
+            )
+        }
+
+    @Test
+    fun `writing or clearing one provider's key leaves the other's alone`() =
+        runTest {
+            store.write(Provider.ANTHROPIC, API_KEY)
+            store.write(Provider.GROQ, GROQ_KEY)
+
+            store.write(Provider.GROQ, "groq-second")
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
+
+            store.clear(Provider.ANTHROPIC)
+            assertNull(store.read(Provider.ANTHROPIC))
+            assertEquals("groq-second", store.read(Provider.GROQ))
+
+            store.write(Provider.ANTHROPIC, API_KEY)
+            store.clear(Provider.GROQ)
+            assertNull(store.read(Provider.GROQ))
+            assertEquals(API_KEY, store.read(Provider.ANTHROPIC))
+        }
+
+    @Test
     fun `writing a blank key is rejected`() =
         runTest {
             val error = runCatching { store.write(Provider.ANTHROPIC, " ") }.exceptionOrNull()
@@ -208,6 +257,12 @@ class KeystoreApiKeyStoreTest {
         error("unreachable")
     }
 
+    private suspend fun storedNames(): Set<Preferences.Key<*>> =
+        dataStore.data
+            .first()
+            .asMap()
+            .keys
+
     private suspend fun storedValue(): String? = dataStore.data.first()[STORED]
 
     private suspend fun putStoredValue(value: String) {
@@ -216,6 +271,7 @@ class KeystoreApiKeyStoreTest {
 
     private companion object {
         const val API_KEY = "sk-ant-api03-test-secret-key"
+        const val GROQ_KEY = "groq-test-secret-key"
         val STORED = stringPreferencesKey("anthropic_api_key")
 
         fun newAesKey(): SecretKey =
