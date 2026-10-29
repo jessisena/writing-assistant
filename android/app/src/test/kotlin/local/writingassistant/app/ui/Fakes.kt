@@ -64,6 +64,17 @@ class FakeAppSettings(
     }
 }
 
+/** [ApiKeyStore] whose every operation fails with [error]. */
+class FailingKeyStore(
+    private val error: Exception,
+) : ApiKeyStore {
+    override suspend fun read(): String? = throw error
+
+    override suspend fun write(key: String) = throw error
+
+    override suspend fun clear() = throw error
+}
+
 class FakeApiKeyStore(
     var key: String? = "sk-test",
 ) : ApiKeyStore {

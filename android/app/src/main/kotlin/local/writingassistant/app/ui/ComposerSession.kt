@@ -1,5 +1,6 @@
 package local.writingassistant.app.ui
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,11 +37,9 @@ class ComposerSession(
     private var channelChosen = false
 
     init {
-        scope.launch {
+        launchReporting {
             val restored = settings.lastChannel()
-            if (restored != null &&
-                !channelChosen
-            ) {
+            if (restored != null && !channelChosen) {
                 mutableState.update { it.copy(channel = restored) }
             }
         }
@@ -71,7 +70,7 @@ class ComposerSession(
     }
 
     private fun refreshApiKey() {
-        scope.launch {
+        launchReporting {
             val missing = apiKeyStore.read().isNullOrBlank()
             mutableState.update { it.copy(needsApiKey = missing) }
         }
@@ -80,7 +79,21 @@ class ComposerSession(
     private fun selectChannel(channel: Channel) {
         channelChosen = true
         mutableState.update { it.copy(channel = channel) }
-        scope.launch { settings.setLastChannel(channel) }
+        launchReporting { settings.setLastChannel(channel) }
+    }
+
+    /** Runs [body] in [scope], showing any failure in the error banner instead of crashing. */
+    private fun launchReporting(body: suspend () -> Unit) {
+        scope.launch {
+            try {
+                body()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val error = asPolishError(e)
+                mutableState.update { it.copy(error = error) }
+            }
+        }
     }
 
     private fun polish() {
@@ -121,7 +134,10 @@ class ComposerSession(
                 val apply =
                     try {
                         work()
-                    } catch (error: PolishError) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        val error = asPolishError(e)
                         failure = error
                         failed(error)
                     }
@@ -131,6 +147,9 @@ class ComposerSession(
                 mutableState.update { apply(it.copy(phase = ComposerState.Phase.Idle)) }
             }
     }
+
+    private fun asPolishError(e: Exception): PolishError =
+        e as? PolishError ?: PolishError.Unexpected(e.javaClass.simpleName)
 
     private fun failed(error: PolishError): (ComposerState) -> ComposerState =
         { state ->

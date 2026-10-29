@@ -58,6 +58,7 @@ class AnthropicClient(
         timeout: Duration,
     ): String {
         val key = apiKey()?.takeIf { it.isNotBlank() } ?: throw PolishError.MissingApiKey
+        if (!isWellFormedKey(key)) throw PolishError.MalformedApiKey
         val request =
             Request
                 .Builder()
@@ -143,6 +144,7 @@ class AnthropicClient(
     @Serializable
     private data class MessagesResponse(
         val content: List<ContentBlock>,
+        @SerialName("stop_reason") val stopReason: String? = null,
     )
 
     @Serializable
@@ -165,8 +167,12 @@ class AnthropicClient(
         const val DEFAULT_BASE_URL = "https://api.anthropic.com/"
         const val ANTHROPIC_VERSION = "2023-06-01"
 
-        /** Inputs are capped at 20k characters, so the reply comfortably fits in this. */
-        private const val MAX_TOKENS = 8192
+        /**
+         * Output cap for polish and refine calls. Inputs are capped at 20k characters, and the
+         * cap also covers adaptive thinking on Sonnet. 16k is the documented non-streaming
+         * default and is within both models' output limits (Haiku 4.5: 64k, Sonnet 5.5: 128k).
+         */
+        private const val MAX_TOKENS = 16_000
         private const val EXCERPT_LENGTH = 200
         private val CHECK_TIMEOUT = 20.seconds
         private val OVERLOADED_STATUSES = setOf(429, 503, 529)
@@ -177,6 +183,12 @@ class AnthropicClient(
                 encodeDefaults = true
             }
 
+        /**
+         * Returns whether [key] can be sent as an HTTP header: printable ASCII only, so no
+         * spaces, newlines, zero-width characters or smart quotes picked up while pasting.
+         */
+        fun isWellFormedKey(key: String): Boolean = key.isNotEmpty() && key.all { it in '!'..'~' }
+
         private fun extractText(body: String): String {
             val response =
                 try {
@@ -184,6 +196,10 @@ class AnthropicClient(
                 } catch (e: IllegalArgumentException) {
                     throw PolishError.BadFormat("Unparseable response: ${e.message}")
                 }
+            when (response.stopReason) {
+                "max_tokens" -> throw PolishError.OutputTooLong
+                "refusal" -> throw PolishError.Refused
+            }
             val texts = response.content.filter { it.type == "text" }.mapNotNull { it.text }
             if (texts.isEmpty()) throw PolishError.BadFormat("Response has no text content block")
             return texts.joinToString("")

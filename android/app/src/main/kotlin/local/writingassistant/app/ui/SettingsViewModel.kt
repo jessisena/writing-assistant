@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,7 @@ import local.writingassistant.app.BuildConfig
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Polishing
+import local.writingassistant.core.api.AnthropicClient
 
 /** What the Settings screen renders. */
 data class SettingsState(
@@ -36,7 +38,8 @@ data class SettingsState(
 
         data object TestPassed : Status
 
-        data class TestFailed(
+        /** Loading, saving, testing or clearing the key failed; [message] is shown as is. */
+        data class Failed(
             val message: String,
         ) : Status
     }
@@ -55,7 +58,7 @@ class SettingsViewModel(
     val state: StateFlow<SettingsState> = mutableState.asStateFlow()
 
     init {
-        viewModelScope.launch {
+        launchReporting {
             val stored = apiKeyStore.read()
             val key = stored ?: debugApiKey.takeIf { it.isNotBlank() }.orEmpty()
             mutableState.update { it.copy(key = key, hasStoredKey = stored != null) }
@@ -67,27 +70,21 @@ class SettingsViewModel(
     }
 
     fun save() {
-        viewModelScope.launch { store() }
+        launchReporting { store() }
     }
 
     /** Saves the key, then makes a cheap call to check that Claude accepts it. */
     fun test() {
-        viewModelScope.launch {
-            if (!store()) return@launch
+        launchReporting {
+            if (!store()) return@launchReporting
             mutableState.update { it.copy(status = SettingsState.Status.Testing) }
-            val status =
-                try {
-                    polisher.checkReady()
-                    SettingsState.Status.TestPassed
-                } catch (error: PolishError) {
-                    SettingsState.Status.TestFailed(error.message)
-                }
-            mutableState.update { it.copy(status = status) }
+            polisher.checkReady()
+            mutableState.update { it.copy(status = SettingsState.Status.TestPassed) }
         }
     }
 
     fun clear() {
-        viewModelScope.launch {
+        launchReporting {
             apiKeyStore.clear()
             mutableState.update {
                 SettingsState(key = "", hasStoredKey = false, status = SettingsState.Status.Cleared)
@@ -95,9 +92,29 @@ class SettingsViewModel(
         }
     }
 
+    /** Runs [body], showing any failure as [SettingsState.Status.Failed]. */
+    private fun launchReporting(body: suspend () -> Unit) {
+        viewModelScope.launch {
+            val error =
+                try {
+                    body()
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: PolishError) {
+                    e
+                } catch (e: Exception) {
+                    PolishError.Unexpected(e.javaClass.simpleName)
+                }
+            mutableState.update { it.copy(status = SettingsState.Status.Failed(error.message)) }
+        }
+    }
+
+    /** @throws PolishError.MalformedApiKey when the key can't be sent as an HTTP header. */
     private suspend fun store(): Boolean {
         val key = state.value.key.trim()
         if (key.isEmpty()) return false
+        if (!AnthropicClient.isWellFormedKey(key)) throw PolishError.MalformedApiKey
         apiKeyStore.write(key)
         mutableState.update {
             it.copy(key = key, hasStoredKey = true, status = SettingsState.Status.Saved)

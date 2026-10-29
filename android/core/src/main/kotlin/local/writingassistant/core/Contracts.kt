@@ -51,9 +51,9 @@ data class VocabularyItem(
 
 @Serializable
 data class LearningSummary(
-    val corrections: List<Correction> = emptyList(),
-    @SerialName("grammar_insight") val grammarInsight: String = "",
-    val vocabulary: List<VocabularyItem> = emptyList(),
+    val corrections: List<Correction>,
+    @SerialName("grammar_insight") val grammarInsight: String,
+    val vocabulary: List<VocabularyItem>,
 ) {
     val isEmpty: Boolean
         get() = corrections.isEmpty() && grammarInsight.isEmpty() && vocabulary.isEmpty()
@@ -83,6 +83,18 @@ sealed class PolishError(
     data object InvalidApiKey :
         PolishError("Anthropic rejected the API key. Check it in Settings.")
 
+    /** The key has a character outside printable ASCII, such as a zero-width space or a newline. */
+    data object MalformedApiKey :
+        PolishError("The API key contains characters that aren't allowed. Paste it again.")
+
+    /** The device's secure key storage failed. [detail] names the failure, never the key. */
+    data class KeyStorageFailed(
+        val detail: String,
+    ) : PolishError(
+            "Couldn't access the secure key storage on this device. Try again, or clear and " +
+                "re-enter the key.",
+        )
+
     data object NoCredits :
         PolishError("Your Anthropic account is out of credits. Add some in the Console.")
 
@@ -101,6 +113,14 @@ sealed class PolishError(
         val detail: String,
     ) : PolishError("Claude returned an error (HTTP $status). Please try again.")
 
+    /** Claude hit the output token limit, so the reply is incomplete. */
+    data object OutputTooLong :
+        PolishError("The reply was cut off because the text is too long. Try a shorter selection.")
+
+    /** Claude's safety systems declined the request. */
+    data object Refused :
+        PolishError("Claude declined to process this text. Try rewording it.")
+
     data class BadFormat(
         val detail: String,
     ) : PolishError("Unexpected response format from Claude. Please try again.")
@@ -108,6 +128,11 @@ sealed class PolishError(
     data class PromptUnavailable(
         val detail: String,
     ) : PolishError("Couldn't read the bundled prompt files ($detail).")
+
+    /** A failure outside the cases above. [detail] is the exception class, never its message. */
+    data class Unexpected(
+        val detail: String,
+    ) : PolishError("Something went wrong ($detail). Please try again.")
 }
 
 sealed class PromptFile(
@@ -134,8 +159,9 @@ interface ClaudeClient {
     /**
      * Runs [prompt] on [model].
      *
-     * @throws PolishError MissingApiKey, InvalidApiKey, NoCredits, Overloaded, Timeout, Network,
-     *   ApiFailed or BadFormat.
+     * @throws PolishError MissingApiKey, MalformedApiKey, InvalidApiKey, NoCredits, Overloaded,
+     *   Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or any error the key
+     *   provider throws.
      */
     suspend fun run(
         prompt: String,

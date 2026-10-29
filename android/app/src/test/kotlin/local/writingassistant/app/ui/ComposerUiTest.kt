@@ -24,7 +24,11 @@ class ComposerUiTest {
     val compose = createComposeRule()
 
     private val summary =
-        LearningSummary(corrections = listOf(Correction("tomorow", "tomorrow", "Spelling.")))
+        LearningSummary(
+            corrections = listOf(Correction("tomorow", "tomorrow", "Spelling.")),
+            grammarInsight = "",
+            vocabulary = emptyList(),
+        )
     private val polished =
         ComposerState(
             input = "hey",

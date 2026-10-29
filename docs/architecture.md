@@ -450,13 +450,18 @@ store on every call and redacted from every error message. Responses map to `Pol
 | Response | `PolishError` |
 |---|---|
 | No stored key | `MissingApiKey` |
+| Key with a character outside `!`..`~` (checked before sending, and on Save/Test) | `MalformedApiKey`: "The API key contains characters that aren't allowed. Paste it again." |
+| Keystore, cipher or DataStore failure in the key store | `KeyStorageFailed`: "Couldn't access the secure key storage on this device. Try again, or clear and re-enter the key." |
 | 401, 403 | `InvalidApiKey` |
 | 402, or 400 mentioning "credit balance" | `NoCredits` |
 | 429, 503, 529 | `Overloaded` |
 | Other non-2xx | `ApiFailed` (status and the API's message) |
 | Timeout | `Timeout` |
 | Other network failure | `Network` |
+| `stop_reason` `max_tokens` | `OutputTooLong`: "The reply was cut off because the text is too long. Try a shorter selection." |
+| `stop_reason` `refusal` | `Refused`: "Claude declined to process this text. Try rewording it." |
 | No text content block, or unparsable body | `BadFormat` |
+| Any other exception in the composer or Settings | `Unexpected`: "Something went wrong (exception class). Please try again." |
 
 `checkAvailable()`, used by the Settings Test button, sends "Hi" to Haiku with `max_tokens` 1.
 

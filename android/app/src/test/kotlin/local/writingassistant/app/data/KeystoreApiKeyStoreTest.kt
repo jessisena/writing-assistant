@@ -12,16 +12,20 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import local.writingassistant.core.PolishError
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import java.io.File
+import java.security.ProviderException
 import java.util.Base64
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -139,6 +143,69 @@ class KeystoreApiKeyStoreTest {
             assertNull(reopened.read())
             assertNull(storedValue())
         }
+
+    @Test
+    fun `a Keystore failure while encrypting is a key storage error and stores nothing`() =
+        runTest {
+            val failing = KeystoreApiKeyStore(dataStore) { throw ProviderException("boom") }
+
+            val error = storageError { failing.write(API_KEY) }
+
+            assertEquals(PolishError.KeyStorageFailed("ProviderException"), error)
+            assertNull(storedValue())
+        }
+
+    @Test
+    fun `a Keystore failure while decrypting is a key storage error and keeps the key`() =
+        runTest {
+            store.write(API_KEY)
+            val stored = storedValue()
+            val failing = KeystoreApiKeyStore(dataStore) { throw ProviderException("boom") }
+
+            storageError { failing.read() }
+
+            assertEquals(stored, storedValue())
+            assertEquals(API_KEY, store.read())
+        }
+
+    @Test
+    fun `a cipher runtime failure while decrypting is a key storage error`() =
+        runTest {
+            store.write(API_KEY)
+            val broken =
+                object : SecretKey {
+                    override fun getAlgorithm() = "AES"
+
+                    override fun getFormat() = "RAW"
+
+                    override fun getEncoded(): ByteArray = throw ProviderException("Keystore busy")
+                }
+            val failing = KeystoreApiKeyStore(dataStore) { broken }
+
+            storageError { failing.read() }
+
+            assertEquals(API_KEY, store.read())
+        }
+
+    @Test
+    fun `writing a blank key is rejected`() =
+        runTest {
+            val error = runCatching { store.write(" ") }.exceptionOrNull()
+
+            assertTrue(error is IllegalArgumentException)
+            assertNull(storedValue())
+        }
+
+    private suspend fun storageError(body: suspend () -> Unit): PolishError.KeyStorageFailed {
+        try {
+            body()
+        } catch (e: PolishError.KeyStorageFailed) {
+            assertFalse(e.toString().contains(API_KEY))
+            return e
+        }
+        fail("Expected KeyStorageFailed")
+        error("unreachable")
+    }
 
     private suspend fun storedValue(): String? = dataStore.data.first()[STORED]
 

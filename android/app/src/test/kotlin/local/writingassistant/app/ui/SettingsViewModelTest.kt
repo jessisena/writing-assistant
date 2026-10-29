@@ -101,9 +101,71 @@ class SettingsViewModelTest {
             vm.test()
             advanceUntilIdle()
             assertEquals(
-                Status.TestFailed(PolishError.InvalidApiKey.message),
+                Status.Failed(PolishError.InvalidApiKey.message),
                 vm.state.value.status,
             )
+        }
+
+    @Test
+    fun `a key with characters that can't go in a header is not saved or tested`() =
+        runTest(dispatcher) {
+            val malformed = listOf("sk-ant-key\u200B", "\u201Csk-ant-key\u201D", "sk-ant\n-key")
+            for (key in malformed) {
+                val vm = viewModel()
+                var checked = false
+                polisher.onCheckReady = { checked = true }
+
+                vm.onKeyChange(key)
+                vm.save()
+                advanceUntilIdle()
+                val afterSave = vm.state.value.status
+                vm.test()
+                advanceUntilIdle()
+
+                val expected = Status.Failed(PolishError.MalformedApiKey.message)
+                assertEquals(expected, afterSave)
+                assertEquals(expected, vm.state.value.status)
+                assertFalse((vm.state.value.status as Status.Failed).message.contains("sk-ant"))
+                assertNull(keys.key)
+                assertFalse(checked)
+            }
+        }
+
+    @Test
+    fun `a key storage failure on save is shown`() =
+        runTest(dispatcher) {
+            val failure = PolishError.KeyStorageFailed("ProviderException")
+            val vm =
+                SettingsViewModel(
+                    FailingKeyStore(failure),
+                    polisher,
+                    "",
+                ).also { advanceUntilIdle() }
+
+            assertEquals(Status.Failed(failure.message), vm.state.value.status)
+            vm.onKeyChange("sk-ant-key")
+            vm.save()
+            advanceUntilIdle()
+
+            assertEquals(Status.Failed(failure.message), vm.state.value.status)
+            assertFalse(vm.state.value.hasStoredKey)
+        }
+
+    @Test
+    fun `an unexpected failure is shown instead of crashing`() =
+        runTest(dispatcher) {
+            polisher.onCheckReady = { throw IllegalStateException("sk-ant-secret") }
+            val vm = viewModel()
+            vm.onKeyChange("sk-ant-key")
+            vm.test()
+            advanceUntilIdle()
+
+            val status = vm.state.value.status
+            assertEquals(
+                Status.Failed(PolishError.Unexpected("IllegalStateException").message),
+                status,
+            )
+            assertFalse((status as Status.Failed).message.contains("sk-ant"))
         }
 
     @Test

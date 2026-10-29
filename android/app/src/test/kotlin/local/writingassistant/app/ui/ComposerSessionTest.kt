@@ -16,8 +16,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.ui.ComposerEvent.Cancel
 import local.writingassistant.app.ui.ComposerEvent.ChannelSelected
+import local.writingassistant.app.ui.ComposerEvent.DismissError
 import local.writingassistant.app.ui.ComposerEvent.Open
 import local.writingassistant.app.ui.ComposerEvent.Polish
 import local.writingassistant.app.ui.ComposerState.Phase
@@ -28,6 +30,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ComposerSessionTest {
@@ -139,5 +142,57 @@ class ComposerSessionTest {
             session.onEvent(ComposerEvent.Retry)
             advanceUntilIdle()
             assertEquals(1, polisher.calls.size)
+        }
+
+    @Test
+    fun `a key storage failure while checking the key is shown`() =
+        runTest(dispatcher) {
+            val failure = PolishError.KeyStorageFailed("ProviderException")
+            val session =
+                ComposerSession(polisher, FakeAppSettings(), FailingKeyStore(failure), sessionScope)
+
+            session.onEvent(ComposerEvent.RefreshApiKey)
+            advanceUntilIdle()
+
+            assertEquals(failure, session.state.value.error)
+        }
+
+    @Test
+    fun `an unexpected failure ends the request with an error that can be retried`() =
+        runTest(dispatcher) {
+            val session = session()
+            polisher.onPolish = { throw IllegalStateException("boom") }
+            session.onEvent(Open("hey"))
+            session.onEvent(Polish)
+            advanceUntilIdle()
+
+            val state = session.state.value
+            assertEquals(PolishError.Unexpected("IllegalStateException"), state.error)
+            assertEquals(Phase.Idle, state.phase)
+            polisher.onPolish = { FakePolishing.result(it) }
+            session.onEvent(ComposerEvent.Retry)
+            advanceUntilIdle()
+            assertEquals("polished: hey", session.state.value.output)
+        }
+
+    @Test
+    fun `a settings failure is shown instead of crashing`() =
+        runTest(dispatcher) {
+            val settings =
+                object : AppSettings {
+                    override suspend fun lastChannel(): Channel? = throw IOException("disk")
+
+                    override suspend fun setLastChannel(channel: Channel) =
+                        throw IOException("disk")
+                }
+            val session = ComposerSession(polisher, settings, FakeApiKeyStore(), sessionScope)
+            advanceUntilIdle()
+
+            assertEquals(PolishError.Unexpected("IOException"), session.state.value.error)
+            session.onEvent(DismissError)
+            session.onEvent(ChannelSelected(Channel.FORMAL))
+            advanceUntilIdle()
+            assertEquals(Channel.FORMAL, session.state.value.channel)
+            assertEquals(PolishError.Unexpected("IOException"), session.state.value.error)
         }
 }
