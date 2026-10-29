@@ -13,7 +13,6 @@ import local.writingassistant.app.data.AppSettings
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Polishing
-import local.writingassistant.core.Provider
 import local.writingassistant.core.Refinement
 
 /**
@@ -72,7 +71,7 @@ class ComposerSession(
 
     private fun refreshApiKey() {
         launchReporting {
-            val missing = apiKeyStore.read(Provider.ANTHROPIC).isNullOrBlank()
+            val missing = apiKeyStore.read(settings.provider()).isNullOrBlank()
             mutableState.update { it.copy(needsApiKey = missing) }
         }
     }
