@@ -7,12 +7,22 @@ package local.writingassistant.app.ui
  * Emphasis follows a simplified CommonMark flanking rule: an opening marker must be followed by
  * a non-space character and a closing one preceded by one; `_` also can't open or close inside
  * a word. A marker run that can only open while looking for a closer is matched with its own
- * closer first, so `*a **b** c*` nests.
+ * closer first, so `*a **b** c*` nests. Closer searches are memoised, so parsing stays
+ * polynomial however many markers lack a partner.
  */
 internal class InlineParser private constructor(
     private val source: String,
 ) {
     private val spans = mutableListOf<InlineSpan>()
+    private val closers = HashMap<CloserKey, Int>()
+    private val codeSpanEnds = HashMap<Pair<Int, Int>, Int>()
+
+    private data class CloserKey(
+        val marker: Char,
+        val width: Int,
+        val from: Int,
+        val end: Int,
+    )
 
     private fun parseRange(
         start: Int,
@@ -119,39 +129,28 @@ internal class InlineParser private constructor(
         width: Int,
         from: Int,
         end: Int,
+    ): Int =
+        closers.getOrPut(CloserKey(marker, width, from, end)) {
+            scanForCloser(marker, width, from, end)
+        }
+
+    private fun scanForCloser(
+        marker: Char,
+        width: Int,
+        from: Int,
+        end: Int,
     ): Int {
         var index = from
         while (index < end) {
-            val char = source[index]
+            val run = if (source[index] == marker) runLength(index, end, marker) else 0
             index =
-                when (char) {
-                    '\\' -> {
-                        index + 2
-                    }
-
-                    '`' -> {
-                        skipCodeSpan(index, end)
-                    }
-
-                    marker -> {
-                        val run = runLength(index, end, marker)
-                        when {
-                            isOpenerOnly(
-                                index,
-                                run,
-                                marker,
-                                end,
-                            ) -> skipNested(marker, index, run, end)
-
-                            run >= width && canClose(index, run, marker) -> return index
-
-                            else -> index + run
-                        }
-                    }
-
-                    else -> {
-                        index + 1
-                    }
+                when {
+                    source[index] == '\\' -> index + 2
+                    source[index] == '`' -> skipCodeSpan(index, end)
+                    run == 0 -> index + 1
+                    isOpenerOnly(index, run, marker, end) -> skipNested(marker, index, run, end)
+                    run >= width && canClose(index, run, marker) -> return index
+                    else -> index + run
                 }
         }
         return -1
@@ -258,11 +257,12 @@ internal class InlineParser private constructor(
     private fun skipCodeSpan(
         index: Int,
         end: Int,
-    ): Int {
-        val fence = runLength(index, end, '`')
-        val close = findBacktickClose(index + fence, end, fence)
-        return if (close < 0) index + fence else close + fence
-    }
+    ): Int =
+        codeSpanEnds.getOrPut(index to end) {
+            val fence = runLength(index, end, '`')
+            val close = findBacktickClose(index + fence, end, fence)
+            if (close < 0) index + fence else close + fence
+        }
 
     private fun findBacktickClose(
         from: Int,
