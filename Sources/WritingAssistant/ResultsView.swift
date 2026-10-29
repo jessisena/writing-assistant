@@ -11,10 +11,11 @@ struct ResultsView: View {
         case idle, loading, result
     }
 
-    /// A refinement keeps the result on screen, so only a polish request shows the skeleton.
+    /// A polish clears the result when it starts, so the skeleton shows until its preview or
+    /// final result arrives. A refinement keeps the result on screen.
     private var phase: Phase {
-        if model.isLoading && model.runningRefinement == nil { return .loading }
-        return model.result == nil ? .idle : .result
+        if model.result != nil { return .result }
+        return model.isLoading ? .loading : .idle
     }
 
     var body: some View {
@@ -27,7 +28,9 @@ struct ResultsView: View {
                 if let result = model.result {
                     VStack(spacing: 16) {
                         PolishedCard(model: model, result: result)
-                        if showsSummary(of: result) {
+                        if model.isAwaitingSummary {
+                            SummarySkeletonCard()
+                        } else if showsSummary(of: result) {
                             LearningSummaryCard(result: result)
                         }
                     }
@@ -90,6 +93,8 @@ private struct SummarySkeletonCard: View {
             Text(String(repeating: "The summary is on its way. ", count: 5))
         }
         .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Working on the English learning summary")
     }
 }
 

@@ -59,7 +59,8 @@ extension AppModel {
         persistHistory()
     }
 
-    /// Adds a successful request as the newest entry and makes it current.
+    /// Adds a finished request as the newest entry and makes it current: a successful one, or a
+    /// polish that showed its polished text before it failed or was cancelled.
     func recordHistory(_ result: PolishResult, input: String, channel: Channel) {
         let entry = HistoryEntry(
             date: .now,

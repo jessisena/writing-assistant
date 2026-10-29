@@ -20,6 +20,20 @@ import Testing
         #expect(runner.isRunning)
     }
 
+    @Test func isCurrentOnlyWhileThatGenerationRuns() async throws {
+        let runner = RequestRunner()
+        let first = try #require(runner.begin())
+        #expect(runner.isCurrent(first))
+
+        runner.cancel()
+        let second = try #require(runner.begin())
+        #expect(!runner.isCurrent(first))
+        #expect(runner.isCurrent(second))
+
+        _ = await runner.finish(second) { () async throws(Never) in 1 }
+        #expect(!runner.isCurrent(second))
+    }
+
     @Test func finishReturnsTheValueAndEndsRunning() async throws {
         let runner = RequestRunner()
         let generation = try #require(runner.begin())

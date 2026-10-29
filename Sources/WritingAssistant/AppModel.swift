@@ -34,6 +34,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// than in view state because the card is rebuilt after every request. Any change to
     /// `result` turns it off; a refinement only changes `output`, so it keeps it on.
     var showsChanges = false
+    /// True while a polish shows its polished text but its learning summary is still coming.
+    private(set) var isAwaitingSummary = false
     private(set) var errorMessage: String?
     private(set) var copied = false
     /// Counts successful copies, so views can react to every copy, even two within `copiedDuration`.
@@ -66,6 +68,9 @@ struct ClipboardContent: Equatable, Sendable {
     /// False when the history file exists but couldn't be read or moved aside at launch. Saving
     /// is then skipped until the next launch, so the unread file is never overwritten.
     @ObservationIgnored private(set) var savesHistory = true
+    /// The preview on screen for the running polish. It is kept until the request ends, so a
+    /// cancel or failure can still save the polished text to history.
+    @ObservationIgnored private var shownPreview: ShownPreview?
 
     /// Creates the model.
     ///
@@ -147,12 +152,16 @@ struct ClipboardContent: Equatable, Sendable {
         await polish(request)
     }
 
-    /// Stops the running request and returns to the empty state, with no error banner. A
-    /// late answer from the stopped request is ignored.
+    /// Stops the running request, with no error banner. A late answer from the stopped request
+    /// is ignored. A polish that already showed its polished text keeps it on screen and saves
+    /// it to history without a learning summary; otherwise the screen returns to the empty state.
     func cancel() {
         requests.cancel()
         requestStartedAt = nil
         runningRefinement = nil
+        if let shown = endPreview() {
+            recordPreviewInHistory(shown)
+        }
     }
 
     /// Marks a request as running in `requests` and clears the error banner.
@@ -198,6 +207,12 @@ struct ClipboardContent: Equatable, Sendable {
         let generation: Int
     }
 
+    /// A polish request's preview and the result made from it.
+    private struct ShownPreview {
+        let request: PolishRequest
+        let result: PolishResult
+    }
+
     private func beginProcessing() -> PolishRequest? {
         guard !isLoading else { return nil }
         let text = RichText.markdown(from: RichTextBridge.attributedString(from: input))
@@ -215,18 +230,68 @@ struct ClipboardContent: Equatable, Sendable {
             generation: generation)
     }
 
+    /// Runs `request` and shows its result. When a preview was shown first, the final result
+    /// only adds the learning summary: the output, which the user may have edited meanwhile,
+    /// stays. History and the learning log are written once, when the request ends.
     private func polish(_ request: PolishRequest) async {
         let polisher = polisher
+        let onPreview: @Sendable (PolishPreview) -> Void = { [weak self] preview in
+            Task { @MainActor in self?.showPreview(preview, for: request) }
+        }
         let polished = await finishRequest(request.generation) { () async throws(PolishError) in
             try await polisher.polish(
                 text: request.text, channel: request.channel,
-                includeLearningSummary: request.includesLearningSummary, onPreview: { _ in })
+                includeLearningSummary: request.includesLearningSummary, onPreview: onPreview)
         }
-        guard let polished else { return }
-        result = polished
-        output = Self.editorText(fromMarkdown: polished.polishedText)
-        recordHistory(polished, input: request.text, channel: request.channel)
+        let preview = shownPreview?.request.generation == request.generation ? endPreview() : nil
+        guard let polished else {
+            if let preview { recordPreviewInHistory(preview) }
+            return
+        }
+        if preview == nil {
+            result = polished
+            output = Self.editorText(fromMarkdown: polished.polishedText)
+            recordHistory(polished, input: request.text, channel: request.channel)
+        } else {
+            let keepsChanges = showsChanges
+            result = polished
+            showsChanges = keepsChanges
+            recordHistory(polished, input: request.text, channel: request.channel)
+            saveOutputToHistory()
+        }
         appendToLearningLog(polished, channel: request.channel)
+    }
+
+    /// Shows the polished text of `request` while its learning summary is still coming. Ignored
+    /// when the request is no longer running (it finished, failed or was cancelled) or already
+    /// showed a preview.
+    private func showPreview(_ preview: PolishPreview, for request: PolishRequest) {
+        guard requests.isCurrent(request.generation), shownPreview == nil else { return }
+        let shown = PolishResult(
+            polishedText: preview.polishedText,
+            learningSummary: nil,
+            detectedLanguage: preview.detectedLanguage ?? "Unknown",
+            wasTranslated: preview.wasTranslated ?? false,
+            modelUsed: ModelRouting.pickModel(for: request.text)
+        )
+        shownPreview = ShownPreview(request: request, result: shown)
+        result = shown
+        output = Self.editorText(fromMarkdown: shown.polishedText)
+        isAwaitingSummary = request.includesLearningSummary && !shown.wasTranslated
+    }
+
+    /// Forgets the shown preview, which stays on screen, and stops waiting for its summary.
+    private func endPreview() -> ShownPreview? {
+        let shown = shownPreview
+        shownPreview = nil
+        isAwaitingSummary = false
+        return shown
+    }
+
+    /// Saves a preview whose request ended without a final result, with the output as edited.
+    private func recordPreviewInHistory(_ shown: ShownPreview) {
+        recordHistory(shown.result, input: shown.request.text, channel: shown.request.channel)
+        saveOutputToHistory()
     }
 
     /// Empties the input, the output, the result and the error banner, after saving the edited
