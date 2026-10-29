@@ -48,6 +48,8 @@ struct ClipboardContent: Equatable, Sendable {
     var history: [HistoryEntry] = []
     /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
     var currentHistoryID: UUID?
+    /// Tokens used this calendar month, read from `usageStore` at launch and after each request.
+    private(set) var monthlyUsage = MonthlyUsage.zero
 
     /// True when there is something to clear and no request is running.
     var canClear: Bool {
@@ -60,6 +62,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// Where `process()` writes each learning summary. Append only from the main actor.
     @ObservationIgnored let learningLog: LearningLog
     @ObservationIgnored let historyStore: HistoryStore
+    /// Where the polisher records the tokens each request uses; the model only reads it.
+    @ObservationIgnored let usageStore: UsageStore
     /// The running polish or refinement, which `cancel()` stops.
     @ObservationIgnored let requests = RequestRunner()
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
@@ -81,6 +85,8 @@ struct ClipboardContent: Equatable, Sendable {
     ///     in the error banner and the history starts empty. When the file can't be read (or a
     ///     damaged one can't be moved aside), the banner says so and history isn't saved until
     ///     the next launch.
+    ///   - usageStore: The monthly token totals, read here and after every request. A file that
+    ///     can't be read is shown in the error banner and the count shows zero.
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
@@ -91,6 +97,7 @@ struct ClipboardContent: Equatable, Sendable {
         polisher: any Polishing,
         learningLog: LearningLog = .standard(),
         historyStore: HistoryStore = .standard(),
+        usageStore: UsageStore = .standard(),
         writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
         sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
@@ -105,9 +112,26 @@ struct ClipboardContent: Equatable, Sendable {
             defaults.object(forKey: Self.learningSummaryDefaultsKey) as? Bool ?? true
         self.learningLog = learningLog
         self.historyStore = historyStore
+        self.usageStore = usageStore
         self.writeToPasteboard = writeToPasteboard
         self.sleep = sleep
         loadHistory()
+        do {
+            monthlyUsage = try usageStore.currentMonth()
+        } catch {
+            showStartupError(error)
+        }
+    }
+
+    /// Reads this month's token totals again. A failure goes to the error banner and leaves the
+    /// count at zero; a damaged file was moved aside, so the next read starts from zero.
+    func refreshMonthlyUsage() {
+        do {
+            monthlyUsage = try usageStore.currentMonth()
+        } catch {
+            monthlyUsage = .zero
+            showBanner(error)
+        }
     }
 
     private func loadHistory() {
@@ -179,12 +203,14 @@ struct ClipboardContent: Equatable, Sendable {
 
     /// Runs the work of the request started as `generation` (see `RequestRunner.finish(_:_:)`)
     /// and shows a failure in the error banner. A cancelled or replaced request shows no error.
+    /// Either way the monthly token count is read again, since the request may have used tokens.
     ///
     /// - Returns: The operation's value, or nil when it failed or was cancelled.
     func finishRequest<Value>(
         _ generation: Int, _ operation: () async throws(PolishError) -> Value
     ) async -> Value? {
         let outcome = await requests.finish(generation, operation)
+        defer { refreshMonthlyUsage() }
         if !requests.isRunning {
             requestStartedAt = nil
             runningRefinement = nil

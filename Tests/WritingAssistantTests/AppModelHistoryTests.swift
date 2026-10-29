@@ -414,6 +414,7 @@ import WritingAssistantCore
             polisher: FakePolisher(),
             learningLog: LearningLog(fileURL: directory.appending(path: "learning-log.md")),
             historyStore: HistoryStore(fileURL: store.fileURL, limit: 2),
+            usageStore: UsageStore(fileURL: directory.appending(path: "usage.json")),
             writeToPasteboard: { _ in },
             sleep: { _ in },
             defaults: TestDefaults.make()
