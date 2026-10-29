@@ -154,6 +154,16 @@ class MarkdownTest {
     }
 
     @Test
+    fun `autolinks follow commonmark character classes`() {
+        assertEquals(
+            listOf(span("https://a.com/é", InlineStyle(link = "https://a.com/é"))),
+            spans("<https://a.com/é>"),
+        )
+        assertEquals(listOf(span("<me@a\u2003b.com>")), spans("<me@a\u2003b.com>"))
+        assertEquals(listOf(span("<é@a.com>")), spans("<é@a.com>"))
+    }
+
+    @Test
     fun `bare urls and malformed links stay plain`() {
         assertEquals(listOf(span("go to https://a.com now")), spans("go to https://a.com now"))
         assertEquals(listOf(span("[a] (b)")), spans("[a] (b)"))

@@ -354,8 +354,10 @@ internal class InlineParser private constructor(
     companion object {
         private const val MAX_EMPHASIS = 3
         private const val PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
-        private val URI = Regex("[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\s<>]*")
-        private val EMAIL = Regex("[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+")
+        private val URI = Regex("[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\x00-\\x20\\x7F<>]*")
+        private const val EMAIL_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+        private val EMAIL =
+            Regex("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@$EMAIL_LABEL(?:\\.$EMAIL_LABEL)*")
 
         /** Parses one line of inline Markdown; adjacent spans with the same style are merged. */
         fun parse(line: String): List<InlineSpan> =
