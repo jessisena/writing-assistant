@@ -414,8 +414,10 @@ android/
     src/main/AndroidManifest.xml       MainActivity, ProcessTextActivity, ShareActivity
     src/main/kotlin/local/writingassistant/app/
       WritingAssistantApp.kt           Application, owns the AppGraph
-      AppGraph.kt                      wires PolishService, both clients, key store, settings
-      MainActivity.kt                  full-screen composer and Settings
+      AppGraph.kt                      wires PolishService, both clients, key store, settings,
+                                       prompt store and history
+      MainActivity.kt                  composer, History, Settings, Prompts and the prompt editor,
+                                       Back goes up one level
       data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
       data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
@@ -432,11 +434,18 @@ android/
       ui/ComposerViewModel.kt          thin wrapper exposing the session to a screen
       ui/SettingsScreen.kt             provider picker, API key entry with Save, Test and Clear
       ui/SettingsViewModel.kt          reads and writes the provider and its key, runs the test
+      ui/PreferencesSection.kt         Writing for switches, learning summary, palette, Prompts
+      ui/PreferencesViewModel.kt       reads and writes those settings
+      ui/PromptsScreen.kt              prompt list with Edited labels, and the prompt editor
+      ui/PromptEditorViewModel.kt      loads, saves and restores one prompt off the main thread
+      ui/HistoryScreen.kt              history list with restore, delete and clear all
       ui/Markdown.kt, InlineParser.kt  Markdown subset → AnnotatedString, HTML and plain text
       ui/Clipboard.kt                  ClipData.newHtmlText with a plain-text fallback
-      ui/Theme.kt                      Material 3 colour schemes from the Writing Desk palette
+      ui/Theme.kt                      Material 3 colour schemes for each PalettePreset (Writing
+                                       Desk, Lagoon, Sepia, System dynamic colour)
     src/test/                          Robolectric and JVM tests: key store, settings, asset
-                                       prompts, view models, Markdown, composer UI
+                                       prompts, view models, Markdown, composer, settings,
+                                       prompts and history UI, navigation, theme contrast
 ```
 
 `:core` holds everything that runs without Android, including the API client, so the pipeline
