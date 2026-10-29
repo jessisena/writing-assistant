@@ -45,11 +45,13 @@ import local.writingassistant.app.ui.copyPolishedText
 
 /**
  * Shows the composer in a bottom sheet over the calling app, prefilled with [text] when the
- * activity is first created (not again after a configuration change). Copy and dismissing the
- * sheet finish the activity. When no API key is stored, the sheet shows Settings first.
+ * activity is first created, or when it is restored after process death with an empty session.
+ * Blank [text] leaves the session as it is, so an empty share can't wipe a draft or cancel a
+ * request. Copy and dismissing the sheet finish the activity. When no API key is stored, the
+ * sheet shows Settings first.
  *
- * @param savedInstanceState The activity's; non-null means [text] was already loaded.
- * @param text The text handed over by the calling app.
+ * @param savedInstanceState The activity's; non-null means [text] may already be loaded.
+ * @param text The text handed over by the calling app; blank when it sent none.
  * @param onReplace Receives the polished plain text and is expected to finish the activity;
  *   null hides Replace.
  */
@@ -65,7 +67,12 @@ fun ComponentActivity.showComposerSheet(
             this,
             ComposerViewModel.factory(graph),
         )[ComposerViewModel::class]
-    if (savedInstanceState == null) composer.onEvent(ComposerEvent.Open(text))
+    val firstLaunch = savedInstanceState == null
+    val sessionInput = composer.state.value.input
+    val sessionIsEmpty = sessionInput.isEmpty()
+    if (text.isNotBlank() && (firstLaunch || sessionIsEmpty)) {
+        composer.onEvent(ComposerEvent.Open(text))
+    }
     setContent {
         WritingAssistantTheme {
             ComposerSheet(graph, composer, onReplace, onFinish = ::finish)
