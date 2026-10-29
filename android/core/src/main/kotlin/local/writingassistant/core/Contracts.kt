@@ -191,7 +191,7 @@ enum class Provider(
         "groq",
         "Groq",
         "https://console.groq.com/keys",
-        Models(small = "llama-3.1-8b-instant", large = "openai/gpt-oss-120b"),
+        Models(small = "openai/gpt-oss-20b", large = "openai/gpt-oss-120b"),
     ),
     ;
 
