@@ -5,14 +5,16 @@ import WritingAssistantCore
     @Test func channelsMatchPromptFileNames() {
         #expect(
             Channel.allCases.map(\.rawValue) == [
-                "slack", "slack_informal", "talking_points", "formal", "ai_prompt", "other",
+                "slack", "slack_informal", "talking_points", "formal", "ai_prompt", "email",
+                "personal_message", "proofread", "other",
             ])
     }
 
     @Test func channelsHaveShortNamesForChips() {
         #expect(
             Channel.allCases.map(\.shortName) == [
-                "Slack", "Casual Slack", "Talking points", "Formal doc", "AI prompt", "General",
+                "Slack", "Casual Slack", "Talking points", "Formal doc", "AI prompt", "Email",
+                "Personal", "Proofread", "General",
             ])
     }
 

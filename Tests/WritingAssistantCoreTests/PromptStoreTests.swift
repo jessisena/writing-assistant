@@ -33,7 +33,7 @@ import Testing
     @Test func seedingCreatesEveryFileWithTheBundledContents() throws {
         try store.seedMissingDefaults()
 
-        #expect(PromptFile.allCases.count == 12)
+        #expect(PromptFile.allCases.count == 15)
         for file in PromptFile.allCases {
             #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
         }

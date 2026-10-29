@@ -97,6 +97,55 @@ class PolishServiceTest {
         }
 
     @Test
+    fun summaryOffAsksTheModelToSkipStepFour() =
+        runTest {
+            val client = replying(englishResponse)
+
+            service(client).polish("Hello there", Channel.FORMAL, learningSummary = false)
+
+            val expected =
+                "SYSTEM FORMAL RULES\n\nThe learning summary is turned off: skip Step 4 and set " +
+                    "learning_summary to null.\n\n---\n\nHello there"
+            assertEquals(expected, client.calls.single().prompt)
+        }
+
+    @Test
+    fun summaryOnLeavesThePromptUnchanged() =
+        runTest {
+            val client = replying(englishResponse)
+
+            service(client).polish("Hello there", Channel.FORMAL, learningSummary = true)
+
+            assertEquals("SYSTEM FORMAL RULES\n\n---\n\nHello there", client.calls.single().prompt)
+        }
+
+    @Test
+    fun summaryOffDropsAReturnedSummary() =
+        runTest {
+            val result =
+                service(replying(englishResponse))
+                    .polish("Send me the report pls", Channel.SLACK, learningSummary = false)
+
+            assertNull(result.learningSummary)
+            assertEquals("Please send me the report by end of day.", result.polishedText)
+            assertEquals("English", result.detectedLanguage)
+        }
+
+    @Test
+    fun summaryOffIgnoresAMalformedSummary() =
+        runTest {
+            val output =
+                json(
+                    "polished_text" to JsonPrimitive("Hi"),
+                    "learning_summary" to JsonPrimitive(42),
+                )
+
+            val result = service(replying(output)).polish("Hi", Channel.SLACK, false)
+
+            assertNull(result.learningSummary)
+        }
+
+    @Test
     fun truthyWasTranslatedDropsSummary() =
         runTest {
             listOf(

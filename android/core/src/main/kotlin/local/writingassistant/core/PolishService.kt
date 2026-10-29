@@ -1,5 +1,8 @@
 package local.writingassistant.core
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,11 +25,13 @@ import kotlin.time.Duration.Companion.seconds
  *   unchanged.
  * @param prompts Supplies the prompt files.
  * @param timeout Upper bound for a single model call.
+ * @param io Where prompt files are read, so callers on the main thread don't touch the disk.
  */
 class PolishService(
     private val backend: suspend () -> Backend,
     private val prompts: PromptReading,
     private val timeout: Duration = DEFAULT_TIMEOUT,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : Polishing {
     /** Always uses [client] with Anthropic's models. */
     constructor(
@@ -37,11 +42,20 @@ class PolishService(
 
     private val assembler = PromptAssembler(prompts)
 
+    private suspend fun loadPrompt(body: () -> String): String =
+        try {
+            withContext(io) { body() }
+        } catch (e: IOException) {
+            throw PolishError.PromptUnavailable(e.message ?: e.toString())
+        }
+
     /**
      * Polishes (or translates, then polishes) [text] for [channel].
      *
-     * When the model reports a truthy `was_translated`, the result never carries a learning
-     * summary, whatever the model returned.
+     * When the model reports a truthy `was_translated`, or [learningSummary] is false, the
+     * result never carries a learning summary, whatever the model returned.
+     *
+     * @param learningSummary False tells the model to skip the summary step, saving tokens.
      *
      * @throws PolishError EmptyInput, InputTooLong, PromptUnavailable, BadFormat, or any error
      *   thrown by the client, unchanged.
@@ -49,12 +63,14 @@ class PolishService(
     override suspend fun polish(
         text: String,
         channel: Channel,
+        learningSummary: Boolean,
     ): PolishResult {
         val input = validatedInput(text)
-        val systemPrompt = loadPrompt { assembler.assemble(channel) }
+        val assembled = loadPrompt { assembler.assemble(channel) }
+        val systemPrompt = if (learningSummary) assembled else "$assembled\n\n$NO_SUMMARY_NOTE"
         val backend = backend()
         val model = backend.models.forTier(ModelRouting.pickTier(input))
-        return parse(send(backend.client, systemPrompt, input, model), model)
+        return parse(send(backend.client, systemPrompt, input, model), model, learningSummary)
     }
 
     /**
@@ -99,7 +115,11 @@ class PolishService(
 
         private const val REFINEMENT_NOTE =
             "The input is already-polished English: apply the additional instruction on top of " +
-                "the rules above, set was_translated to false and set learning_summary to null."
+                "the rules above. Where it conflicts with them (for example a minimal-edit, " +
+                "length or formatting rule), the additional instruction wins. Set was_translated " +
+                "to false and set learning_summary to null."
+        private const val NO_SUMMARY_NOTE =
+            "The learning summary is turned off: skip Step 4 and set learning_summary to null."
         private val json = Json { ignoreUnknownKeys = true }
 
         private fun validatedInput(text: String): String {
@@ -113,21 +133,20 @@ class PolishService(
             return trimmed
         }
 
-        private fun loadPrompt(body: () -> String): String =
-            try {
-                body()
-            } catch (e: IOException) {
-                throw PolishError.PromptUnavailable(e.message ?: e.toString())
-            }
-
         private fun parse(
             raw: String,
             model: String,
+            wantsSummary: Boolean,
         ): PolishResult {
             val response = decodeObject(raw)
             val polishedText = polishedText(response)
             val wasTranslated = isTruthy(response["was_translated"])
-            val summary = if (wasTranslated) null else decodeSummary(response["learning_summary"])
+            val summary =
+                if (wasTranslated || !wantsSummary) {
+                    null
+                } else {
+                    decodeSummary(response["learning_summary"])
+                }
             return PolishResult(
                 polishedText = polishedText,
                 learningSummary = summary,

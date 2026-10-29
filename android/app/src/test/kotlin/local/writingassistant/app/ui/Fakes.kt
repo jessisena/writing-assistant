@@ -1,9 +1,15 @@
 package local.writingassistant.app.ui
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
+import local.writingassistant.app.data.HistoryRepository
+import local.writingassistant.app.data.PalettePreset
 import local.writingassistant.core.Channel
+import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.HistoryStore
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Provider
@@ -18,6 +24,9 @@ class FakePolishing : Polishing {
     )
 
     val calls = mutableListOf<Call>()
+
+    /** The `learningSummary` argument of every [polish] call. */
+    val learningSummaryRequests = mutableListOf<Boolean>()
     var onPolish: suspend (String) -> PolishResult = { result(it) }
     var onRefine: suspend (
         String,
@@ -28,8 +37,10 @@ class FakePolishing : Polishing {
     override suspend fun polish(
         text: String,
         channel: Channel,
+        learningSummary: Boolean,
     ): PolishResult {
         calls += Call(text, channel)
+        learningSummaryRequests += learningSummary
         return onPolish(text)
     }
 
@@ -60,6 +71,26 @@ class FakeAppSettings(
     var channel: Channel? = null,
     var provider: Provider = Provider.ANTHROPIC,
 ) : AppSettings {
+    override val disabledChannels = MutableStateFlow(emptySet<Channel>())
+    override val learningSummaryEnabled = MutableStateFlow(true)
+    override val palette = MutableStateFlow(PalettePreset.WRITING_DESK)
+
+    override suspend fun setChannelEnabled(
+        channel: Channel,
+        enabled: Boolean,
+    ) {
+        disabledChannels.value =
+            if (enabled) disabledChannels.value - channel else disabledChannels.value + channel
+    }
+
+    override suspend fun setLearningSummaryEnabled(enabled: Boolean) {
+        learningSummaryEnabled.value = enabled
+    }
+
+    override suspend fun setPalette(palette: PalettePreset) {
+        this.palette.value = palette
+    }
+
     override suspend fun lastChannel(): Channel? = channel
 
     override suspend fun setLastChannel(channel: Channel) {
@@ -126,3 +157,19 @@ class FakeApiKeyStore(
         keys.remove(provider)
     }
 }
+
+/**
+ * A history kept in memory, starting with [saved]; every save goes to [save] (which may throw to
+ * simulate a disk failure). File work runs in place, so `advanceUntilIdle` covers it.
+ */
+fun testHistory(
+    saved: List<HistoryEntry> = emptyList(),
+    limit: Int = HistoryStore.DEFAULT_LIMIT,
+    save: (List<HistoryEntry>) -> Unit = {},
+): HistoryRepository =
+    HistoryRepository(
+        loadEntries = { saved },
+        saveEntries = save,
+        limit = limit,
+        ioDispatcher = Dispatchers.Unconfined,
+    )

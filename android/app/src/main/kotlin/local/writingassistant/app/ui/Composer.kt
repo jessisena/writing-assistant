@@ -26,13 +26,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -42,11 +46,13 @@ import local.writingassistant.core.Channel
 import local.writingassistant.core.LearningSummary
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Refinement
+import kotlin.math.roundToInt
 
 /**
  * The composer shared by the full-screen app and the bottom sheet: channel chips, input,
  * Polish with progress and Cancel, then the editable result, the learning summary,
- * refinements, Copy and (when the host supports it) Replace.
+ * refinements, Copy and (when the host supports it) Replace. Copy and Replace send
+ * [ComposerEvent.SaveOutput] before calling the host, so the history keeps the text as shown.
  *
  * @param state What to render, from [ComposerViewModel.state].
  * @param onEvent Receives every user action; pass [ComposerViewModel.onEvent].
@@ -66,7 +72,9 @@ fun Composer(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ChannelChips(state.channel) { onEvent(ComposerEvent.ChannelSelected(it)) }
+        ChannelChips(state.chipChannels, state.channel) {
+            onEvent(ComposerEvent.ChannelSelected(it))
+        }
         OutlinedTextField(
             value = state.input,
             onValueChange = { onEvent(ComposerEvent.InputChanged(it)) },
@@ -91,18 +99,34 @@ fun Composer(
 
 @Composable
 private fun ChannelChips(
+    channels: List<Channel>,
     selected: Channel,
     onSelect: (Channel) -> Unit,
 ) {
+    val scroll = rememberScrollState()
+    val spans = remember { mutableStateMapOf<Channel, IntRange>() }
+    val selectedSpan = spans[selected]
+    LaunchedEffect(selectedSpan) {
+        selectedSpan?.let {
+            scroll.animateScrollTo(
+                scrollToShow(it, scroll.value, scroll.viewportSize),
+            )
+        }
+    }
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = Modifier.horizontalScroll(scroll),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (channel in Channel.entries) {
+        for (channel in channels) {
             val isSelected = channel == selected
             FilterChip(
                 selected = isSelected,
                 onClick = { onSelect(channel) },
+                modifier =
+                    Modifier.onPlaced { placed ->
+                        val start = placed.positionInParent().x.roundToInt()
+                        spans[channel] = start until start + placed.size.width
+                    },
                 label = { Text(channel.shortName) },
                 leadingIcon = if (isSelected) ({ Text("✓") }) else null,
                 border =
@@ -115,6 +139,21 @@ private fun ChannelChips(
         }
     }
 }
+
+/**
+ * The scroll position that brings [span] (in content pixels) fully into a viewport of
+ * [viewport] pixels currently scrolled to [current], moving as little as possible.
+ */
+internal fun scrollToShow(
+    span: IntRange,
+    current: Int,
+    viewport: Int,
+): Int =
+    when {
+        span.first < current -> span.first
+        span.last + 1 > current + viewport -> span.last + 1 - viewport
+        else -> current
+    }
 
 @Composable
 private fun ErrorBanner(
@@ -180,10 +219,12 @@ private fun ResultSection(
         state.output,
         enabled = !state.isWorking,
     ) { onEvent(ComposerEvent.OutputChanged(it)) }
-    state.result
-        ?.learningSummary
-        ?.takeUnless { it.isEmpty }
-        ?.let { LearningSummarySection(it) }
+    if (state.showLearningSummary) {
+        state.result
+            ?.learningSummary
+            ?.takeUnless { it.isEmpty }
+            ?.let { LearningSummarySection(it) }
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (refinement in Refinement.entries) {
             OutlinedButton(
@@ -196,12 +237,22 @@ private fun ResultSection(
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        Button(onClick = onCopy, enabled = state.canUseOutput, modifier = Modifier.weight(1f)) {
+        Button(
+            onClick = {
+                onEvent(ComposerEvent.SaveOutput)
+                onCopy()
+            },
+            enabled = state.canUseOutput,
+            modifier = Modifier.weight(1f),
+        ) {
             Text(stringResource(R.string.composer_copy))
         }
         if (onReplace != null) {
             Button(
-                onClick = onReplace,
+                onClick = {
+                    onEvent(ComposerEvent.SaveOutput)
+                    onReplace()
+                },
                 enabled = state.canUseOutput,
                 modifier = Modifier.weight(1f),
             ) {
