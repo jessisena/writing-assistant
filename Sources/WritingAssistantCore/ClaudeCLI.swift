@@ -29,30 +29,37 @@ public struct ClaudeCLI: ClaudeRunning {
         self.locator = locator
     }
 
-    /// Sends `prompt` on stdin to `claude --print` and returns its trimmed stdout.
+    /// Sends `prompt` on stdin to `claude --print` and returns the reply of its `result` event.
     ///
-    /// A non-zero exit is retried once; a timeout is never retried. Cancelling the calling task
-    /// terminates the process (SIGTERM, then SIGKILL after a grace period).
+    /// The CLI streams newline-delimited JSON events. Each text delta goes to `onText` as it
+    /// arrives; the final `result` event supplies the reply text (trimmed) and the token usage.
+    /// A non-zero exit is retried once, but only when no text delta reached `onText` yet: a
+    /// retry after that would make the caller see the reply text twice. A timeout is never
+    /// retried. Cancelling the calling task terminates the process (SIGTERM, then SIGKILL after
+    /// a grace period).
     ///
     /// - Parameters:
     ///   - prompt: Full prompt text written to the CLI's stdin.
     ///   - model: Value passed to `--model`.
     ///   - timeout: Limit for each attempt; the process is terminated when it is exceeded.
+    ///   - onText: Gets each text delta in order, on a background queue, while the CLI runs.
     /// - Throws: `PolishError.claudeNotFound`, `.timeout(seconds:)`, or `.cliFailed(stderr:)`
-    ///   (`"Cancelled"` when the task is cancelled or `terminateRunningProcesses()` is called).
+    ///   (`"Cancelled"` when the task is cancelled or `terminateRunningProcesses()` is called;
+    ///   the result text when the CLI reports an error; a note when no `result` event came).
     public func run(
         prompt: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
         let invocation = Invocation(
-            locator: locator, cache: cache, prompt: prompt, model: model, timeout: timeout)
+            locator: locator, cache: cache, prompt: prompt, model: model, timeout: timeout,
+            onText: onText)
         let control = SubprocessControl()
         let result = await withTaskCancellationHandler {
             await Self.offCooperativePool { Self.runBlocking(invocation, control: control) }
         } onCancel: {
             control.cancel()
         }
-        return ClaudeReply(text: try result.get(), usage: nil)
+        return try result.get()
     }
 
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
@@ -78,49 +85,92 @@ public struct ClaudeCLI: ClaudeRunning {
         let prompt: String
         let model: String
         let timeout: Duration
+        let onText: @Sendable (String) -> Void
     }
 
     static func runBlocking(_ invocation: Invocation, control: SubprocessControl)
-        -> Result<String, PolishError>
+        -> Result<ClaudeReply, PolishError>
     {
         control.register()
         defer { control.unregister() }
         guard let binary = invocation.cache.resolve(with: invocation.locator) else {
             return .failure(.claudeNotFound)
         }
-        let request = SubprocessRequest(
-            executable: binary,
-            arguments: ["--print", "--output-format", "text", "--model", invocation.model]
-                + headlessFlags,
-            environment: makeEnvironment(binaryDirectory: binary.deletingLastPathComponent()),
-            input: Data(invocation.prompt.utf8),
-            timeout: invocation.timeout
-        )
         var lastFailure = ""
         for attempt in 1...maxAttempts {
+            let stream = StreamJSONReader(onText: invocation.onText)
             let outcome: SubprocessOutcome
             do {
-                outcome = try Subprocess.run(request, control: control)
+                outcome = try Subprocess.run(
+                    makeRequest(invocation, binary: binary, stream: stream), control: control)
             } catch {
                 return .failure(mapSubprocessError(error, timeout: invocation.timeout))
             }
             if outcome.status == 0 {
-                return .success(trimmed(outcome.stdout))
+                return reply(from: stream, outcome: outcome)
             }
-            lastFailure = failureDetail(outcome)
+            lastFailure = failureDetail(outcome, stream: stream)
             claudeLogger.error(
                 """
                 claude CLI exited with status \(outcome.status) \
                 (attempt \(attempt) of \(maxAttempts)): \(lastFailure, privacy: .public)
                 """)
+            if stream.hasEmittedText {
+                claudeLogger.info("Not retrying: part of the reply was already streamed")
+                break
+            }
         }
         return .failure(.cliFailed(stderr: lastFailure))
     }
 
-    /// claude reports some failures (e.g. "Not logged in") on stdout, so fall back to it.
-    private static func failureDetail(_ outcome: SubprocessOutcome) -> String {
+    private static func makeRequest(
+        _ invocation: Invocation, binary: URL, stream: StreamJSONReader
+    ) -> SubprocessRequest {
+        SubprocessRequest(
+            executable: binary,
+            arguments: [
+                "--print", "--output-format", "stream-json", "--verbose",
+                "--include-partial-messages", "--model", invocation.model,
+            ] + headlessFlags,
+            environment: makeEnvironment(binaryDirectory: binary.deletingLastPathComponent()),
+            input: Data(invocation.prompt.utf8),
+            timeout: invocation.timeout,
+            onStdoutLine: stream.consume
+        )
+    }
+
+    /// The reply of a run that exited with status 0.
+    private static func reply(from stream: StreamJSONReader, outcome: SubprocessOutcome)
+        -> Result<ClaudeReply, PolishError>
+    {
+        guard let result = stream.result else {
+            let output = stream.plainOutput ?? trimmed(outcome.stdout)
+            let detail = capped("claude CLI printed no result event. Output: \(output)")
+            claudeLogger.error("\(detail, privacy: .public)")
+            return .failure(.cliFailed(stderr: detail))
+        }
+        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.isError {
+            let detail = capped(text)
+            claudeLogger.error("claude CLI reported an error: \(detail, privacy: .public)")
+            return .failure(.cliFailed(stderr: detail))
+        }
+        return .success(ClaudeReply(text: text, usage: result.usage))
+    }
+
+    /// Prefers stderr, then an error `result` event, then the stdout lines that aren't JSON:
+    /// claude reports some failures (e.g. "Not logged in") as plain text on stdout.
+    private static func failureDetail(_ outcome: SubprocessOutcome, stream: StreamJSONReader)
+        -> String
+    {
         let stderr = trimmed(outcome.stderr)
-        return capped(stderr.isEmpty ? trimmed(outcome.stdout) : stderr)
+        if !stderr.isEmpty {
+            return capped(stderr)
+        }
+        if let result = stream.result, result.isError {
+            return capped(result.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return capped(stream.plainOutput ?? trimmed(outcome.stdout))
     }
 
     static func capped(_ detail: String) -> String {
@@ -205,6 +255,9 @@ struct SubprocessRequest: Sendable {
     let input: Data?
     /// Limit for the process to exit and close its output.
     let timeout: Duration
+    /// Gets each stdout line (without its `\n`) in order on the draining queue, including a
+    /// final line that doesn't end in `\n`. Stdout is still collected in full either way.
+    var onStdoutLine: (@Sendable (Data) -> Void)? = nil
 }
 
 struct SubprocessOutcome: Sendable {
@@ -352,7 +405,7 @@ enum Subprocess {
 /// A started child process with its output being drained.
 private struct LaunchedProcess {
     let process = Process()
-    let stdout = OutputCollector()
+    let stdout: OutputCollector
     let stderr = OutputCollector()
     private let stdinPipe = Pipe()
     private let exited = DispatchSemaphore(value: 0)
@@ -360,6 +413,7 @@ private struct LaunchedProcess {
     var stdin: FileHandle { stdinPipe.fileHandleForWriting }
 
     init(_ request: SubprocessRequest) throws(SubprocessError) {
+        stdout = OutputCollector(onLine: request.onStdoutLine)
         process.executableURL = request.executable
         process.arguments = request.arguments
         // A neutral cwd keeps claude from picking up the caller's project context.
@@ -405,22 +459,37 @@ private struct LaunchedProcess {
 }
 
 /// Collects one output pipe without blocking a thread, so large output can't fill the pipe
-/// buffer and deadlock the child.
+/// buffer and deadlock the child. With `onLine`, it also splits the output into lines, which
+/// can span several reads.
 private final class OutputCollector: Sendable {
+    private struct State {
+        var data = Data()
+        /// The start of a line whose `\n` hasn't been read yet.
+        var partialLine = Data()
+    }
+
     let pipe = Pipe()
-    private let buffer = OSAllocatedUnfairLock(initialState: Data())
+    private let onLine: (@Sendable (Data) -> Void)?
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let reachedEndOfFile = DispatchSemaphore(value: 0)
 
-    var data: Data { buffer.withLock { $0 } }
+    init(onLine: (@Sendable (Data) -> Void)? = nil) {
+        self.onLine = onLine
+    }
+
+    var data: Data { state.withLock { $0.data } }
 
     func startDraining() {
-        pipe.fileHandleForReading.readabilityHandler = { [buffer, reachedEndOfFile] handle in
+        // The readability handler runs serially, so lines reach `onLine` in order, and all of
+        // them before end of file is signalled.
+        pipe.fileHandleForReading.readabilityHandler = { [self] handle in
             let chunk = handle.availableData
             if chunk.isEmpty {
                 handle.readabilityHandler = nil
+                finishLines()
                 reachedEndOfFile.signal()
             } else {
-                buffer.withLock { $0.append(chunk) }
+                append(chunk)
             }
         }
     }
@@ -431,5 +500,42 @@ private final class OutputCollector: Sendable {
 
     func stopDraining() {
         pipe.fileHandleForReading.readabilityHandler = nil
+    }
+
+    private func append(_ chunk: Data) {
+        let splitsLines = onLine != nil
+        let lines = state.withLock { state in
+            state.data.append(chunk)
+            return splitsLines ? Self.completedLines(adding: chunk, to: &state.partialLine) : []
+        }
+        for line in lines {
+            onLine?(line)
+        }
+    }
+
+    /// Sends a last line that had no `\n`.
+    private func finishLines() {
+        guard let onLine else { return }
+        let last = state.withLock { state in
+            defer { state.partialLine = Data() }
+            return state.partialLine
+        }
+        if !last.isEmpty {
+            onLine(last)
+        }
+    }
+
+    /// Appends `chunk` to `partialLine` and returns the lines it completes.
+    private static func completedLines(adding chunk: Data, to partialLine: inout Data) -> [Data] {
+        var lines: [Data] = []
+        var lineStart = chunk.startIndex
+        while let newline = chunk[lineStart...].firstIndex(of: UInt8(ascii: "\n")) {
+            partialLine.append(chunk[lineStart..<newline])
+            lines.append(partialLine)
+            partialLine = Data()
+            lineStart = chunk.index(after: newline)
+        }
+        partialLine.append(chunk[lineStart...])
+        return lines
     }
 }
