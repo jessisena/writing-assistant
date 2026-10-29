@@ -72,6 +72,7 @@
     <string name="prompt_editor_failed">Couldn\'t read or save the prompt. Try again.</string>
 
     <string name="history_title">History</string>
+    <string name="history_busy">A request is running. Wait for it or cancel it to restore an entry.</string>
     <string name="history_empty">Nothing here yet. Polished texts show up here so you can come back to them.</string>
     <string name="history_entry_meta">%1$s · %2$s</string>
     <string name="history_delete">Delete</string>

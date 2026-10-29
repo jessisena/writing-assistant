@@ -151,7 +151,7 @@ private fun MainScreen(graph: AppGraph) {
             }
 
             Screen.History -> {
-                MainHistory(graph, composer, navigation, content)
+                MainHistory(graph, composer, state.isWorking, navigation, content)
             }
 
             Screen.Prompts -> {
@@ -219,6 +219,7 @@ private fun MainSettings(
 private fun MainHistory(
     graph: AppGraph,
     composer: ComposerViewModel,
+    isWorking: Boolean,
     navigation: Navigation,
     modifier: Modifier,
 ) {
@@ -233,6 +234,7 @@ private fun MainHistory(
             },
             onDelete = history::delete,
             onClear = history::clear,
+            canRestore = !isWorking,
         )
     HistoryScreen(entries, failure, actions, modifier)
 }

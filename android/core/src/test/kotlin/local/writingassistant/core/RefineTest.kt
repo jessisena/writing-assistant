@@ -38,8 +38,10 @@ class RefineTest {
                 val expected =
                     "SYSTEM FORMAL RULES\n\n## Additional instruction\n\n$instruction\n\n" +
                         "The input is already-polished English: apply the additional instruction " +
-                        "on top of the rules above, set was_translated to false and set " +
-                        "learning_summary to null.\n\n---\n\nPlease send me the report."
+                        "on top of the rules above. Where it conflicts with them (for example a " +
+                        "minimal-edit, length or formatting rule), the additional instruction " +
+                        "wins. Set was_translated to false and set learning_summary to null." +
+                        "\n\n---\n\nPlease send me the report."
                 assertEquals(expected, client.calls.single().prompt)
             }
         }

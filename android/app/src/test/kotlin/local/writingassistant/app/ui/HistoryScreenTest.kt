@@ -49,6 +49,7 @@ class HistoryScreenTest {
     private fun show(
         entries: List<HistoryEntry>,
         failure: String? = null,
+        actions: HistoryActions = this.actions,
     ) {
         compose.setContent {
             WritingAssistantTheme { HistoryScreen(entries, failure, actions) }
@@ -81,6 +82,17 @@ class HistoryScreenTest {
         show(listOf(entry("a", "first"), entry("b", "second")))
         compose.onNodeWithText("second").performClick()
         assertEquals(listOf("b"), restored)
+    }
+
+    @Test
+    fun rowsCantBeRestoredWhileARequestRuns() {
+        val busy = HistoryActions({ restored += it }, { deleted += it }, { cleared++ }, false)
+        show(listOf(entry("a", "first")), actions = busy)
+
+        compose.onNodeWithText("A request is running", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("first").performClick()
+
+        assertEquals(emptyList<String>(), restored)
     }
 
     @Test

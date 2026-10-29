@@ -113,6 +113,14 @@ fun HistoryScreen(
                     modifier = Modifier.padding(16.dp),
                 )
             }
+            if (!actions.canRestore) {
+                Text(
+                    stringResource(R.string.history_busy),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             if (entries.isNotEmpty()) ClearAll(actions.onClear)
         }
         items(entries, key = { it.id }) { entry ->
@@ -128,6 +136,8 @@ class HistoryActions(
     val onRestore: (String) -> Unit,
     val onDelete: (String) -> Unit,
     val onClear: () -> Unit,
+    /** False while a request runs: rows can't be tapped and a line says why. */
+    val canRestore: Boolean = true,
 )
 
 @Composable
@@ -179,7 +189,7 @@ private fun HistoryRow(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .clickable { actions.onRestore(entry.id) }
+                .clickable(enabled = actions.canRestore) { actions.onRestore(entry.id) }
                 .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {

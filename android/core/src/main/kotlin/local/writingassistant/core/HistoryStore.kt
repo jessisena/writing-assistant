@@ -51,10 +51,16 @@ internal object ChannelIdSerializer : KSerializer<Channel> {
         Channel.fromId(decoder.decodeString()) ?: Channel.OTHER
 }
 
-/** A history file operation that failed; [message] names the file and what to do. */
+/**
+ * A history file operation that failed; [message] names the file and what to do.
+ *
+ * @property fileKept True when [HistoryStore.load] left an unread file in place, so saving would
+ *   overwrite history that may still be recoverable.
+ */
 class HistoryStoreException(
     message: String,
     cause: Throwable? = null,
+    val fileKept: Boolean = false,
 ) : Exception(message, cause)
 
 /** The most recent requests, stored as JSON in [file]. Mirrors `HistoryStore.swift`. */
@@ -88,6 +94,7 @@ class HistoryStore(
                     "Couldn't read the history at ${file.path}: ${reason(e)}. Check that the " +
                         "file is readable, or move it away to start a new history.",
                     e,
+                    fileKept = true,
                 )
             }
         val entries =
@@ -139,6 +146,7 @@ class HistoryStore(
                 "The history file at ${file.path} is damaged and couldn't be moved to " +
                     "${backupFile.path}: ${reason(e)}. Move or delete it to start a new history.",
                 e,
+                fileKept = true,
             )
         }
     }

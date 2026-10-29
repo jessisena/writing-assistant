@@ -4,9 +4,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.HistoryStoreException
 import local.writingassistant.core.LearningSummary
 import local.writingassistant.core.PolishResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -16,12 +18,14 @@ class HistoryRepositoryTest {
     private var saves = 0
     private var loads = 0
     private var failSaves = false
+    private var loadError: HistoryStoreException? = null
     private var clock = 1_000L
 
     private fun repository(limit: Int = 50) =
         HistoryRepository(
             loadEntries = {
                 loads++
+                loadError?.let { throw it }
                 file.toList()
             },
             saveEntries = {
@@ -174,5 +178,34 @@ class HistoryRepositoryTest {
             assertTrue(failure is IOException)
             assertEquals(listOf("a"), history.entries.value.map { it.output })
             assertTrue(file.isEmpty())
+        }
+
+    @Test
+    fun `an unreadable file that was left in place is never overwritten`() =
+        runTest {
+            repository().recordAll("old")
+            val error = HistoryStoreException("unreadable", fileKept = true)
+            loadError = error
+            val history = repository()
+            saves = 0
+
+            assertSame(error, runCatching { history.load() }.exceptionOrNull())
+            history.recordAll("new")
+
+            assertEquals(0, saves)
+            assertEquals(listOf("old"), file.map { it.output })
+            assertEquals(listOf("new"), history.entries.value.map { it.output })
+        }
+
+    @Test
+    fun `a damaged file that was moved aside lets new history be saved`() =
+        runTest {
+            loadError = HistoryStoreException("damaged, moved aside")
+            val history = repository()
+
+            runCatching { history.load() }
+            history.recordAll("new")
+
+            assertEquals(listOf("new"), file.map { it.output })
         }
 }

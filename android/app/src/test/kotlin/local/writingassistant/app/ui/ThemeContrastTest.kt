@@ -53,6 +53,18 @@ class ThemeContrastTest {
         assertContrast(4.5, "onPrimary vs primary") { it.onPrimary to it.primary }
 
     @Test
+    fun successTextIsReadableOnPaper() =
+        assertContrast(4.5, "tertiary vs paper") { it.tertiary to it.surface }
+
+    @Test
+    fun successTextIsReadableOnTheDesk() =
+        assertContrast(4.5, "tertiary vs desk") { it.tertiary to it.background }
+
+    @Test
+    fun errorTextIsReadableOnTheDesk() =
+        assertContrast(4.5, "error vs desk") { it.error to it.background }
+
+    @Test
     fun inkIsReadableOnPaper() = assertContrast(4.5, "ink vs paper") { it.primary to it.surface }
 
     @Test

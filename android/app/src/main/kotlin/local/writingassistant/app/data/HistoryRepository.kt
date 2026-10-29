@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStore
+import local.writingassistant.core.HistoryStoreException
 import local.writingassistant.core.PolishResult
 import java.util.UUID
 
@@ -20,7 +21,9 @@ import java.util.UUID
  * time. Mirrors `AppModel+History.swift`.
  *
  * Every function throws `HistoryStoreException` when the file can't be read or written; the
- * in-memory list keeps the change either way.
+ * in-memory list keeps the change either way. When [load] fails but leaves the file in place
+ * (`HistoryStoreException.fileKept`), changes stay in memory and are never saved, so they can't
+ * overwrite history that may still be recoverable; the next app start reads the file again.
  *
  * The internal constructor replaces the file with [loadEntries] and [saveEntries] (and lets tests
  * pick the dispatcher and clock), so tests can keep the history in memory or make saving fail.
@@ -39,6 +42,7 @@ class HistoryRepository internal constructor(
     private val mutableEntries = MutableStateFlow(emptyList<HistoryEntry>())
     private val mutex = Mutex()
     private var loaded = false
+    private var savesToFile = true
 
     /** Empty until [load] finishes. */
     val entries: StateFlow<List<HistoryEntry>> = mutableEntries.asStateFlow()
@@ -48,7 +52,12 @@ class HistoryRepository internal constructor(
         mutex.withLock {
             if (loaded) return
             loaded = true
-            mutableEntries.value = withContext(ioDispatcher) { loadEntries() }
+            try {
+                mutableEntries.value = withContext(ioDispatcher) { loadEntries() }
+            } catch (e: HistoryStoreException) {
+                savesToFile = !e.fileKept
+                throw e
+            }
         }
     }
 
@@ -111,7 +120,7 @@ class HistoryRepository internal constructor(
         mutex.withLock {
             val next = transform(mutableEntries.value) ?: return
             mutableEntries.value = next
-            withContext(ioDispatcher) { saveEntries(next) }
+            if (savesToFile) withContext(ioDispatcher) { saveEntries(next) }
         }
     }
 

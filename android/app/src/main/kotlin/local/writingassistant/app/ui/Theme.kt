@@ -22,7 +22,9 @@ import local.writingassistant.app.data.PalettePreset
 /**
  * One appearance of a palette: the six colours from `ThemePalette.swift` plus Android-only control
  * colours. [border] keeps field, button and chip outlines at 3:1 or more against paper, and
- * [inkWash] fills the selected channel chip under [onInkWash] text.
+ * [inkWash] fills the selected channel chip under [onInkWash] text. Android shows [marginGreen] as
+ * status text, so Lagoon and Sepia light use a darker green (and Lagoon a darker red) than the
+ * Mac, to reach 4.5:1 on desk.
  */
 internal data class Swatch(
     val ink: Color,
@@ -71,8 +73,8 @@ private val lagoonLight =
         border = Color(0xFF6B7A80),
         inkWash = Color(0xFFBFE3DF),
         onInkWash = Color(0xFF01373C),
-        redPencil = Color(0xFFB8463A),
-        marginGreen = Color(0xFF2F9D94),
+        redPencil = Color(0xFFA63E33),
+        marginGreen = Color(0xFF1A746C),
     )
 
 private val lagoonDark =
@@ -98,7 +100,7 @@ private val sepiaLight =
         inkWash = Color(0xFFF0D9C2),
         onInkWash = Color(0xFF4A2810),
         redPencil = Color(0xFFA8322A),
-        marginGreen = Color(0xFF4D7A2A),
+        marginGreen = Color(0xFF456E25),
     )
 
 private val sepiaDark =

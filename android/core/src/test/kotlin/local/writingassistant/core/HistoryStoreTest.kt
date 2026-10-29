@@ -103,6 +103,7 @@ class HistoryStoreTest {
         assertTrue(error.message!!.contains("history starts empty"))
         assertEquals("{ not json", store.backupFile.readText())
         assertFalse(historyFile.exists())
+        assertFalse(error.fileKept)
         assertEquals(emptyList<HistoryEntry>(), store.load())
     }
 
@@ -141,6 +142,7 @@ class HistoryStoreTest {
             assertThrows(HistoryStoreException::class.java) { HistoryStore(historyFile).load() }
 
         assertTrue(error.message!!.contains("Couldn't read the history at ${historyFile.path}"))
+        assertTrue(error.fileKept)
     }
 
     @Test

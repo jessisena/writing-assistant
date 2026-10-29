@@ -9,7 +9,9 @@ public struct PolishService: Polishing {
     private static let logger = Logger(subsystem: "local.writing-assistant", category: "pipeline")
     private static let refinementNote =
         "The input is already-polished English: apply the additional instruction on top of the "
-        + "rules above, set was_translated to false and set learning_summary to null."
+        + "rules above. Where it conflicts with them (for example a minimal-edit, length or "
+        + "formatting rule), the additional instruction wins. Set was_translated to false and set "
+        + "learning_summary to null."
 
     private let runner: any ClaudeRunning
     private let prompts: any PromptStoring
