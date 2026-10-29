@@ -12,6 +12,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import local.writingassistant.core.PolishError
+import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.util.Base64
@@ -28,7 +30,8 @@ private val Context.secretsDataStore by preferencesDataStore(name = "secrets")
  *
  * The stored value is Base64 of the 12-byte IV followed by the ciphertext. A value that can no
  * longer be decrypted (for example after the Keystore key was invalidated) is cleared and read as
- * no key, so the user is asked to enter it again.
+ * no key, so the user is asked to enter it again. Any other Keystore, cipher or DataStore failure
+ * is thrown as [PolishError.KeyStorageFailed], which names the failure but never the key.
  */
 class KeystoreApiKeyStore internal constructor(
     private val dataStore: DataStore<Preferences>,
@@ -39,22 +42,54 @@ class KeystoreApiKeyStore internal constructor(
         AndroidKeystoreKey::getOrCreate,
     )
 
-    override suspend fun read(): String? {
-        val stored = dataStore.data.first()[ENCRYPTED_KEY] ?: return null
-        val key = withContext(Dispatchers.IO) { decryptOrNull(stored) }
-        if (key == null) {
-            dataStore.edit { if (it[ENCRYPTED_KEY] == stored) it.remove(ENCRYPTED_KEY) }
+    /** @throws PolishError.KeyStorageFailed when the Keystore or DataStore can't be used. */
+    override suspend fun read(): String? =
+        storageGuarded {
+            val stored = dataStore.data.first()[ENCRYPTED_KEY] ?: return@storageGuarded null
+            val key = withContext(Dispatchers.IO) { decryptOrNull(stored) }
+            if (key == null) {
+                dataStore.edit { if (it[ENCRYPTED_KEY] == stored) it.remove(ENCRYPTED_KEY) }
+            }
+            key
         }
-        return key
-    }
 
+    /**
+     * Encrypts and stores [key], replacing any previous one.
+     *
+     * @throws IllegalArgumentException when [key] is blank; callers validate it first.
+     * @throws PolishError.KeyStorageFailed when the Keystore or DataStore can't be used.
+     */
     override suspend fun write(key: String) {
-        val encrypted = withContext(Dispatchers.IO) { encrypt(key) }
-        dataStore.edit { it[ENCRYPTED_KEY] = encrypted }
+        require(key.isNotBlank()) { "API key must not be blank" }
+        storageGuarded {
+            val encrypted = withContext(Dispatchers.IO) { cryptoGuarded { encrypt(key) } }
+            dataStore.edit { it[ENCRYPTED_KEY] = encrypted }
+        }
     }
 
+    /** @throws PolishError.KeyStorageFailed when DataStore can't be written. */
     override suspend fun clear() {
-        dataStore.edit { it.remove(ENCRYPTED_KEY) }
+        storageGuarded { dataStore.edit { it.remove(ENCRYPTED_KEY) } }
+    }
+
+    private suspend fun <T> storageGuarded(body: suspend () -> T): T =
+        try {
+            body()
+        } catch (e: IOException) {
+            throw storageFailed(e)
+        }
+
+    private fun <T> cryptoGuarded(body: () -> T): T =
+        try {
+            body()
+        } catch (e: Exception) {
+            throw storageFailed(e)
+        }
+
+    private fun storageFailed(e: Exception): PolishError.KeyStorageFailed {
+        val detail = e.javaClass.simpleName
+        Log.w(TAG, "Secure key storage failed ($detail)")
+        return PolishError.KeyStorageFailed(detail)
     }
 
     private fun encrypt(plain: String): String {
@@ -65,9 +100,22 @@ class KeystoreApiKeyStore internal constructor(
         return Base64.getEncoder().encodeToString(iv + cipher.doFinal(plain.toByteArray()))
     }
 
-    private fun decryptOrNull(stored: String): String? =
+    /**
+     * Returns the decrypted key, or null when the stored value is unusable and should be cleared.
+     * A device key that can't be loaded, or a Keystore runtime failure, is a storage failure
+     * instead, so a transient error doesn't delete the user's key.
+     */
+    private fun decryptOrNull(stored: String): String? {
+        val deviceKey = cryptoGuarded { secretKey() }
+        return cryptoGuarded { decryptOrNull(stored, deviceKey) }
+    }
+
+    private fun decryptOrNull(
+        stored: String,
+        deviceKey: SecretKey,
+    ): String? =
         try {
-            decrypt(Base64.getDecoder().decode(stored))
+            decrypt(Base64.getDecoder().decode(stored), deviceKey)
         } catch (e: GeneralSecurityException) {
             Log.w(TAG, "Stored API key can't be decrypted (${e.javaClass.simpleName}); clearing it")
             null
@@ -79,11 +127,14 @@ class KeystoreApiKeyStore internal constructor(
             null
         }
 
-    private fun decrypt(data: ByteArray): String {
+    private fun decrypt(
+        data: ByteArray,
+        deviceKey: SecretKey,
+    ): String {
         if (data.size <= IV_LENGTH) throw AEADBadTagException("Stored value is too short")
         val cipher = Cipher.getInstance(TRANSFORMATION)
         val spec = GCMParameterSpec(TAG_LENGTH_BITS, data, 0, IV_LENGTH)
-        cipher.init(Cipher.DECRYPT_MODE, secretKey(), spec)
+        cipher.init(Cipher.DECRYPT_MODE, deviceKey, spec)
         return String(cipher.doFinal(data, IV_LENGTH, data.size - IV_LENGTH))
     }
 

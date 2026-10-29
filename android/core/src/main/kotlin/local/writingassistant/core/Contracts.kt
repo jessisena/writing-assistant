@@ -87,6 +87,14 @@ sealed class PolishError(
     data object MalformedApiKey :
         PolishError("The API key contains characters that aren't allowed. Paste it again.")
 
+    /** The device's secure key storage failed. [detail] names the failure, never the key. */
+    data class KeyStorageFailed(
+        val detail: String,
+    ) : PolishError(
+            "Couldn't access the secure key storage on this device. Try again, or clear and " +
+                "re-enter the key.",
+        )
+
     data object NoCredits :
         PolishError("Your Anthropic account is out of credits. Add some in the Console.")
 
@@ -120,6 +128,11 @@ sealed class PolishError(
     data class PromptUnavailable(
         val detail: String,
     ) : PolishError("Couldn't read the bundled prompt files ($detail).")
+
+    /** A failure outside the cases above. [detail] is the exception class, never its message. */
+    data class Unexpected(
+        val detail: String,
+    ) : PolishError("Something went wrong ($detail). Please try again.")
 }
 
 sealed class PromptFile(

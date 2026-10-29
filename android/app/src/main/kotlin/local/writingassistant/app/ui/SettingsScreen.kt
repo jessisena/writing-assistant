@@ -95,11 +95,11 @@ private fun StatusLine(status: SettingsState.Status) {
             SettingsState.Status.Cleared -> stringResource(R.string.settings_cleared)
             SettingsState.Status.Testing -> stringResource(R.string.settings_testing)
             SettingsState.Status.TestPassed -> stringResource(R.string.settings_test_passed)
-            is SettingsState.Status.TestFailed -> status.message
+            is SettingsState.Status.Failed -> status.message
         }
     val color =
         when (status) {
-            is SettingsState.Status.TestFailed -> MaterialTheme.colorScheme.error
+            is SettingsState.Status.Failed -> MaterialTheme.colorScheme.error
             SettingsState.Status.TestPassed -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
