@@ -78,10 +78,9 @@ sealed class PolishError(
         val limit: Int,
     ) : PolishError("Text is too long. The limit is $limit characters.")
 
-    data object MissingApiKey : PolishError("Add your Anthropic API key in Settings to start.")
+    data object MissingApiKey : PolishError("Add your API key in Settings to start.")
 
-    data object InvalidApiKey :
-        PolishError("Anthropic rejected the API key. Check it in Settings.")
+    data object InvalidApiKey : PolishError("The API key was rejected. Check it in Settings.")
 
     /** The key has a character outside printable ASCII, such as a zero-width space or a newline. */
     data object MalformedApiKey :
@@ -95,35 +94,38 @@ sealed class PolishError(
                 "re-enter the key.",
         )
 
+    /** Only Anthropic reports this, so the message names it. */
     data object NoCredits :
         PolishError("Your Anthropic account is out of credits. Add some in the Console.")
 
-    data object Overloaded : PolishError("Claude is busy right now. Please try again shortly.")
+    /** The provider is overloaded, or the request hit a rate or tokens-per-minute limit. */
+    data object Overloaded :
+        PolishError("The AI service is busy or you've hit its rate limit. Try again shortly.")
 
     data class Timeout(
         val seconds: Int,
-    ) : PolishError("Claude took longer than $seconds seconds. Please try again.")
+    ) : PolishError("The AI service took longer than $seconds seconds. Please try again.")
 
     data class Network(
         val detail: String,
-    ) : PolishError("Couldn't reach Anthropic. Check your connection and try again.")
+    ) : PolishError("Couldn't reach the AI service. Check your connection and try again.")
 
     data class ApiFailed(
         val status: Int,
         val detail: String,
-    ) : PolishError("Claude returned an error (HTTP $status). Please try again.")
+    ) : PolishError("The AI service returned an error (HTTP $status). Please try again.")
 
-    /** Claude hit the output token limit, so the reply is incomplete. */
+    /** The model hit the output token limit, so the reply is incomplete. */
     data object OutputTooLong :
         PolishError("The reply was cut off because the text is too long. Try a shorter selection.")
 
-    /** Claude's safety systems declined the request. */
+    /** The provider's safety systems declined the request. */
     data object Refused :
-        PolishError("Claude declined to process this text. Try rewording it.")
+        PolishError("The AI service declined to process this text. Try rewording it.")
 
     data class BadFormat(
         val detail: String,
-    ) : PolishError("Unexpected response format from Claude. Please try again.")
+    ) : PolishError("The AI service sent a reply in an unexpected format. Please try again.")
 
     data class PromptUnavailable(
         val detail: String,
