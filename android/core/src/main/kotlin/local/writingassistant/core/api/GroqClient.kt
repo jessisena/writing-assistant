@@ -116,10 +116,11 @@ class GroqClient(
         /**
          * Output cap for polish and refine calls. Groq's free tier allows 8k tokens a minute
          * for both models and counts this cap against that budget before the reply starts, so
-         * a 16k cap like Anthropic's would fail every request with 413. 4k plus a typical
-         * 1.5k-2.5k token prompt fits, and stays well under both models' 65k output limit.
+         * a 16k cap like Anthropic's would fail every request with 413. With a typical
+         * 1.5k-2.5k token prompt, 2k leaves room for a polish and a refine in the same minute,
+         * and covers replies to texts of a few thousand characters. Both models allow 65k.
          */
-        private const val MAX_COMPLETION_TOKENS = 4_096
+        private const val MAX_COMPLETION_TOKENS = 2_048
         private const val JSON_OBJECT = "json_object"
         private const val JSON_VALIDATE_FAILED = "json_validate_failed"
         private val CHECK_TIMEOUT = 20.seconds

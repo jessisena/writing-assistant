@@ -125,7 +125,7 @@ class GroqClientTest {
             runPolish()
 
             val maxTokens = takeBody()["max_completion_tokens"]!!.jsonPrimitive.int
-            assertEquals(4_096, maxTokens)
+            assertEquals(2_048, maxTokens)
         }
 
     @Test
