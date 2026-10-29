@@ -27,9 +27,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import local.writingassistant.app.ui.Composer
 import local.writingassistant.app.ui.ComposerEvent
 import local.writingassistant.app.ui.ComposerViewModel
+import local.writingassistant.app.ui.SavedPaletteTheme
 import local.writingassistant.app.ui.SettingsScreen
 import local.writingassistant.app.ui.SettingsViewModel
-import local.writingassistant.app.ui.WritingAssistantTheme
 import local.writingassistant.app.ui.copyPolishedText
 
 /** Full-screen composer with Settings. */
@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val graph = (application as WritingAssistantApp).graph
         setContent {
-            WritingAssistantTheme { MainScreen(graph) }
+            SavedPaletteTheme(graph.settings.palette) { MainScreen(graph) }
         }
     }
 }
