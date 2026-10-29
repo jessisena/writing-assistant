@@ -12,7 +12,10 @@ struct WritingAssistantApp: App {
 
     init() {
         let store = PromptStore.standard()
-        let model = AppModel(polisher: PolishService(runner: ClaudeCLI(), prompts: store))
+        let usageStore = UsageStore.standard()
+        let model = AppModel(
+            polisher: PolishService(runner: ClaudeCLI(), prompts: store, usage: usageStore),
+            usageStore: usageStore)
         var newerDefaults: Set<PromptFile> = []
         do {
             try store.seedMissingDefaults()
@@ -44,6 +47,8 @@ struct WritingAssistantApp: App {
 
         Settings {
             TabView {
+                GeneralSettingsView(model: model)
+                    .tabItem { Label("General", systemImage: "gearshape") }
                 PromptEditorView(store: store, newerDefaults: newerDefaults)
                     .tabItem { Label("Prompts", systemImage: "doc.text") }
                 AppearanceSettingsView(settings: themeSettings)
@@ -154,7 +159,10 @@ struct MainWindowView: View {
         }
         .background(theme.desk)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) { HistoryButton(model: model) }
+            ToolbarItemGroup(placement: .primaryAction) {
+                MonthlyUsageLabel(model: model)
+                HistoryButton(model: model)
+            }
         }
     }
 

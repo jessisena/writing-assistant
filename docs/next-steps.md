@@ -144,12 +144,13 @@ added that were not in the original.
 ## 12. Service (polish from anywhere)
 
 - Select text in Notes, then Notes → Services → **Polish with Writing Assistant**. The app comes
-  forward and processes the selection with the current channel.
+  forward with the selection as input and the previous result cleared; nothing runs until you
+  click Polish.
 - Run it while a request is running: a banner explains that a request is already running, and
   the input is kept.
 - Close the main window while Settings is open, then run the service: the main window opens again
-  and processes the text.
-- Quit the app and run the service: the app launches and processes the text.
+  with the text loaded.
+- Quit the app and run the service: the app launches with the text loaded.
 - Assign a shortcut in System Settings → Keyboard → Keyboard Shortcuts → Services → Text, and
   confirm it works.
 

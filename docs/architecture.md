@@ -236,8 +236,10 @@ false until the next launch, so the first new entry never overwrites it.
 ### Service
 
 `ServiceProvider` is `NSApp.servicesProvider`. It reads the pasteboard (RTF through
-`RichTextBridge.normalized`, else plain text), loads the text into the input and starts a request
-with the current channel. If a request is already running it shows a banner and keeps the input.
+`RichTextBridge.normalized`, else plain text) and loads the text into the input with
+`AppModel.loadInput(_:)`, which saves and leaves the current history entry and clears the old
+result. It doesn't start a request: the user checks the channel and clicks Polish. If a request is
+already running it shows a banner and keeps the input.
 It then brings the main window forward. SwiftUI gives the `Window(id: "main")` NSWindow the
 identifier `main`; when no such window exists (it was closed while Settings kept the app running),
 the provider calls an `openWindow` action that the main window and Settings views hand to the app
