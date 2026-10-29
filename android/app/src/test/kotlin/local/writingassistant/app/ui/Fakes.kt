@@ -1,18 +1,19 @@
 package local.writingassistant.app.ui
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.app.data.PalettePreset
 import local.writingassistant.core.Channel
+import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStore
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Provider
 import local.writingassistant.core.Refinement
-import java.nio.file.Files
 
 /** [Polishing] whose answers are supplied by each test; records every call. */
 class FakePolishing : Polishing {
@@ -157,8 +158,18 @@ class FakeApiKeyStore(
     }
 }
 
-/** A history kept in a fresh temp directory, so tests never touch each other's files. */
-fun testHistory(): HistoryRepository =
+/**
+ * A history kept in memory, starting with [saved]; every save goes to [save] (which may throw to
+ * simulate a disk failure). File work runs in place, so `advanceUntilIdle` covers it.
+ */
+fun testHistory(
+    saved: List<HistoryEntry> = emptyList(),
+    limit: Int = HistoryStore.DEFAULT_LIMIT,
+    save: (List<HistoryEntry>) -> Unit = {},
+): HistoryRepository =
     HistoryRepository(
-        HistoryStore(Files.createTempDirectory("history").resolve("history.json").toFile()),
+        loadEntries = { saved },
+        saveEntries = save,
+        limit = limit,
+        ioDispatcher = Dispatchers.Unconfined,
     )
