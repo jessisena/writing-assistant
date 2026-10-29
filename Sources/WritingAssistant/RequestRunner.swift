@@ -20,6 +20,12 @@ import Observation
         return generation
     }
 
+    /// Whether the request started as `generation` is still running: not finished, cancelled or
+    /// replaced.
+    func isCurrent(_ generation: Int) -> Bool {
+        isRunning && generation == self.generation
+    }
+
     /// Runs `work` in a task that `cancel()` can stop. Call it after `begin()` succeeded.
     func start(_ work: @escaping @MainActor () async -> Void) {
         task = Task { await work() }

@@ -119,8 +119,7 @@ class PolishService(
                 "length or formatting rule), the additional instruction wins. Set was_translated " +
                 "to false and set learning_summary to null."
         private const val NO_SUMMARY_NOTE =
-            "The author turned the learning summary off: skip Step 4 and set learning_summary " +
-                "to null."
+            "The learning summary is turned off: skip Step 4 and set learning_summary to null."
         private val json = Json { ignoreUnknownKeys = true }
 
         private fun validatedInput(text: String): String {

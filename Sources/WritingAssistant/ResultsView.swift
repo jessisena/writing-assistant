@@ -11,22 +11,28 @@ struct ResultsView: View {
         case idle, loading, result
     }
 
-    /// A refinement keeps the result on screen, so only a polish request shows the skeleton.
+    /// A polish clears the result when it starts, so the skeleton shows until its preview or
+    /// final result arrives. A refinement keeps the result on screen.
     private var phase: Phase {
-        if model.isLoading && model.runningRefinement == nil { return .loading }
-        return model.result == nil ? .idle : .result
+        if model.result != nil { return .result }
+        return model.isLoading ? .loading : .idle
     }
 
     var body: some View {
         ZStack(alignment: .top) {
             switch phase {
             case .loading:
-                SkeletonCards().transition(.opacity)
+                SkeletonCards(includesSummary: model.includesLearningSummary)
+                    .transition(.opacity)
             case .result:
                 if let result = model.result {
                     VStack(spacing: 16) {
                         PolishedCard(model: model, result: result)
-                        LearningSummaryCard(result: result)
+                        if model.isAwaitingSummary {
+                            SummarySkeletonCard()
+                        } else if showsSummary(of: result) {
+                            LearningSummaryCard(result: result)
+                        }
                     }
                     .transition(
                         .asymmetric(
@@ -34,35 +40,62 @@ struct ResultsView: View {
                     )
                 }
             case .idle:
-                IdleHint()
+                IdleHint(includesSummary: model.includesLearningSummary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phase)
     }
+
+    /// The card shows a summary whenever the result has one (even a history entry from before the
+    /// setting was turned off), and explains a translation's missing summary while the setting is
+    /// on. English text without a summary (setting off, cancelled or failed) gets no card.
+    private func showsSummary(of result: PolishResult) -> Bool {
+        result.learningSummary != nil || (result.wasTranslated && model.includesLearningSummary)
+    }
 }
 
 private struct IdleHint: View {
+    let includesSummary: Bool
+
     var body: some View {
-        Text("Your polished text and a short English tip will appear here.")
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Text(
+            includesSummary
+                ? "Your polished text and a short English tip will appear here."
+                : "Your polished text will appear here."
+        )
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SkeletonCards: View {
+    let includesSummary: Bool
+
     var body: some View {
         VStack(spacing: 16) {
             ResultCard(title: "Polished text") {
                 Text(String(repeating: "Polished text is on its way. ", count: 8))
             }
-            ResultCard(title: "English learning summary") {
-                Text(String(repeating: "The summary is on its way. ", count: 5))
+            .redacted(reason: .placeholder)
+            if includesSummary {
+                SummarySkeletonCard()
             }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Working on your text")
+    }
+}
+
+/// A redacted learning summary card, shown while the summary is on its way.
+private struct SummarySkeletonCard: View {
+    var body: some View {
+        ResultCard(title: "English learning summary") {
+            Text(String(repeating: "The summary is on its way. ", count: 5))
         }
         .redacted(reason: .placeholder)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Working on your text")
+        .accessibilityLabel("Working on the English learning summary")
     }
 }
 
@@ -227,29 +260,32 @@ private struct CopyButton: View {
     }
 }
 
+/// "Refine:" and a button per refinement, wrapping to more rows when the window is narrow.
 private struct RefinementRow: View {
     let model: AppModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Refine:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            ForEach(Refinement.allCases) { refinement in
-                Button {
-                    model.refine(refinement)
-                } label: {
-                    ZStack {
-                        Text(refinement.displayName)
-                            .opacity(model.runningRefinement == refinement ? 0 : 1)
-                        if model.runningRefinement == refinement {
-                            ProgressView().controlSize(.small)
+            FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                ForEach(Refinement.allCases) { refinement in
+                    Button {
+                        model.refine(refinement)
+                    } label: {
+                        ZStack {
+                            Text(refinement.displayName)
+                                .opacity(model.runningRefinement == refinement ? 0 : 1)
+                            if model.runningRefinement == refinement {
+                                ProgressView().controlSize(.small)
+                            }
                         }
                     }
+                    .accessibilityLabel("Refine: \(refinement.displayName)")
+                    .help("Rewrites the polished text, including your edits")
                 }
-                .accessibilityLabel("Refine: \(refinement.displayName)")
-                .help("Rewrites the polished text, including your edits")
             }
         }
         .disabled(!model.canRefine)

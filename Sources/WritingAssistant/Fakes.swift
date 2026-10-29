@@ -2,25 +2,37 @@
     import Foundation
     import WritingAssistantCore
 
-    /// In-memory `Polishing` for previews and tests. Returns `outcome` after `delay`; `refine`
-    /// returns its polished text.
+    /// In-memory `Polishing` for previews and tests. Sends `preview`, if set, then returns
+    /// `outcome` after `delay`; `refine` returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
+        private var _preview: PolishPreview?
         private var _calls: [(text: String, channel: Channel)] = []
+        private var _summaryRequests: [Bool] = []
         private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
         let delay: Duration
 
         init(
             outcome: Result<PolishResult, PolishError> = .success(.sample),
             readiness: PolishError? = nil,
+            preview: PolishPreview? = nil,
             delay: Duration = .zero
         ) {
             _outcome = outcome
             _readiness = readiness
+            _preview = preview
             self.delay = delay
         }
+
+        var preview: PolishPreview? {
+            get { lock.withLock { _preview } }
+            set { lock.withLock { _preview = newValue } }
+        }
+
+        /// The `includeLearningSummary` value of each `polish` call, in call order.
+        var summaryRequests: [Bool] { lock.withLock { _summaryRequests } }
 
         var outcome: Result<PolishResult, PolishError> {
             get { lock.withLock { _outcome } }
@@ -38,8 +50,18 @@
             lock.withLock { _refineCalls }
         }
 
-        func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
-            lock.withLock { _calls.append((text, channel)) }
+        func polish(
+            text: String, channel: Channel, includeLearningSummary: Bool,
+            onPreview: @escaping @Sendable (PolishPreview) -> Void
+        ) async throws(PolishError) -> PolishResult {
+            let preview = lock.withLock {
+                _calls.append((text, channel))
+                _summaryRequests.append(includeLearningSummary)
+                return _preview
+            }
+            if let preview {
+                onPreview(preview)
+            }
             if delay > .zero {
                 try? await Task.sleep(for: delay)
             }
@@ -71,6 +93,7 @@
 
         private let lock = NSLock()
         private var gates: [Gate] = []
+        private var previewSinks: [@Sendable (PolishPreview) -> Void] = []
         private var _cancelledCount = 0
 
         /// Calls made so far, each waiting until resumed.
@@ -84,21 +107,39 @@
             gate.resume(returning: outcome)
         }
 
-        func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
-            let outcome = await withTaskCancellationHandler {
-                await withCheckedContinuation { gate in
-                    lock.withLock { gates.append(gate) }
-                }
-            } onCancel: {
-                lock.withLock { _cancelledCount += 1 }
-            }
-            return try outcome.get()
+        /// Sends `preview` to the `onPreview` of the call at `index`, which keeps waiting.
+        func sendPreview(_ index: Int, _ preview: PolishPreview) {
+            let sink = lock.withLock { previewSinks[index] }
+            sink(preview)
+        }
+
+        func polish(
+            text: String, channel: Channel, includeLearningSummary: Bool,
+            onPreview: @escaping @Sendable (PolishPreview) -> Void
+        ) async throws(PolishError) -> PolishResult {
+            try await wait(onPreview: onPreview)
         }
 
         func refine(
             text: String, channel: Channel, refinement: Refinement
         ) async throws(PolishError) -> String {
-            try await polish(text: text, channel: channel).polishedText
+            try await wait(onPreview: { _ in }).polishedText
+        }
+
+        private func wait(
+            onPreview: @escaping @Sendable (PolishPreview) -> Void
+        ) async throws(PolishError) -> PolishResult {
+            let outcome = await withTaskCancellationHandler {
+                await withCheckedContinuation { gate in
+                    lock.withLock {
+                        gates.append(gate)
+                        previewSinks.append(onPreview)
+                    }
+                }
+            } onCancel: {
+                lock.withLock { _cancelledCount += 1 }
+            }
+            return try outcome.get()
         }
 
         func checkReady() async throws(PolishError) {}

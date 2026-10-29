@@ -57,6 +57,48 @@ import WritingAssistantCore
         #expect(try saved() == model.history)
     }
 
+    @Test func loadInputClearsTheOldResultWithoutStartingARequest() async throws {
+        let polisher = FakePolisher()
+        let model = makeModel(polisher)
+        await process(model, "Hello")
+        model.showBanner("Old problem")
+
+        model.loadInput(NSAttributedString(string: "New text"))
+
+        #expect(model.input.string == "New text")
+        #expect(model.result == nil)
+        #expect(model.output.length == 0)
+        #expect(model.errorMessage == nil)
+        #expect(model.currentHistoryID == nil)
+        #expect(!model.isLoading)
+        #expect(polisher.calls.count == 1)
+    }
+
+    @Test func loadInputSavesTheEditedOutputToItsEntryFirst() async throws {
+        let model = makeModel()
+        await process(model, "Hello")
+        model.output = NSAttributedString(string: "My edit")
+
+        model.loadInput(NSAttributedString(string: "New text"))
+
+        #expect(model.history[0].outputMarkdown == "My edit")
+        #expect(try saved()[0].outputMarkdown == "My edit")
+    }
+
+    @Test func loadInputIsIgnoredWhileARequestRuns() async {
+        let polisher = GatedPolisher()
+        let model = makeModel(polisher)
+        model.input = NSAttributedString(string: "First")
+        model.startProcessing()
+        while polisher.waitingCount == 0 { await Task.yield() }
+
+        model.loadInput(NSAttributedString(string: "Second"))
+
+        #expect(model.input.string == "First")
+        polisher.resume(0, with: .success(.sample))
+        await model.requests.task?.value
+    }
+
     @Test func failureRecordsNothing() async throws {
         let model = makeModel(FakePolisher(outcome: .failure(.claudeNotFound)))
 
@@ -372,6 +414,7 @@ import WritingAssistantCore
             polisher: FakePolisher(),
             learningLog: LearningLog(fileURL: directory.appending(path: "learning-log.md")),
             historyStore: HistoryStore(fileURL: store.fileURL, limit: 2),
+            usageStore: UsageStore(fileURL: directory.appending(path: "usage.json")),
             writeToPasteboard: { _ in },
             sleep: { _ in },
             defaults: TestDefaults.make()

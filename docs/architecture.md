@@ -32,6 +32,18 @@ input and to Sonnet for everything else. A Haiku triage call would have been the
 "intelligent routing" design but adds a full round-trip to every request to save quota on some of
 them. The local heuristic gets the same result for free.
 
+### Haiku 4.5, not Haiku 5.5, for short English
+
+Re-measured on 2026-10-29 through the CLI with the real polish prompt (5 short English Slack
+messages × 3 runs, stream-json): Haiku 4.5 finished `polished_text` after a median 2.6 s (8.1 s
+for the whole process), Haiku 5.5 after 10.0 s (14.8 s). Haiku 5.5 always uses adaptive thinking
+(about 1,000–2,800 thinking tokens per request here): `MAX_THINKING_TOKENS=0`, `--effort low`
+(7.8 s) and `alwaysThinkingEnabled: false` (11.1 s) don't turn it off, and the Claude Code docs
+list no switch that does. Its learning summaries were better (it named Spanish/Portuguese
+interference such as "assist" for "attend"), but its polished Slack text was wordier. Haiku is in
+the routing for speed, so `ModelRouting.haikuModel` stays on Haiku 4.5. Re-check when Claude Code
+offers a way to disable thinking for 5.x models.
+
 ### `learning_summary` gate — enforced in code
 
 When input was not in English (`was_translated: true`), the learning summary is always nil. This is
@@ -224,8 +236,10 @@ false until the next launch, so the first new entry never overwrites it.
 ### Service
 
 `ServiceProvider` is `NSApp.servicesProvider`. It reads the pasteboard (RTF through
-`RichTextBridge.normalized`, else plain text), loads the text into the input and starts a request
-with the current channel. If a request is already running it shows a banner and keeps the input.
+`RichTextBridge.normalized`, else plain text) and loads the text into the input with
+`AppModel.loadInput(_:)`, which saves and leaves the current history entry and clears the old
+result. It doesn't start a request: the user checks the channel and clicks Polish. If a request is
+already running it shows a banner and keeps the input.
 It then brings the main window forward. SwiftUI gives the `Window(id: "main")` NSWindow the
 identifier `main`; when no such window exists (it was closed while Settings kept the app running),
 the provider calls an `openWindow` action that the main window and Settings views hand to the app
@@ -238,6 +252,8 @@ delegate when they appear. The activation step is injected, so tests run without
   prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
   history.json             the newest 50 requests
   history.corrupt.json     a history file that couldn't be read, moved aside
+  usage.json               token totals per month
+  usage.corrupt.json       a usage file that couldn't be read, moved aside
   learning-log.md          learning summaries, newest last
 ```
 
@@ -253,15 +269,42 @@ installing `claude` works without relaunching. Those directories are prefixed on
 `ClaudeCLI` runs:
 
 ```
-claude --print --output-format text --model <model> \
-  --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
+claude --print --output-format stream-json --verbose --include-partial-messages \
+  --model <model> --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
 ```
 
 with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
 `MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
-stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. After 120 s the
-process gets SIGTERM, then SIGKILL after a 2 s grace. A non-zero exit is retried once; a timeout is
-never retried. Cancelling the request or quitting the app terminates a running `claude` process.
+stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. stdout is read as
+one JSON event per line (`StreamJSONReader`): `text_delta` events go to the caller's `onText` as
+they arrive, and the final `result` event gives the reply text and its `usage` (input, output,
+cache write and cache read tokens). After 120 s the process gets SIGTERM, then SIGKILL after a 2 s
+grace. A non-zero exit is retried once, but only if no text was streamed yet; a timeout is never
+retried. Cancelling the request or quitting the app terminates a running `claude` process.
+
+The `result` event arrives about 2.5 s after the model's last token (CLI shutdown), and each call
+also carries about 24K tokens of Claude Code's own system prompt, mostly cache reads. Both show in
+the token count; the preview makes the first.
+
+### Progressive display, summary setting and token count
+
+`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which reports the
+top-level `polished_text` the moment its JSON string closes (with `detected_language` and
+`was_translated` if they came first). `AppModel` shows it as the result with no summary and a
+placeholder summary card; the final result fills in the summary but keeps the output editor's
+text, so edits made during the wait survive. A preview for a request that is no longer current is
+ignored. After a cancel or failure the previewed text stays and is saved to history without a
+summary.
+
+Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
+When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
+
+`PolishService` records the usage of every reply the CLI completes in `UsageStore` (`usage.json`,
+totals per Gregorian "yyyy-MM" in the user's time zone), even when the reply then fails to parse.
+Runs that end without a `result` event (cancelled, timed out, crashed) report no usage and aren't
+counted, and neither is a failed first attempt that was retried, so the count is a slight
+undercount. The toolbar and Settings › General show the current month, re-read after each request,
+when the app becomes active and when Settings opens.
 
 ### Logging
 
@@ -307,8 +350,9 @@ paste + channel, Process (⌘↩)
 │ PromptStore.assemble(for: channel)     │
 └────────────────────────────────────────┘
       │
-      ▼  one ClaudeCLI.run() call
+      ▼  one ClaudeCLI.run() call, stream-json
          MAX_THINKING_TOKENS=0, MCP disabled
+         polished_text closes → onPreview (shown at once)
 ┌────────────────────────────────────────┐
 │ polish.txt  (4 steps)                  │
 │  1. detect language                    │

@@ -104,8 +104,8 @@ class PolishServiceTest {
             service(client).polish("Hello there", Channel.FORMAL, learningSummary = false)
 
             val expected =
-                "SYSTEM FORMAL RULES\n\nThe author turned the learning summary off: skip Step 4 " +
-                    "and set learning_summary to null.\n\n---\n\nHello there"
+                "SYSTEM FORMAL RULES\n\nThe learning summary is turned off: skip Step 4 and set " +
+                    "learning_summary to null.\n\n---\n\nHello there"
             assertEquals(expected, client.calls.single().prompt)
         }
 

@@ -41,8 +41,9 @@ import AppKit
         }
     }
 
-    /// Loads the pasteboard's text into the model and starts polishing it. While a request is
-    /// running, the input is kept and a banner explains why nothing started.
+    /// Loads the pasteboard's text into the model (see `AppModel.loadInput(_:)`) without
+    /// polishing it: the user reviews the text and the channel, then clicks Polish. While a
+    /// request is running, the input is kept and a banner explains why nothing was loaded.
     ///
     /// - Parameter pboard: Pasteboard holding the selection.
     /// - Returns: A message for the calling app when the pasteboard has no text, otherwise nil.
@@ -51,8 +52,7 @@ import AppKit
         if model.isLoading {
             model.showBanner(Self.busyMessage)
         } else {
-            model.input = text
-            model.startProcessing()
+            model.loadInput(text)
         }
         activate()
         return nil

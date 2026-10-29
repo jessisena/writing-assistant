@@ -135,6 +135,73 @@ public struct PolishResult: Sendable, Equatable {
     }
 }
 
+/// Tokens one or more Claude requests used, as the claude CLI reports them.
+public struct TokenUsage: Codable, Sendable, Equatable {
+    public var input: Int
+    public var output: Int
+    public var cacheCreation: Int
+    public var cacheRead: Int
+
+    public static let zero = TokenUsage(input: 0, output: 0, cacheCreation: 0, cacheRead: 0)
+
+    public init(input: Int, output: Int, cacheCreation: Int, cacheRead: Int) {
+        self.input = input
+        self.output = output
+        self.cacheCreation = cacheCreation
+        self.cacheRead = cacheRead
+    }
+
+    /// Every token sent or received, cached or not.
+    public var total: Int { input + output + cacheCreation + cacheRead }
+
+    public static func + (lhs: TokenUsage, rhs: TokenUsage) -> TokenUsage {
+        TokenUsage(
+            input: lhs.input + rhs.input,
+            output: lhs.output + rhs.output,
+            cacheCreation: lhs.cacheCreation + rhs.cacheCreation,
+            cacheRead: lhs.cacheRead + rhs.cacheRead
+        )
+    }
+}
+
+/// The tokens used in one calendar month and how many requests used them.
+public struct MonthlyUsage: Codable, Sendable, Equatable {
+    public var tokens: TokenUsage
+    public var requests: Int
+
+    public static let zero = MonthlyUsage(tokens: .zero, requests: 0)
+
+    public init(tokens: TokenUsage, requests: Int) {
+        self.tokens = tokens
+        self.requests = requests
+    }
+}
+
+/// What the claude CLI answered: the reply text and, when reported, the tokens it used.
+public struct ClaudeReply: Sendable, Equatable {
+    public var text: String
+    public var usage: TokenUsage?
+
+    public init(text: String, usage: TokenUsage?) {
+        self.text = text
+        self.usage = usage
+    }
+}
+
+/// The polished text of a polish request that is still running, sent as soon as the reply's
+/// `polished_text` is complete. The language fields are nil when the reply hadn't stated them yet.
+public struct PolishPreview: Sendable, Equatable {
+    public var polishedText: String
+    public var detectedLanguage: String?
+    public var wasTranslated: Bool?
+
+    public init(polishedText: String, detectedLanguage: String?, wasTranslated: Bool?) {
+        self.polishedText = polishedText
+        self.detectedLanguage = detectedLanguage
+        self.wasTranslated = wasTranslated
+    }
+}
+
 public enum PolishError: LocalizedError, Equatable, Sendable {
     case emptyInput
     case inputTooLong(limit: Int)
@@ -223,12 +290,21 @@ public enum PromptValidationError: LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Runs one prompt through the claude CLI and returns its stdout.
+/// Runs one prompt through the claude CLI and returns its reply.
 /// Throws `PolishError.claudeNotFound`, `.timeout`, or `.cliFailed`.
 public protocol ClaudeRunning: Sendable {
-    func run(prompt: String, model: String, timeout: Duration) async throws(PolishError) -> String
+    /// `onText` receives the reply text in order, piece by piece, while it is generated.
+    func run(
+        prompt: String, model: String, timeout: Duration,
+        onText: @escaping @Sendable (String) -> Void
+    ) async throws(PolishError) -> ClaudeReply
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
     func checkAvailable() async throws(PolishError)
+}
+
+/// Keeps count of the tokens Claude requests use.
+public protocol UsageRecording: Sendable {
+    func record(_ usage: TokenUsage) throws
 }
 
 /// Prompt files on disk. Every read goes to disk, so external edits apply immediately.
@@ -251,7 +327,16 @@ public protocol PromptStoring: Sendable {
 }
 
 public protocol Polishing: Sendable {
-    func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult
+    /// Polishes `text` for `channel`.
+    ///
+    /// - Parameters:
+    ///   - includeLearningSummary: False asks for no learning summary, and the result has none.
+    ///   - onPreview: Called at most once, before the method returns, as soon as the polished
+    ///     text is complete, while the rest of the reply (the learning summary) is still coming.
+    func polish(
+        text: String, channel: Channel, includeLearningSummary: Bool,
+        onPreview: @escaping @Sendable (PolishPreview) -> Void
+    ) async throws(PolishError) -> PolishResult
     /// Rewrites already-polished `text` for `channel` with one extra instruction and returns
     /// only the new polished text.
     func refine(text: String, channel: Channel, refinement: Refinement) async throws(PolishError)

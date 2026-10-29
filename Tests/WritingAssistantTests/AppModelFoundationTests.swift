@@ -50,6 +50,36 @@ import WritingAssistantCore
 }
 
 @MainActor
+@Suite struct LearningSummarySettingTests {
+    @Test func isOnWhenNothingWasSaved() {
+        #expect(AppModel.testing(polisher: FakePolisher()).includesLearningSummary)
+    }
+
+    @Test func turningItOffSurvivesANewModel() {
+        let defaults = TestDefaults.make()
+        AppModel.testing(polisher: FakePolisher(), defaults: defaults)
+            .includesLearningSummary = false
+
+        let relaunched = AppModel.testing(polisher: FakePolisher(), defaults: defaults)
+
+        #expect(!relaunched.includesLearningSummary)
+        #expect(defaults.object(forKey: AppModel.learningSummaryDefaultsKey) as? Bool == false)
+    }
+
+    @Test func eachPolishAsksForTheSummaryAsTheSettingSays() async {
+        let polisher = FakePolisher()
+        let model = AppModel.testing(polisher: polisher)
+        model.input = NSAttributedString(string: "Hello")
+
+        await model.process()
+        model.includesLearningSummary = false
+        await model.process()
+
+        #expect(polisher.summaryRequests == [true, false])
+    }
+}
+
+@MainActor
 @Suite struct RequestStartedAtTests {
     private func waitUntil(_ polisher: GatedPolisher, hasCalls count: Int) async {
         while polisher.waitingCount < count { await Task.yield() }

@@ -15,7 +15,8 @@ let package = Package(
         ),
         .testTarget(
             name: "WritingAssistantCoreTests",
-            dependencies: ["WritingAssistantCore"]
+            dependencies: ["WritingAssistantCore"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "WritingAssistantTests",

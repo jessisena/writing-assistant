@@ -13,12 +13,18 @@ struct ClipboardContent: Equatable, Sendable {
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
     static let channelDefaultsKey = "selectedChannel"
+    static let learningSummaryDefaultsKey = "learningSummaryEnabled"
 
     var input = NSAttributedString()
     var output = NSAttributedString()
     /// The channel to write for. Each change is saved, so the next launch starts with it.
     var channel: Channel {
         didSet { defaults.set(channel.rawValue, forKey: Self.channelDefaultsKey) }
+    }
+    /// Whether a polish asks for the English learning summary. Turning it off saves time and
+    /// tokens. Each change is saved, so the next launch keeps it.
+    var includesLearningSummary: Bool {
+        didSet { defaults.set(includesLearningSummary, forKey: Self.learningSummaryDefaultsKey) }
     }
     var isLoading: Bool { requests.isRunning }
     private(set) var result: PolishResult? {
@@ -28,6 +34,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// than in view state because the card is rebuilt after every request. Any change to
     /// `result` turns it off; a refinement only changes `output`, so it keeps it on.
     var showsChanges = false
+    /// True while a polish shows its polished text but its learning summary is still coming.
+    private(set) var isAwaitingSummary = false
     private(set) var errorMessage: String?
     private(set) var copied = false
     /// Counts successful copies, so views can react to every copy, even two within `copiedDuration`.
@@ -40,6 +48,8 @@ struct ClipboardContent: Equatable, Sendable {
     var history: [HistoryEntry] = []
     /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
     var currentHistoryID: UUID?
+    /// Tokens used this calendar month, read from `usageStore` at launch and after each request.
+    private(set) var monthlyUsage = MonthlyUsage.zero
 
     /// True when there is something to clear and no request is running.
     var canClear: Bool {
@@ -52,6 +62,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// Where `process()` writes each learning summary. Append only from the main actor.
     @ObservationIgnored let learningLog: LearningLog
     @ObservationIgnored let historyStore: HistoryStore
+    /// Where the polisher records the tokens each request uses; the model only reads it.
+    @ObservationIgnored let usageStore: UsageStore
     /// The running polish or refinement, which `cancel()` stops.
     @ObservationIgnored let requests = RequestRunner()
     @ObservationIgnored private let writeToPasteboard: @MainActor (ClipboardContent) -> Void
@@ -60,6 +72,9 @@ struct ClipboardContent: Equatable, Sendable {
     /// False when the history file exists but couldn't be read or moved aside at launch. Saving
     /// is then skipped until the next launch, so the unread file is never overwritten.
     @ObservationIgnored private(set) var savesHistory = true
+    /// The preview on screen for the running polish. It is kept until the request ends, so a
+    /// cancel or failure can still save the polished text to history.
+    @ObservationIgnored private var shownPreview: ShownPreview?
 
     /// Creates the model.
     ///
@@ -70,15 +85,19 @@ struct ClipboardContent: Equatable, Sendable {
     ///     in the error banner and the history starts empty. When the file can't be read (or a
     ///     damaged one can't be moved aside), the banner says so and history isn't saved until
     ///     the next launch.
+    ///   - usageStore: The monthly token totals, read here and after every request. A file that
+    ///     can't be read is shown in the error banner and the count shows zero.
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
-    ///   - defaults: Where the selected channel is kept between launches. A missing or unknown
-    ///     saved value gives Formal document.
+    ///   - defaults: Where the selected channel and the learning summary setting are kept
+    ///     between launches. A missing or unknown saved channel gives Formal document; a missing
+    ///     summary setting turns the summary on.
     init(
         polisher: any Polishing,
         learningLog: LearningLog = .standard(),
         historyStore: HistoryStore = .standard(),
+        usageStore: UsageStore = .standard(),
         writeToPasteboard: @escaping @MainActor (ClipboardContent) -> Void =
             AppModel.writeToGeneralPasteboard,
         sleep: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
@@ -89,11 +108,30 @@ struct ClipboardContent: Equatable, Sendable {
         channel =
             defaults.string(forKey: Self.channelDefaultsKey).flatMap(Channel.init(rawValue:))
             ?? .formal
+        includesLearningSummary =
+            defaults.object(forKey: Self.learningSummaryDefaultsKey) as? Bool ?? true
         self.learningLog = learningLog
         self.historyStore = historyStore
+        self.usageStore = usageStore
         self.writeToPasteboard = writeToPasteboard
         self.sleep = sleep
         loadHistory()
+        do {
+            monthlyUsage = try usageStore.currentMonth()
+        } catch {
+            showStartupError(error)
+        }
+    }
+
+    /// Reads this month's token totals again. A failure goes to the error banner and leaves the
+    /// count at zero; a damaged file was moved aside, so the next read starts from zero.
+    func refreshMonthlyUsage() {
+        do {
+            monthlyUsage = try usageStore.currentMonth()
+        } catch {
+            monthlyUsage = .zero
+            showBanner(error)
+        }
     }
 
     private func loadHistory() {
@@ -112,6 +150,18 @@ struct ClipboardContent: Equatable, Sendable {
             + " New history won't be saved until you relaunch the app, so the file isn't replaced."
     }
 
+    /// Puts `text` in the input, ready for the user to polish, as the Services entry does. The
+    /// output on screen is saved to its history entry first; the result, the output and the error
+    /// banner are cleared. Nothing is sent to Claude. Ignored while a request is running.
+    func loadInput(_ text: NSAttributedString) {
+        guard !isLoading else { return }
+        errorMessage = nil
+        leaveCurrentHistoryEntry()
+        input = text
+        output = NSAttributedString()
+        result = nil
+    }
+
     /// Starts polishing `input` in a task that `cancel()` can stop. Ignored while a request is
     /// running.
     func startProcessing() {
@@ -126,12 +176,16 @@ struct ClipboardContent: Equatable, Sendable {
         await polish(request)
     }
 
-    /// Stops the running request and returns to the empty state, with no error banner. A
-    /// late answer from the stopped request is ignored.
+    /// Stops the running request, with no error banner. A late answer from the stopped request
+    /// is ignored. A polish that already showed its polished text keeps it on screen and saves
+    /// it to history without a learning summary; otherwise the screen returns to the empty state.
     func cancel() {
         requests.cancel()
         requestStartedAt = nil
         runningRefinement = nil
+        if let shown = endPreview() {
+            recordPreviewInHistory(shown)
+        }
     }
 
     /// Marks a request as running in `requests` and clears the error banner.
@@ -149,12 +203,14 @@ struct ClipboardContent: Equatable, Sendable {
 
     /// Runs the work of the request started as `generation` (see `RequestRunner.finish(_:_:)`)
     /// and shows a failure in the error banner. A cancelled or replaced request shows no error.
+    /// Either way the monthly token count is read again, since the request may have used tokens.
     ///
     /// - Returns: The operation's value, or nil when it failed or was cancelled.
     func finishRequest<Value>(
         _ generation: Int, _ operation: () async throws(PolishError) -> Value
     ) async -> Value? {
         let outcome = await requests.finish(generation, operation)
+        defer { refreshMonthlyUsage() }
         if !requests.isRunning {
             requestStartedAt = nil
             runningRefinement = nil
@@ -173,7 +229,14 @@ struct ClipboardContent: Equatable, Sendable {
     private struct PolishRequest {
         let text: String
         let channel: Channel
+        let includesLearningSummary: Bool
         let generation: Int
+    }
+
+    /// A polish request's preview and the result made from it.
+    private struct ShownPreview {
+        let request: PolishRequest
+        let result: PolishResult
     }
 
     private func beginProcessing() -> PolishRequest? {
@@ -188,19 +251,73 @@ struct ClipboardContent: Equatable, Sendable {
         leaveCurrentHistoryEntry()
         result = nil
         output = NSAttributedString()
-        return PolishRequest(text: text, channel: channel, generation: generation)
+        return PolishRequest(
+            text: text, channel: channel, includesLearningSummary: includesLearningSummary,
+            generation: generation)
     }
 
+    /// Runs `request` and shows its result. When a preview was shown first, the final result
+    /// only adds the learning summary: the output, which the user may have edited meanwhile,
+    /// stays. History and the learning log are written once, when the request ends.
     private func polish(_ request: PolishRequest) async {
         let polisher = polisher
-        let polished = await finishRequest(request.generation) { () async throws(PolishError) in
-            try await polisher.polish(text: request.text, channel: request.channel)
+        let onPreview: @Sendable (PolishPreview) -> Void = { [weak self] preview in
+            Task { @MainActor in self?.showPreview(preview, for: request) }
         }
-        guard let polished else { return }
-        result = polished
-        output = Self.editorText(fromMarkdown: polished.polishedText)
-        recordHistory(polished, input: request.text, channel: request.channel)
+        let polished = await finishRequest(request.generation) { () async throws(PolishError) in
+            try await polisher.polish(
+                text: request.text, channel: request.channel,
+                includeLearningSummary: request.includesLearningSummary, onPreview: onPreview)
+        }
+        let preview = shownPreview?.request.generation == request.generation ? endPreview() : nil
+        guard let polished else {
+            if let preview { recordPreviewInHistory(preview) }
+            return
+        }
+        if preview == nil {
+            result = polished
+            output = Self.editorText(fromMarkdown: polished.polishedText)
+            recordHistory(polished, input: request.text, channel: request.channel)
+        } else {
+            let keepsChanges = showsChanges
+            result = polished
+            showsChanges = keepsChanges
+            recordHistory(polished, input: request.text, channel: request.channel)
+            saveOutputToHistory()
+        }
         appendToLearningLog(polished, channel: request.channel)
+    }
+
+    /// Shows the polished text of `request` while its learning summary is still coming. Ignored
+    /// when the request is no longer running (it finished, failed or was cancelled) or already
+    /// showed a preview.
+    private func showPreview(_ preview: PolishPreview, for request: PolishRequest) {
+        guard requests.isCurrent(request.generation), shownPreview == nil else { return }
+        let shown = PolishResult(
+            polishedText: preview.polishedText,
+            learningSummary: nil,
+            detectedLanguage: preview.detectedLanguage ?? "Unknown",
+            wasTranslated: preview.wasTranslated ?? false,
+            modelUsed: ModelRouting.pickModel(for: request.text)
+        )
+        shownPreview = ShownPreview(request: request, result: shown)
+        result = shown
+        output = Self.editorText(fromMarkdown: shown.polishedText)
+        isAwaitingSummary = request.includesLearningSummary && !shown.wasTranslated
+    }
+
+    /// Forgets the shown preview, which stays on screen, and stops waiting for its summary.
+    private func endPreview() -> ShownPreview? {
+        let shown = shownPreview
+        shownPreview = nil
+        isAwaitingSummary = false
+        return shown
+    }
+
+    /// Saves a preview whose request ended without a final result, with the output as edited.
+    private func recordPreviewInHistory(_ shown: ShownPreview) {
+        recordHistory(shown.result, input: shown.request.text, channel: shown.request.channel)
+        saveOutputToHistory()
     }
 
     /// Empties the input, the output, the result and the error banner, after saving the edited
