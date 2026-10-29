@@ -6,18 +6,22 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import local.writingassistant.core.Channel
 import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -100,5 +104,63 @@ class DataStoreAppSettingsTest {
             DataStoreAppSettings(context).setLastChannel(Channel.FORMAL)
 
             assertEquals(Channel.FORMAL, DataStoreAppSettings(context).lastChannel())
+        }
+
+    @Test
+    fun `new settings start with every channel, the summary on and Writing Desk`() =
+        runTest {
+            assertEquals(emptySet<Channel>(), settings.disabledChannels.first())
+            assertTrue(settings.learningSummaryEnabled.first())
+            assertEquals(PalettePreset.WRITING_DESK, settings.palette.first())
+        }
+
+    @Test
+    fun `channels can be turned off and on again`() =
+        runTest {
+            settings.setChannelEnabled(Channel.EMAIL, enabled = false)
+            settings.setChannelEnabled(Channel.FORMAL, enabled = false)
+            assertEquals(setOf(Channel.EMAIL, Channel.FORMAL), settings.disabledChannels.first())
+
+            settings.setChannelEnabled(Channel.EMAIL, enabled = true)
+            settings.setChannelEnabled(Channel.SLACK, enabled = true)
+            assertEquals(setOf(Channel.FORMAL), settings.disabledChannels.first())
+        }
+
+    @Test
+    fun `unknown disabled channel ids are ignored`() =
+        runTest {
+            dataStore.edit {
+                it[stringSetPreferencesKey("disabled_channels")] = setOf("carrier_pigeon", "email")
+            }
+
+            assertEquals(setOf(Channel.EMAIL), settings.disabledChannels.first())
+        }
+
+    @Test
+    fun `the learning summary switch round-trips`() =
+        runTest {
+            settings.setLearningSummaryEnabled(false)
+            assertFalse(settings.learningSummaryEnabled.first())
+
+            settings.setLearningSummaryEnabled(true)
+            assertTrue(settings.learningSummaryEnabled.first())
+        }
+
+    @Test
+    fun `every palette round-trips`() =
+        runTest {
+            for (palette in PalettePreset.entries.reversed()) {
+                settings.setPalette(palette)
+
+                assertEquals(palette, settings.palette.first())
+            }
+        }
+
+    @Test
+    fun `an unknown stored palette id reads as Writing Desk`() =
+        runTest {
+            dataStore.edit { it[stringPreferencesKey("palette")] = "neon" }
+
+            assertEquals(PalettePreset.WRITING_DESK, settings.palette.first())
         }
 }
