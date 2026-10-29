@@ -285,9 +285,8 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func errorResultIsTheDetailOfAFailedExit() async throws {
-        let script =
-            "\(countInvocation); \(printLines(resultEvent("Credit balance too low", isError: true)))"
-            + "; exit 1"
+        let error = printLines(resultEvent("Credit balance too low", isError: true))
+        let script = "\(countInvocation); \(error); exit 1"
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
 
