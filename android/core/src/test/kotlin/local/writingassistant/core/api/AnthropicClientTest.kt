@@ -261,6 +261,16 @@ class AnthropicClientTest {
         }
 
     @Test
+    fun `a malformed reply echoing the key is redacted`() =
+        runTest {
+            enqueue(200, """{"content": "$API_KEY"}""")
+
+            val error = assertFails<PolishError.BadFormat> { runPolish() }
+
+            assertTrue(error.detail.contains("[redacted]"))
+        }
+
+    @Test
     fun `a slow response past the timeout is a timeout`() =
         runTest {
             server.enqueue(

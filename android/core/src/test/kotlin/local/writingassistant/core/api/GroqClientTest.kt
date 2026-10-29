@@ -278,6 +278,26 @@ class GroqClientTest {
         }
 
     @Test
+    fun `a non-JSON error body echoing the key is redacted`() =
+        runTest {
+            enqueue(502, "<html>Bad gateway for Bearer $API_KEY</html>")
+
+            val error = assertFails<PolishError.ApiFailed> { runPolish() }
+
+            assertTrue(error.detail.contains("[redacted]"))
+        }
+
+    @Test
+    fun `a malformed reply echoing the key is redacted`() =
+        runTest {
+            enqueue(200, """{"choices": "$API_KEY"}""")
+
+            val error = assertFails<PolishError.BadFormat> { runPolish() }
+
+            assertTrue(error.detail.contains("[redacted]"))
+        }
+
+    @Test
     fun `a slow response past the timeout is a timeout`() =
         runTest {
             server.enqueue(
