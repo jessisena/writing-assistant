@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WritingAssistant" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Hosts the bottom sheet over the calling app, which stays visible behind it. -->
+    <style name="Theme.WritingAssistant.Sheet">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

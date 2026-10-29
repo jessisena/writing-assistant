@@ -351,4 +351,165 @@ Defined as constants in `Sources/WritingAssistantCore/ModelRouting.swift`:
 - `haikuModel = "claude-haiku-4-5-20251001"`
 - `sonnetModel = "claude-sonnet-5-5"`
 
-Update these constants when newer models are available to the CLI.
+The Android app has the same values as `HAIKU_MODEL` and `SONNET_MODEL` in
+`android/core/src/main/kotlin/local/writingassistant/core/ModelRouting.kt`. Update both files
+together when newer models are available.
+
+---
+
+## Android
+
+`android/` is a Gradle project (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) with
+two modules. It ports the Core logic to Kotlin and replaces the `claude` CLI with one call to the
+Anthropic Messages API, authenticated with the user's own API key. The CLI runs on subscription
+OAuth as a local subprocess, which Android can't do.
+
+### Change logic in both apps
+
+The model routing heuristic, JSON extraction, the polish and refine pipeline and the
+`learning_summary` invariant (always null when `was_translated` is truthy) exist twice: in Swift
+under `Sources/WritingAssistantCore/` and in Kotlin under `android/core/`. The Kotlin tests are
+ports of the Swift tests. A change to any of these, or to the model ID constants, has to be made
+in both languages together with its tests in both. Each Kotlin file names the Swift file it
+mirrors in its doc comment.
+
+Prompts are not duplicated (see below), so prompt edits need no Android change.
+
+### Modules
+
+```
+android/
+  settings.gradle.kts                  :core and :app
+  gradle/libs.versions.toml            every dependency and plugin version
+  lint.xml                             shared Android lint config
+  core/                                pure Kotlin/JVM, no Android dependencies
+    src/main/kotlin/local/writingassistant/core/
+      Contracts.kt                     Channel, Refinement, PolishResult, LearningSummary,
+                                       PolishError, PromptFile, and the ClaudeClient /
+                                       PromptReading / Polishing interfaces
+      ModelRouting.kt                  pickModel(text) + model ID constants
+      JsonExtraction.kt                extract the JSON object from model output
+      PromptAssembler.kt               polish.txt + channel file; DirectoryPromptReader
+      PolishService.kt                 Polishing: validate, route, assemble, call, parse,
+                                       invariant; polish and refine
+      api/AnthropicClient.kt           ClaudeClient backed by POST /v1/messages (OkHttp)
+    src/test/                          JUnit ports of the Swift Core tests, MockWebServer
+                                       tests for AnthropicClient
+    src/testFixtures/                  FakeClaudeClient, shared with :app tests
+    src/liveTest/                      LivePolishTest against the real API
+  app/                                 Android app, Jetpack Compose, minSdk 31
+    src/main/AndroidManifest.xml       MainActivity, ProcessTextActivity, ShareActivity
+    src/main/kotlin/local/writingassistant/app/
+      WritingAssistantApp.kt           Application, owns the AppGraph
+      AppGraph.kt                      wires PolishService, AnthropicClient, key store, settings
+      MainActivity.kt                  full-screen composer and Settings
+      data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
+      data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
+      data/AppSettings.kt              interface; DataStoreAppSettings implements it
+      data/DataStoreAppSettings.kt     last-used channel, in Preferences DataStore
+      data/AssetPromptReader.kt        PromptReading from the bundled assets
+      intents/                         ProcessTextActivity, ShareActivity, SheetHost (the
+                                       bottom sheet both activities show)
+      ui/Composer.kt                   input, channel chips, Polish/Cancel, result, refinements,
+                                       learning summary, Copy and Replace
+      ui/ComposerSession.kt            composer state and the one in-flight request, app-scoped
+      ui/ComposerViewModel.kt          thin wrapper exposing the session to a screen
+      ui/SettingsScreen.kt             API key entry with Save, Test and Clear
+      ui/SettingsViewModel.kt          reads and writes the key, runs the test call
+      ui/Markdown.kt, InlineParser.kt  Markdown subset → AnnotatedString, HTML and plain text
+      ui/Clipboard.kt                  ClipData.newHtmlText with a plain-text fallback
+      ui/Theme.kt                      Material 3 colour schemes from the Writing Desk palette
+    src/test/                          Robolectric and JVM tests: key store, settings, asset
+                                       prompts, view models, Markdown, composer UI
+```
+
+`:core` holds everything that runs without Android, including the API client, so the pipeline
+and the client are tested on the plain JVM. `:app` depends on `:core` and owns state, views,
+storage and the system integration. `AppGraph` is the only place the real implementations are
+built; tests construct view models with fakes instead.
+
+### Shared prompts
+
+`app/build.gradle.kts` adds `Sources/WritingAssistantCore/Resources/Prompts/` as an assets
+directory, so the APK bundles the same `polish.txt`, `channels/*.txt` and `refinements/*.txt` as
+the Mac app, and a change to those bundled defaults reaches both apps with their next build.
+Edits made in the Mac app's Settings live in its Application Support folder and don't reach
+Android. On Android the prompts are read-only: `AssetPromptReader` opens them from the assets
+on each request, and there is no prompt editor or user copy. `:core` tests and `liveTest` read
+the same directory through `DirectoryPromptReader`, passed in as the `prompts.dir` system
+property.
+
+### API client
+
+`AnthropicClient` sends the assembled prompt and the input, joined as in the Swift app, as one
+user message, with `x-api-key`, `anthropic-version: 2023-06-01` and `max_tokens` 16000. Thinking
+stays off, as on the Mac: Sonnet 5.5 requests send `thinking: {"type": "between_tools"}`
+(Sonnet 5.5 thinks adaptively when the field is left out and rejects `disabled`), and Haiku 4.5
+requests send no thinking field, since Haiku doesn't think unless asked. Each call has a 120 s
+timeout and is not retried. Cancelling the calling coroutine cancels the HTTP call. The key is read from the key
+store on every call and redacted from every error message. Responses map to `PolishError`:
+
+| Response | `PolishError` |
+|---|---|
+| No stored key | `MissingApiKey` |
+| Key with a character outside `!`..`~` (checked before sending, and on Save/Test) | `MalformedApiKey`: "The API key contains characters that aren't allowed. Paste it again." |
+| Keystore, cipher or DataStore failure in the key store | `KeyStorageFailed`: "Couldn't access the secure key storage on this device. Try again, or clear and re-enter the key." |
+| 401, 403 | `InvalidApiKey` |
+| 402, or 400 mentioning "credit balance" | `NoCredits` |
+| 429, 503, 529 | `Overloaded` |
+| Other non-2xx | `ApiFailed` (status and the API's message) |
+| Timeout | `Timeout` |
+| Other network failure | `Network` |
+| `stop_reason` `max_tokens` | `OutputTooLong`: "The reply was cut off because the text is too long. Try a shorter selection." |
+| `stop_reason` `refusal` | `Refused`: "Claude declined to process this text. Try rewording it." |
+| No text content block, or unparsable body | `BadFormat` |
+| Any other exception in the composer or Settings | `Unexpected`: "Something went wrong (exception class). Please try again." |
+
+`checkAvailable()`, used by the Settings Test button, sends "Hi" to Haiku with `max_tokens` 1.
+
+### API key and settings
+
+`KeystoreApiKeyStore` encrypts the key with an AES-256-GCM key held in the Android Keystore and
+stores the IV and ciphertext, Base64-encoded, in a `secrets` Preferences DataStore. A value that
+can't be decrypted (for example after the Keystore key was invalidated) is cleared and read as no
+key. `allowBackup` is off and the data extraction rules exclude everything, since the ciphertext
+is useless without the device's Keystore key.
+
+Debug builds get `BuildConfig.DEBUG_API_KEY` from `ANTHROPIC_API_KEY` in `android/local.properties`.
+`SettingsViewModel` uses it only to prefill the field when nothing is stored; it is stored once
+the user saves or tests it. Release builds set `DEBUG_API_KEY` to an empty string.
+
+`DataStoreAppSettings` keeps the last-used channel, which the composer preselects.
+
+### Composer
+
+`ComposerSession` holds the composer state and runs one request at a time in an app-wide
+coroutine scope owned by `AppGraph`, so the full-screen app and the sheets share one composer.
+`ComposerViewModel` only exposes the session to a screen. Closing a sheet mid-request doesn't
+cancel the request: opening the app (or selecting the same text again) shows the result. Cancel
+cancels the job, and a generation number keeps a cancelled or replaced request from overwriting
+newer state, as `RequestRunner.swift` does. Opening a sheet with different text cancels any
+request and starts over, so Replace never returns a result for other text. A failed request can be retried from the error banner. Polish is
+disabled while the key store holds no key, and `MainActivity` opens Settings once in that case.
+
+### System integration
+
+- `ProcessTextActivity` handles `ACTION_PROCESS_TEXT`, which adds **Polish** to the
+  text-selection menu of other apps. It is a translucent activity that hosts the composer in a
+  bottom sheet, prefilled with the selection. **Replace** returns the polished text as
+  `EXTRA_PROCESS_TEXT`, and is hidden when the caller sets `EXTRA_PROCESS_TEXT_READONLY`.
+- `ShareActivity` handles `ACTION_SEND` with `text/plain` and opens the same sheet with Copy only.
+- Copy and Replace close the sheet, as do swiping it down, back and tapping outside it. With no
+  key stored, the sheet shows Settings first and returns to the composer once a key is saved.
+
+Unlike the macOS service, PROCESS_TEXT can return replacement text, because the calling app isn't
+blocked while the sheet is open.
+
+### Build and checks
+
+Kotlin compiles with warnings as errors, and Android lint runs with `warningsAsErrors` on both
+modules. ktlint runs on every module. The CI `android` job in `.github/workflows/ci.yml` runs
+`./gradlew :core:test :app:testDebugUnitTest lint ktlintCheck :app:assembleDebug` on JDK 21.
+`:core:liveTest` is a separate test source set that calls the real API; it is skipped when
+`ANTHROPIC_API_KEY` is missing from both the environment and `local.properties`, so CI never needs
+the key.

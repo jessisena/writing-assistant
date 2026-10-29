@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="clipboard_label">Polished text</string>
+
+    <string name="composer_input_label">Your text</string>
+    <string name="composer_polish">Polish</string>
+    <string name="composer_polishing">Polishing…</string>
+    <string name="composer_refining">Refining…</string>
+    <string name="composer_cancel">Cancel</string>
+    <string name="composer_result_label">Polished</string>
+    <string name="composer_edit">Edit</string>
+    <string name="composer_done_editing">Done</string>
+    <string name="composer_copy">Copy</string>
+    <string name="composer_replace">Replace</string>
+    <string name="composer_retry">Retry</string>
+    <string name="composer_dismiss">Dismiss</string>
+    <string name="composer_needs_key">Add your Anthropic API key in Settings to start polishing.</string>
+    <plurals name="composer_what_changed">
+        <item quantity="one">What changed (%d tip)</item>
+        <item quantity="other">What changed (%d tips)</item>
+    </plurals>
+    <string name="composer_corrections">Corrections</string>
+    <string name="composer_correction">%1$s → %2$s</string>
+    <string name="composer_grammar">Grammar</string>
+    <string name="composer_vocabulary">Vocabulary</string>
+    <string name="composer_vocabulary_item">%1$s: %2$s</string>
+
+    <string name="main_settings">Settings</string>
+    <string name="main_back">Back</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_api_key">Anthropic API key</string>
+    <string name="settings_why">Writing Assistant sends your text to Claude using your own Anthropic API key. Create one at console.anthropic.com. The key is stored encrypted on this device.</string>
+    <string name="settings_show_key">Show</string>
+    <string name="settings_hide_key">Hide</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_test">Test</string>
+    <string name="settings_clear">Clear</string>
+    <string name="settings_saved">Key saved.</string>
+    <string name="settings_cleared">Key removed.</string>
+    <string name="settings_testing">Testing the key…</string>
+    <string name="settings_test_passed">The key works.</string>
+</resources>

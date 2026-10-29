@@ -5,6 +5,9 @@ AI prompts) and produces an English learning summary when you write directly in 
 
 **Stack:** Swift 6, SwiftUI, Swift Package Manager, claude CLI for model calls.
 
+An Android version lives in `android/` (Kotlin, Jetpack Compose, the Anthropic API with your own
+key). See [Android](#android).
+
 **Privacy note:** the text you paste is sent to Anthropic's Claude model via your local `claude`
 CLI subscription. No `ANTHROPIC_API_KEY` is needed or used (the app removes it from the CLI's
 environment). Input is bounded to 20,000 characters. Like any LLM tool, the model output can be
@@ -322,4 +325,104 @@ public static let sonnetModel = "claude-sonnet-5-5"
 ```
 
 To change models, update these constants, check the new ID with
-`claude --print --model <id> "hi"`, then rebuild with `scripts/build_app.sh`.
+`claude --print --model <id> "hi"`, then rebuild with `scripts/build_app.sh`. The Android app has
+its own copy of the constants (`HAIKU_MODEL`, `SONNET_MODEL`) in
+`android/core/src/main/kotlin/local/writingassistant/core/ModelRouting.kt`; change both.
+
+---
+
+## Android
+
+The Android app polishes text with the same prompts, channels, routing and refinements as the
+Mac app. It doesn't use the `claude` CLI: it calls the Anthropic Messages API with **your own
+Anthropic API key**. API usage is billed per token to that key's Console account, separately from
+any Claude subscription. A polish request is roughly 2–3k input tokens and 0.5k output tokens.
+
+What it does:
+
+- **Polish from the text-selection menu.** Select text in another app and choose **Polish**
+  (in the floating selection menu, or under ⋮ in some apps). A bottom sheet opens over the app
+  with your text and the channel chips. After polishing, **Replace** swaps the selected text for
+  the polished version, when the app allows editing; **Copy** copies it.
+- **Share target.** Where **Polish** isn't offered, use **Share → Writing Assistant**. The same
+  sheet opens, with **Copy** only (Android can't replace shared text).
+  Closing a sheet mid-request doesn't cancel it; the result shows when you open the app.
+- **Full-screen composer** from the launcher icon: input, channel chips (the last-used channel is
+  remembered), **Polish** with **Cancel**, the editable polished text with **Copy**, **Shorter**,
+  **More casual** and **More formal**, and a collapsible learning summary for English input.
+  Copy puts HTML and plain text on the clipboard.
+- **Settings:** enter the API key (masked, with Show), **Save**, **Test** (one minimal API call to
+  check the key) and **Clear**. On first launch without a key the app opens Settings, and Polish
+  stays disabled until a key is stored.
+
+History, the learning log, prompt editing, rich-text input, the diff view and themes are Mac-only.
+The app uses the Writing Desk colours and follows the system light/dark setting.
+
+### Requirements
+
+- Android 12 (API 31) or later on the device or emulator
+- JDK 21. A newer default JDK is too new for the Android Gradle plugin, so point `JAVA_HOME` at 21:
+
+  ```sh
+  export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+  ```
+
+- Android command-line tools (no Android Studio needed):
+
+  ```sh
+  brew install --cask android-commandlinetools
+  export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+  sdkmanager "platform-tools" "platforms;android-37.0"
+  ```
+
+  For an emulator, also install `emulator` and a system image with `sdkmanager`, and create a
+  device with `avdmanager`.
+
+### API key
+
+1. In [console.anthropic.com](https://console.anthropic.com), create a dedicated key for this app
+   and set a monthly spend limit on the workspace, so the key can be revoked on its own and costs
+   stay bounded.
+2. Enter it in the app under **Settings**, then press **Test**. The app stores it encrypted with
+   an Android Keystore key, and excludes it from backups and device transfers. The key is never
+   logged.
+
+For development, put the key in `android/local.properties` (gitignored):
+
+```properties
+ANTHROPIC_API_KEY=sk-ant-…
+```
+
+Debug builds read it to prefill the Settings field; it's stored only once you press Save or Test.
+Release builds never embed it.
+
+### Build, test and install
+
+Run from `android/`:
+
+```sh
+./gradlew :core:test :app:testDebugUnitTest lint ktlintCheck :app:assembleDebug
+```
+
+This runs the core and app unit tests (no network, no device), Android lint and ktlint with
+warnings as errors, and builds the debug APK. CI runs the same command.
+
+```sh
+./gradlew :core:liveTest
+```
+
+`liveTest` sends one English and one Spanish text through the real API, using
+`ANTHROPIC_API_KEY` from the environment or `local.properties`, and checks routing, prompts and
+JSON parsing. It costs a few cents and is skipped when no key is set.
+
+To install, connect a device with USB debugging on (or start an emulator) and run:
+
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The app is sideloaded; it isn't on the Play Store.
+
+The code is split into `:core` (pure Kotlin/JVM logic and the API client) and `:app` (the
+Compose UI and Android integration). See [docs/architecture.md](docs/architecture.md#android).
+Logic shared with the Mac app is duplicated in Kotlin and has to be changed in both.
