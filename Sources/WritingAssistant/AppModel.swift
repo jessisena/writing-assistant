@@ -112,6 +112,18 @@ struct ClipboardContent: Equatable, Sendable {
             + " New history won't be saved until you relaunch the app, so the file isn't replaced."
     }
 
+    /// Puts `text` in the input, ready for the user to polish, as the Services entry does. The
+    /// output on screen is saved to its history entry first; the result, the output and the error
+    /// banner are cleared. Nothing is sent to Claude. Ignored while a request is running.
+    func loadInput(_ text: NSAttributedString) {
+        guard !isLoading else { return }
+        errorMessage = nil
+        leaveCurrentHistoryEntry()
+        input = text
+        output = NSAttributedString()
+        result = nil
+    }
+
     /// Starts polishing `input` in a task that `cancel()` can stop. Ignored while a request is
     /// running.
     func startProcessing() {

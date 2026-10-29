@@ -73,10 +73,12 @@ import WritingAssistantCore
         #expect(ServiceProvider.text(from: pasteboard) == nil)
     }
 
-    @Test func polishLoadsTextStartsProcessingAndActivates() async {
-        let polisher = GatedPolisher()
+    @Test func polishLoadsTextWithoutStartingARequestAndActivates() async {
+        let polisher = FakePolisher()
         var activations = 0
         let (provider, model) = makeProvider(polisher) { activations += 1 }
+        model.input = NSAttributedString(string: "Hello")
+        await model.process()
         let pasteboard = makePasteboard()
         pasteboard.setString("Hello there", forType: .string)
 
@@ -84,12 +86,11 @@ import WritingAssistantCore
 
         #expect(failure == nil)
         #expect(model.input.string == "Hello there")
-        #expect(model.isLoading)
+        #expect(!model.isLoading)
+        #expect(model.result == nil)
+        #expect(model.output.length == 0)
+        #expect(polisher.calls.count == 1)
         #expect(activations == 1)
-        while polisher.waitingCount == 0 { await Task.yield() }
-        polisher.resume(0, with: .success(.sample))
-        await model.requests.task?.value
-        #expect(model.result == .sample)
     }
 
     @Test func emptyPasteboardReportsAnErrorAndLeavesTheModelAlone() {

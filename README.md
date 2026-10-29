@@ -90,8 +90,8 @@ vocabulary. Translated input has no learning summary.
 
 You can polish text where you write it, without copying it into the app first. Select text in
 another app and choose **Services → Polish with Writing Assistant** from that app's menu (or the
-right-click menu). Writing Assistant comes forward, loads the selection as input and processes it
-with the selected channel. If the app isn't running, the service launches it.
+right-click menu). Writing Assistant comes forward with the selection loaded as input; check the
+channel and click **Polish**. If the app isn't running, the service launches it.
 
 #### Set up a shortcut (once)
 
@@ -114,10 +114,11 @@ If the entry is missing after installing, log out and back in (the build script 
    app remembers it between launches. If you mostly polish Slack messages, leave it on Slack and
    you'll rarely need to change it.
 2. **Select the text and press your shortcut.** Bold, italic, strikethrough, code and links in the
-   selection carry over; fonts, sizes and colors are dropped.
-3. **Review the result.** Use **Show changes** to see what was edited, and **Shorter**, **More
+   selection carry over; fonts, sizes and colors are dropped. Nothing is sent yet.
+3. **Click Polish** (**⌘↩**), changing the channel first if this text needs another one.
+4. **Review the result.** Use **Show changes** to see what was edited, and **Shorter**, **More
    casual** or **More formal** to adjust it. You can also edit the output directly.
-4. **Copy it back.** Press **Copy**, switch back with **⌘Tab** (your selection is usually still
+5. **Copy it back.** Press **Copy**, switch back with **⌘Tab** (your selection is usually still
    there), and paste over it. Pasting into Slack keeps the formatting and emoji.
 
 The service doesn't replace the selection by itself: a request takes 8–20 seconds, and macOS
@@ -129,7 +130,7 @@ services that change text in place freeze the other app while they wait.
   there. You don't have to start in the app.
 - **One request at a time.** If a request is already running, the app shows a banner and keeps the
   current input. Wait for it to finish or press **Esc**, then run the service again.
-- **Nothing is lost.** Every polish from the service is saved to History (**⌘Y**) and its learning
+- **Nothing is lost.** Every polish is saved to History (**⌘Y**) and its learning
   summary goes to the learning log, so you can come back to it later.
 - **If the service isn't listed** in an app, the app may not support macOS Services (some apps
   built on Electron or other cross-platform toolkits don't). Copy the text into Writing Assistant
