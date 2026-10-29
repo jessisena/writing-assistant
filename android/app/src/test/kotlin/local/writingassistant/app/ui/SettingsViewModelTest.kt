@@ -1,5 +1,6 @@
 package local.writingassistant.app.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -10,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import local.writingassistant.app.ui.SettingsState.Status
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +25,7 @@ class SettingsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val polisher = FakePolishing()
     private val keys = FakeApiKeyStore(key = null)
+    private val settings = FakeAppSettings()
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -30,8 +33,13 @@ class SettingsViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun TestScope.viewModel(debugKey: String = ""): SettingsViewModel =
-        SettingsViewModel(keys, polisher, debugKey).also { advanceUntilIdle() }
+    private fun TestScope.viewModel(
+        debugKey: String = "",
+        debugGroqKey: String = "",
+    ): SettingsViewModel {
+        val debugKeys = mapOf(Provider.ANTHROPIC to debugKey, Provider.GROQ to debugGroqKey)
+        return SettingsViewModel(keys, settings, polisher, debugKeys).also { advanceUntilIdle() }
+    }
 
     @Test
     fun `stored key is shown`() =
@@ -138,8 +146,9 @@ class SettingsViewModelTest {
             val vm =
                 SettingsViewModel(
                     FailingKeyStore(failure),
+                    settings,
                     polisher,
-                    "",
+                    emptyMap(),
                 ).also { advanceUntilIdle() }
 
             assertEquals(Status.Failed(failure.message), vm.state.value.status)
@@ -177,5 +186,186 @@ class SettingsViewModelTest {
             advanceUntilIdle()
             assertNull(keys.key)
             assertEquals(SettingsState(status = Status.Cleared), vm.state.value)
+        }
+
+    @Test
+    fun `the saved provider and its key are loaded`() =
+        runTest(dispatcher) {
+            settings.provider = Provider.GROQ
+            keys.key = "sk-ant-fake"
+            keys.keys[Provider.GROQ] = "groq-stored"
+
+            val state = viewModel(debugKey = "sk-debug").state.value
+
+            assertEquals(Provider.GROQ, state.provider)
+            assertEquals("groq-stored", state.key)
+            assertTrue(state.hasStoredKey)
+        }
+
+    @Test
+    fun `choosing a provider saves it and shows its key`() =
+        runTest(dispatcher) {
+            keys.key = "sk-ant-fake"
+            keys.keys[Provider.GROQ] = "groq-stored"
+            val vm = viewModel()
+            vm.onKeyChange("typed but not saved")
+
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+
+            assertEquals(Provider.GROQ, settings.provider)
+            assertEquals(
+                SettingsState(provider = Provider.GROQ, key = "groq-stored", hasStoredKey = true),
+                vm.state.value,
+            )
+            vm.selectProvider(Provider.ANTHROPIC)
+            advanceUntilIdle()
+            assertEquals(Provider.ANTHROPIC, settings.provider)
+            assertEquals("sk-ant-fake", vm.state.value.key)
+        }
+
+    @Test
+    fun `choosing a provider without a stored key shows its debug key`() =
+        runTest(dispatcher) {
+            keys.key = "sk-ant-fake"
+            val vm = viewModel(debugKey = "sk-debug", debugGroqKey = "groq-debug")
+
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+
+            assertEquals("groq-debug", vm.state.value.key)
+            assertFalse(vm.state.value.hasStoredKey)
+            assertNull(keys.keys[Provider.GROQ])
+        }
+
+    @Test
+    fun `choosing a provider resets the status`() =
+        runTest(dispatcher) {
+            val vm = viewModel()
+            vm.onKeyChange("sk-new")
+            vm.save()
+            advanceUntilIdle()
+
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+
+            assertEquals(Status.Idle, vm.state.value.status)
+        }
+
+    @Test
+    fun `save and clear act on the selected provider only`() =
+        runTest(dispatcher) {
+            keys.key = "sk-ant-fake"
+            val vm = viewModel()
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+
+            vm.onKeyChange("groq-new")
+            vm.save()
+            advanceUntilIdle()
+            assertEquals("groq-new", keys.keys[Provider.GROQ])
+            assertEquals("sk-ant-fake", keys.key)
+
+            vm.clear()
+            advanceUntilIdle()
+            assertNull(keys.keys[Provider.GROQ])
+            assertEquals("sk-ant-fake", keys.key)
+            assertEquals(
+                SettingsState(provider = Provider.GROQ, status = Status.Cleared),
+                vm.state.value,
+            )
+        }
+
+    @Test
+    fun `test stores the selected provider's key before checking it`() =
+        runTest(dispatcher) {
+            keys.key = "sk-ant-fake"
+            var checked: Pair<Provider, String?>? = null
+            polisher.onCheckReady = { checked = settings.provider to keys.keys[Provider.GROQ] }
+            val vm = viewModel()
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+
+            vm.onKeyChange("groq-new")
+            vm.test()
+            advanceUntilIdle()
+
+            assertEquals(Provider.GROQ to "groq-new", checked)
+            assertEquals("sk-ant-fake", keys.key)
+            assertEquals(Status.TestPassed, vm.state.value.status)
+        }
+
+    @Test
+    fun `the provider can't change while a test stores the key`() =
+        runTest(dispatcher) {
+            var checkedProvider: Provider? = null
+            polisher.onCheckReady = { checkedProvider = settings.provider }
+            val vm = viewModel()
+            val write = CompletableDeferred<Unit>()
+            keys.writeGate = write
+
+            vm.onKeyChange("sk-ant-key")
+            vm.test()
+            assertTrue(vm.state.value.isTesting)
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+            write.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(Provider.ANTHROPIC, vm.state.value.provider)
+            assertEquals(vm.state.value.provider, settings.provider)
+            assertEquals(Provider.ANTHROPIC, checkedProvider)
+            assertEquals(Status.TestPassed, vm.state.value.status)
+        }
+
+    @Test
+    fun `a failure from the provider just left isn't shown on the new one`() =
+        runTest(dispatcher) {
+            val vm = viewModel()
+            val write = CompletableDeferred<Unit>()
+            keys.writeGate = write
+
+            vm.onKeyChange("sk-ant-key")
+            vm.save()
+            advanceUntilIdle()
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+            write.completeExceptionally(PolishError.KeyStorageFailed("ProviderException"))
+            advanceUntilIdle()
+
+            assertEquals(Provider.GROQ, vm.state.value.provider)
+            assertEquals(Status.Idle, vm.state.value.status)
+        }
+
+    @Test
+    fun `typing while the key loads keeps the typed text`() =
+        runTest(dispatcher) {
+            keys.key = "sk-stored"
+            val read = CompletableDeferred<Unit>()
+            keys.readGate = read
+            val vm = viewModel()
+
+            vm.onKeyChange("sk-typed")
+            read.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals("sk-typed", vm.state.value.key)
+            assertTrue(vm.state.value.hasStoredKey)
+        }
+
+    @Test
+    fun `choosing the default provider before the saved one loads keeps it`() =
+        runTest(dispatcher) {
+            settings.provider = Provider.GROQ
+            keys.key = "sk-ant-fake"
+            keys.keys[Provider.GROQ] = "groq-stored"
+            val vm = SettingsViewModel(keys, settings, polisher, emptyMap())
+
+            vm.selectProvider(Provider.ANTHROPIC)
+            advanceUntilIdle()
+
+            assertEquals(Provider.ANTHROPIC, vm.state.value.provider)
+            assertEquals(Provider.ANTHROPIC, settings.provider)
+            assertEquals("sk-ant-fake", vm.state.value.key)
         }
 }

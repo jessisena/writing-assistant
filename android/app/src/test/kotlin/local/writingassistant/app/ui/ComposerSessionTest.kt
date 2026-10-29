@@ -25,9 +25,12 @@ import local.writingassistant.app.ui.ComposerEvent.Polish
 import local.writingassistant.app.ui.ComposerState.Phase
 import local.writingassistant.core.Channel
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
@@ -184,6 +187,10 @@ class ComposerSessionTest {
 
                     override suspend fun setLastChannel(channel: Channel) =
                         throw IOException("disk")
+
+                    override suspend fun provider(): Provider = Provider.ANTHROPIC
+
+                    override suspend fun setProvider(provider: Provider) = Unit
                 }
             val session = ComposerSession(polisher, settings, FakeApiKeyStore(), sessionScope)
             advanceUntilIdle()
@@ -194,5 +201,22 @@ class ComposerSessionTest {
             advanceUntilIdle()
             assertEquals(Channel.FORMAL, session.state.value.channel)
             assertEquals(PolishError.Unexpected("IOException"), session.state.value.error)
+        }
+
+    @Test
+    fun `the key check uses the selected provider`() =
+        runTest(dispatcher) {
+            val keys = FakeApiKeyStore(key = "sk-ant-fake")
+            val settings = FakeAppSettings(provider = Provider.GROQ)
+            val session = ComposerSession(polisher, settings, keys, sessionScope)
+
+            session.onEvent(ComposerEvent.RefreshApiKey)
+            advanceUntilIdle()
+            assertTrue(session.state.value.needsApiKey)
+
+            keys.keys[Provider.GROQ] = "gsk-fake"
+            session.onEvent(ComposerEvent.RefreshApiKey)
+            advanceUntilIdle()
+            assertFalse(session.state.value.needsApiKey)
         }
 }

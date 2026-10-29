@@ -56,25 +56,29 @@ tasks.withType<Test>().configureEach {
     systemProperty("prompts.dir", promptsDir.asFile.absolutePath)
 }
 
-val apiKey: Provider<String> =
+/** Reads [name] from the environment, else from `local.properties`, else "". */
+fun liveKey(name: String): Provider<String> =
     providers
-        .environmentVariable("ANTHROPIC_API_KEY")
+        .environmentVariable(name)
         .orElse(
             providers
                 .fileContents(rootProject.layout.projectDirectory.file("local.properties"))
                 .asText
-                .map { text ->
-                    Properties().apply { load(text.reader()) }.getProperty("ANTHROPIC_API_KEY", "")
-                },
+                .map { text -> Properties().apply { load(text.reader()) }.getProperty(name, "") },
         ).orElse("")
 
+val liveKeys: Map<String, Provider<String>> =
+    listOf("ANTHROPIC_API_KEY", "GROQ_API_KEY").associateWith { liveKey(it) }
+
 tasks.register<Test>("liveTest") {
-    description = "Calls the real Anthropic API. Skipped when ANTHROPIC_API_KEY is not set."
+    description =
+        "Calls the real Anthropic and Groq APIs. Each provider's cases are skipped when its " +
+        "key is not set, and the task is skipped when neither is."
     group = "verification"
     testClassesDirs = sourceSets["liveTest"].output.classesDirs
     classpath = sourceSets["liveTest"].runtimeClasspath
-    val key = apiKey
-    onlyIf("ANTHROPIC_API_KEY is set") { key.get().isNotBlank() }
-    doFirst { environment("ANTHROPIC_API_KEY", key.get()) }
+    val keys = liveKeys
+    onlyIf("ANTHROPIC_API_KEY or GROQ_API_KEY is set") { keys.values.any { it.get().isNotBlank() } }
+    doFirst { keys.forEach { (name, key) -> environment(name, key.get()) } }
     outputs.upToDateWhen { false }
 }

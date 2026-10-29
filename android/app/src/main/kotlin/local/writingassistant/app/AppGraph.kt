@@ -10,9 +10,13 @@ import local.writingassistant.app.data.AssetPromptReader
 import local.writingassistant.app.data.DataStoreAppSettings
 import local.writingassistant.app.data.KeystoreApiKeyStore
 import local.writingassistant.app.ui.ComposerSession
+import local.writingassistant.core.Backend
+import local.writingassistant.core.LlmClient
 import local.writingassistant.core.PolishService
 import local.writingassistant.core.Polishing
+import local.writingassistant.core.Provider
 import local.writingassistant.core.api.AnthropicClient
+import local.writingassistant.core.api.GroqClient
 
 /** App-wide singletons, built once by [WritingAssistantApp]. */
 interface AppGraph {
@@ -32,9 +36,18 @@ class DefaultAppGraph(
 
     override val apiKeyStore: ApiKeyStore by lazy { KeystoreApiKeyStore(appContext) }
     override val settings: AppSettings by lazy { DataStoreAppSettings(appContext) }
+    private val anthropic by lazy {
+        AnthropicClient(apiKey = { apiKeyStore.read(Provider.ANTHROPIC) })
+    }
+    private val groq by lazy { GroqClient(apiKey = { apiKeyStore.read(Provider.GROQ) }) }
+
+    /** Uses whichever provider Settings currently selects, read again for every request. */
     override val polisher: Polishing by lazy {
         PolishService(
-            client = AnthropicClient(apiKey = { apiKeyStore.read() }),
+            backend = {
+                val provider = settings.provider()
+                Backend(clientFor(provider), provider.models)
+            },
             prompts = AssetPromptReader(appContext.assets),
         )
     }
@@ -46,4 +59,10 @@ class DefaultAppGraph(
             CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
         )
     }
+
+    private fun clientFor(provider: Provider): LlmClient =
+        when (provider) {
+            Provider.ANTHROPIC -> anthropic
+            Provider.GROQ -> groq
+        }
 }

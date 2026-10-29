@@ -1,16 +1,21 @@
 package local.writingassistant.app.data
 
+import local.writingassistant.core.Provider
+
 /**
- * Holds the user's Anthropic API key, encrypted at rest. Never log the key.
+ * Holds one API key per [Provider], encrypted at rest. Never log a key.
  *
  * Every method throws `PolishError.KeyStorageFailed` when the device's secure storage fails.
  */
 interface ApiKeyStore {
-    /** Returns the stored key, or null when none is set. */
-    suspend fun read(): String?
+    /** Returns [provider]'s stored key, or null when none is set. */
+    suspend fun read(provider: Provider): String?
 
-    /** Stores [key], replacing any previous one. [key] must not be blank. */
-    suspend fun write(key: String)
+    /** Stores [key] for [provider], replacing any previous one. [key] must not be blank. */
+    suspend fun write(
+        provider: Provider,
+        key: String,
+    )
 
-    suspend fun clear()
+    suspend fun clear(provider: Provider)
 }

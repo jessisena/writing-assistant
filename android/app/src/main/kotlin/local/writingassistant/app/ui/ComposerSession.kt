@@ -71,7 +71,7 @@ class ComposerSession(
 
     private fun refreshApiKey() {
         launchReporting {
-            val missing = apiKeyStore.read().isNullOrBlank()
+            val missing = apiKeyStore.read(settings.provider()).isNullOrBlank()
             mutableState.update { it.copy(needsApiKey = missing) }
         }
     }

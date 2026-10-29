@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Provider
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
@@ -24,7 +25,15 @@ class DataStoreAppSettings internal constructor(
         dataStore.edit { it[LAST_CHANNEL] = channel.id }
     }
 
+    override suspend fun provider(): Provider =
+        dataStore.data.first()[PROVIDER]?.let(Provider::fromId) ?: Provider.ANTHROPIC
+
+    override suspend fun setProvider(provider: Provider) {
+        dataStore.edit { it[PROVIDER] = provider.id }
+    }
+
     private companion object {
         val LAST_CHANNEL = stringPreferencesKey("last_channel")
+        val PROVIDER = stringPreferencesKey("provider")
     }
 }

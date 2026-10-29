@@ -1,11 +1,11 @@
 package local.writingassistant.core
 
-/** Chooses the Claude model for a piece of text. Mirrors `ModelRouting.swift`. */
+/**
+ * Chooses the model tier for a piece of text. The heuristic mirrors `ModelRouting.swift`, which
+ * returns a Claude model ID where this returns a tier, so each provider maps it to its own model.
+ */
 object ModelRouting {
-    const val HAIKU_MODEL = "claude-haiku-4-5-20251001"
-    const val SONNET_MODEL = "claude-sonnet-5-5"
-
-    private const val MAX_HAIKU_WORDS = 60
+    private const val MAX_SMALL_WORDS = 60
     private const val MAX_NON_ASCII_RATIO = 0.02
     private const val MAX_ASCII_CODE_POINT = 127
     private const val MAX_ROMANCE_HITS = 1
@@ -19,16 +19,16 @@ object ModelRouting {
         ).split(" ").toSet()
 
     /**
-     * Returns [HAIKU_MODEL] for short, confidently English text, otherwise [SONNET_MODEL].
+     * Returns [ModelTier.SMALL] for short, confidently English text, otherwise [ModelTier.LARGE].
      *
-     * Short means at most 60 whitespace-separated words. Ambiguous or empty text gets Sonnet,
-     * because routing short non-English text to Haiku is the costlier mistake.
+     * Short means at most 60 whitespace-separated words. Ambiguous or empty text gets the large
+     * model, because routing short non-English text to the small one is the costlier mistake.
      */
-    fun pickModel(text: String): String =
-        if (words(text).size <= MAX_HAIKU_WORDS && looksLikeEnglish(text)) {
-            HAIKU_MODEL
+    fun pickTier(text: String): ModelTier =
+        if (words(text).size <= MAX_SMALL_WORDS && looksLikeEnglish(text)) {
+            ModelTier.SMALL
         } else {
-            SONNET_MODEL
+            ModelTier.LARGE
         }
 
     // Char.isWhitespace covers Unicode whitespace on every platform; a `\s` regex doesn't

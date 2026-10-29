@@ -94,7 +94,7 @@ val emptyArray: JsonElement = buildJsonArray {}
 val emptyObject: JsonElement = buildJsonObject {}
 val nonEmptyObject: JsonElement = buildJsonObject { put("a", 0) }
 
-fun replying(vararg replies: String) = FakeClaudeClient(replies.map { Result.success(it) })
+fun replying(vararg replies: String) = FakeLlmClient(replies.map { Result.success(it) })
 
 /** Runs [block] and returns what it threw; fails the test when it returns normally. */
 suspend fun thrownBy(block: suspend () -> Unit): Throwable =

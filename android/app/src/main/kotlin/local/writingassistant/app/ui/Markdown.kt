@@ -14,7 +14,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 
 /**
- * Converts the Markdown subset Claude returns into an [AnnotatedString] for display, and into
+ * Converts the Markdown subset the model returns into an [AnnotatedString] for display, and into
  * HTML plus a plain-text fallback for the clipboard. Mirrors `RichText.swift`.
  *
  * Supported: `**bold**`/`__bold__`, `*italic*`/`_italic_`, `~~strike~~`, inline code, links

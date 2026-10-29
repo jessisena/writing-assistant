@@ -2,10 +2,10 @@ package local.writingassistant.core
 
 import kotlin.time.Duration
 
-/** Scripted [ClaudeClient] for tests: returns [replies] in order and records each call. */
-class FakeClaudeClient(
+/** Scripted [LlmClient] for tests: returns [replies] in order and records each call. */
+class FakeLlmClient(
     replies: List<Result<String>> = emptyList(),
-) : ClaudeClient {
+) : LlmClient {
     data class Call(
         val prompt: String,
         val model: String,
@@ -24,7 +24,7 @@ class FakeClaudeClient(
         timeout: Duration,
     ): String {
         calls += Call(prompt, model, timeout)
-        val reply = pending.removeFirstOrNull() ?: error("FakeClaudeClient has no reply left")
+        val reply = pending.removeFirstOrNull() ?: error("FakeLlmClient has no reply left")
         return reply.getOrThrow()
     }
 

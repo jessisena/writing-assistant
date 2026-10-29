@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.Provider
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -27,6 +28,9 @@ private val Context.secretsDataStore by preferencesDataStore(name = "secrets")
 
 /**
  * [ApiKeyStore] encrypting with an Android Keystore AES-GCM key, persisted in DataStore.
+ *
+ * One device key encrypts every provider's API key; each is stored under `<provider id>_api_key`,
+ * so the Anthropic key keeps the `anthropic_api_key` name it had before providers existed.
  *
  * The stored value is Base64 of the 12-byte IV followed by the ciphertext. A value that can no
  * longer be decrypted (for example after the Keystore key was invalidated) is cleared and read as
@@ -43,12 +47,13 @@ class KeystoreApiKeyStore internal constructor(
     )
 
     /** @throws PolishError.KeyStorageFailed when the Keystore or DataStore can't be used. */
-    override suspend fun read(): String? =
+    override suspend fun read(provider: Provider): String? =
         storageGuarded {
-            val stored = dataStore.data.first()[ENCRYPTED_KEY] ?: return@storageGuarded null
+            val name = preferenceFor(provider)
+            val stored = dataStore.data.first()[name] ?: return@storageGuarded null
             val key = withContext(Dispatchers.IO) { decryptOrNull(stored) }
             if (key == null) {
-                dataStore.edit { if (it[ENCRYPTED_KEY] == stored) it.remove(ENCRYPTED_KEY) }
+                dataStore.edit { if (it[name] == stored) it.remove(name) }
             }
             key
         }
@@ -59,17 +64,20 @@ class KeystoreApiKeyStore internal constructor(
      * @throws IllegalArgumentException when [key] is blank; callers validate it first.
      * @throws PolishError.KeyStorageFailed when the Keystore or DataStore can't be used.
      */
-    override suspend fun write(key: String) {
+    override suspend fun write(
+        provider: Provider,
+        key: String,
+    ) {
         require(key.isNotBlank()) { "API key must not be blank" }
         storageGuarded {
             val encrypted = withContext(Dispatchers.IO) { cryptoGuarded { encrypt(key) } }
-            dataStore.edit { it[ENCRYPTED_KEY] = encrypted }
+            dataStore.edit { it[preferenceFor(provider)] = encrypted }
         }
     }
 
     /** @throws PolishError.KeyStorageFailed when DataStore can't be written. */
-    override suspend fun clear() {
-        storageGuarded { dataStore.edit { it.remove(ENCRYPTED_KEY) } }
+    override suspend fun clear(provider: Provider) {
+        storageGuarded { dataStore.edit { it.remove(preferenceFor(provider)) } }
     }
 
     private suspend fun <T> storageGuarded(body: suspend () -> T): T =
@@ -143,12 +151,16 @@ class KeystoreApiKeyStore internal constructor(
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_LENGTH = 12
         const val TAG_LENGTH_BITS = 128
-        val ENCRYPTED_KEY = stringPreferencesKey("anthropic_api_key")
+
+        fun preferenceFor(provider: Provider) = stringPreferencesKey("${provider.id}_api_key")
     }
 }
 
 private object AndroidKeystoreKey {
     private const val PROVIDER = "AndroidKeyStore"
+
+    // Encrypts every provider's key despite the name. Never rename it: keys already stored
+    // under the old alias could no longer be decrypted.
     private const val ALIAS = "anthropic_api_key"
     private const val KEY_SIZE_BITS = 256
 

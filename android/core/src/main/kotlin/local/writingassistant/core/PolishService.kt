@@ -14,18 +14,27 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Runs the polish pipeline: validate input, assemble the prompt, call Claude, parse the reply.
+ * Runs the polish pipeline: validate input, assemble the prompt, call the model, parse the reply.
  * Mirrors `PolishService.swift`.
  *
- * @param client Sends prompts to Claude. Its [PolishError]s propagate unchanged.
+ * @param backend Returns the client and models to use, resolved once per call so a provider
+ *   change in Settings applies to the next request. The client's [PolishError]s propagate
+ *   unchanged.
  * @param prompts Supplies the prompt files.
- * @param timeout Upper bound for a single Claude call.
+ * @param timeout Upper bound for a single model call.
  */
 class PolishService(
-    private val client: ClaudeClient,
+    private val backend: suspend () -> Backend,
     private val prompts: PromptReading,
     private val timeout: Duration = DEFAULT_TIMEOUT,
 ) : Polishing {
+    /** Always uses [client] with Anthropic's models. */
+    constructor(
+        client: LlmClient,
+        prompts: PromptReading,
+        timeout: Duration = DEFAULT_TIMEOUT,
+    ) : this({ Backend(client, Provider.ANTHROPIC.models) }, prompts, timeout)
+
     private val assembler = PromptAssembler(prompts)
 
     /**
@@ -43,8 +52,9 @@ class PolishService(
     ): PolishResult {
         val input = validatedInput(text)
         val systemPrompt = loadPrompt { assembler.assemble(channel) }
-        val model = ModelRouting.pickModel(input)
-        return parse(send(systemPrompt, input, model), model)
+        val backend = backend()
+        val model = backend.models.forTier(ModelRouting.pickTier(input))
+        return parse(send(backend.client, systemPrompt, input, model), model)
     }
 
     /**
@@ -66,15 +76,18 @@ class PolishService(
         val instruction = loadPrompt { prompts.read(PromptFile.ForRefinement(refinement)).trim() }
         val refinementPrompt =
             "$systemPrompt\n\n## Additional instruction\n\n$instruction\n\n$REFINEMENT_NOTE"
-        val raw = send(refinementPrompt, input, ModelRouting.pickModel(input))
+        val backend = backend()
+        val model = backend.models.forTier(ModelRouting.pickTier(input))
+        val raw = send(backend.client, refinementPrompt, input, model)
         return polishedText(decodeObject(raw))
     }
 
     override suspend fun checkReady() {
-        client.checkAvailable()
+        backend().client.checkAvailable()
     }
 
     private suspend fun send(
+        client: LlmClient,
         systemPrompt: String,
         input: String,
         model: String,

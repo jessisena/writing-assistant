@@ -78,10 +78,9 @@ sealed class PolishError(
         val limit: Int,
     ) : PolishError("Text is too long. The limit is $limit characters.")
 
-    data object MissingApiKey : PolishError("Add your Anthropic API key in Settings to start.")
+    data object MissingApiKey : PolishError("Add your API key in Settings to start.")
 
-    data object InvalidApiKey :
-        PolishError("Anthropic rejected the API key. Check it in Settings.")
+    data object InvalidApiKey : PolishError("The API key was rejected. Check it in Settings.")
 
     /** The key has a character outside printable ASCII, such as a zero-width space or a newline. */
     data object MalformedApiKey :
@@ -95,35 +94,45 @@ sealed class PolishError(
                 "re-enter the key.",
         )
 
+    /** Only Anthropic reports this, so the message names it. */
     data object NoCredits :
         PolishError("Your Anthropic account is out of credits. Add some in the Console.")
 
-    data object Overloaded : PolishError("Claude is busy right now. Please try again shortly.")
+    /** The provider is overloaded, or the request hit a rate or tokens-per-minute limit. */
+    data object Overloaded :
+        PolishError("The AI service is busy or you've hit its rate limit. Try again shortly.")
+
+    /** The provider's per-request token limit is lower than this text needs, so retrying fails. */
+    data object TooLongForProvider :
+        PolishError(
+            "This text is too long for the selected provider's limits. Try a shorter selection " +
+                "or switch provider in Settings.",
+        )
 
     data class Timeout(
         val seconds: Int,
-    ) : PolishError("Claude took longer than $seconds seconds. Please try again.")
+    ) : PolishError("The AI service took longer than $seconds seconds. Please try again.")
 
     data class Network(
         val detail: String,
-    ) : PolishError("Couldn't reach Anthropic. Check your connection and try again.")
+    ) : PolishError("Couldn't reach the AI service. Check your connection and try again.")
 
     data class ApiFailed(
         val status: Int,
         val detail: String,
-    ) : PolishError("Claude returned an error (HTTP $status). Please try again.")
+    ) : PolishError("The AI service returned an error (HTTP $status). Please try again.")
 
-    /** Claude hit the output token limit, so the reply is incomplete. */
+    /** The model hit the output token limit, so the reply is incomplete. */
     data object OutputTooLong :
         PolishError("The reply was cut off because the text is too long. Try a shorter selection.")
 
-    /** Claude's safety systems declined the request. */
+    /** The provider's safety systems declined the request. */
     data object Refused :
-        PolishError("Claude declined to process this text. Try rewording it.")
+        PolishError("The AI service declined to process this text. Try rewording it.")
 
     data class BadFormat(
         val detail: String,
-    ) : PolishError("Unexpected response format from Claude. Please try again.")
+    ) : PolishError("The AI service sent a reply in an unexpected format. Please try again.")
 
     data class PromptUnavailable(
         val detail: String,
@@ -154,14 +163,66 @@ sealed class PromptFile(
     }
 }
 
-/** Sends one prompt to Claude and returns the text of the reply. */
-interface ClaudeClient {
+/** Which of a provider's two models handles a piece of text; see [ModelRouting.pickTier]. */
+enum class ModelTier {
+    SMALL,
+    LARGE,
+}
+
+/** A provider's fast model for short English text and its stronger model for everything else. */
+data class Models(
+    val small: String,
+    val large: String,
+) {
+    fun forTier(tier: ModelTier): String =
+        when (tier) {
+            ModelTier.SMALL -> small
+            ModelTier.LARGE -> large
+        }
+}
+
+/** An LLM service the user can pick in Settings, each with its own API key. */
+enum class Provider(
+    /** Stable identifier used in storage keys; never change it. */
+    val id: String,
+    val displayName: String,
+    /** Where the user creates an API key. */
+    val keyUrl: String,
+    val models: Models,
+) {
+    ANTHROPIC(
+        "anthropic",
+        "Anthropic",
+        "https://console.anthropic.com/settings/keys",
+        Models(small = "claude-haiku-4-5-20251001", large = "claude-sonnet-5-5"),
+    ),
+    GROQ(
+        "groq",
+        "Groq",
+        "https://console.groq.com/keys",
+        Models(small = "openai/gpt-oss-20b", large = "openai/gpt-oss-120b"),
+    ),
+    ;
+
+    companion object {
+        fun fromId(id: String): Provider? = entries.firstOrNull { it.id == id }
+    }
+}
+
+/** The client and models that handle one request. */
+data class Backend(
+    val client: LlmClient,
+    val models: Models,
+)
+
+/** Sends one prompt to an LLM provider and returns the text of the reply. */
+interface LlmClient {
     /**
      * Runs [prompt] on [model].
      *
      * @throws PolishError MissingApiKey, MalformedApiKey, InvalidApiKey, NoCredits, Overloaded,
-     *   Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or any error the key
-     *   provider throws.
+     *   TooLongForProvider, Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or
+     *   any error the key provider throws.
      */
     suspend fun run(
         prompt: String,
@@ -193,6 +254,6 @@ interface Polishing {
         refinement: Refinement,
     ): String
 
-    /** Throws [PolishError] when Claude can't be reached with the current key. */
+    /** Throws [PolishError] when the current provider can't be reached with its key. */
     suspend fun checkReady()
 }

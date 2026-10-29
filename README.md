@@ -325,18 +325,21 @@ public static let sonnetModel = "claude-sonnet-5-5"
 ```
 
 To change models, update these constants, check the new ID with
-`claude --print --model <id> "hi"`, then rebuild with `scripts/build_app.sh`. The Android app has
-its own copy of the constants (`HAIKU_MODEL`, `SONNET_MODEL`) in
-`android/core/src/main/kotlin/local/writingassistant/core/ModelRouting.kt`; change both.
+`claude --print --model <id> "hi"`, then rebuild with `scripts/build_app.sh`. The Android app keeps
+each provider's model IDs in `Provider` in
+`android/core/src/main/kotlin/local/writingassistant/core/Contracts.kt`; update Anthropic's there
+too. A change to the routing heuristic goes in both `ModelRouting` files.
 
 ---
 
 ## Android
 
 The Android app polishes text with the same prompts, channels, routing and refinements as the
-Mac app. It doesn't use the `claude` CLI: it calls the Anthropic Messages API with **your own
-Anthropic API key**. API usage is billed per token to that key's Console account, separately from
-any Claude subscription. A polish request is roughly 2–3k input tokens and 0.5k output tokens.
+Mac app. It doesn't use the `claude` CLI: it calls an LLM API directly with **your own API key**,
+either **Anthropic** (the default) or **Groq**, chosen in **Settings → AI provider**. The text you
+polish is sent to the chosen provider. Anthropic usage is billed per token to that key's Console
+account, separately from any Claude subscription; Groq can be used on its free tier. A polish
+request is roughly 2–3k input tokens and 0.5k output tokens.
 
 What it does:
 
@@ -351,9 +354,10 @@ What it does:
   remembered), **Polish** with **Cancel**, the editable polished text with **Copy**, **Shorter**,
   **More casual** and **More formal**, and a collapsible learning summary for English input.
   Copy puts HTML and plain text on the clipboard.
-- **Settings:** enter the API key (masked, with Show), **Save**, **Test** (one minimal API call to
-  check the key) and **Clear**. On first launch without a key the app opens Settings, and Polish
-  stays disabled until a key is stored.
+- **Settings:** pick the provider (Anthropic | Groq), then enter its API key (masked, with Show),
+  **Save**, **Test** (one minimal API call to check the key) and **Clear**. Each provider keeps its
+  own key, so switching back and forth doesn't lose either. On first launch without a key the app
+  opens Settings, and Polish stays disabled until the selected provider has a key.
 
 History, the learning log, prompt editing, rich-text input, the diff view and themes are Mac-only.
 The app uses the Writing Desk colours and follows the system light/dark setting.
@@ -380,21 +384,28 @@ The app uses the Writing Desk colours and follows the system light/dark setting.
 
 ### API key
 
-1. In [console.anthropic.com](https://console.anthropic.com), create a dedicated key for this app
-   and set a monthly spend limit on the workspace, so the key can be revoked on its own and costs
-   stay bounded.
-2. Enter it in the app under **Settings**, then press **Test**. The app stores it encrypted with
-   an Android Keystore key, and excludes it from backups and device transfers. The key is never
-   logged.
+1. Create a dedicated key for this app:
+   - **Anthropic:** in [console.anthropic.com](https://console.anthropic.com), and set a monthly
+     spend limit on the workspace, so the key can be revoked on its own and costs stay bounded.
+   - **Groq:** in [console.groq.com/keys](https://console.groq.com/keys).
+2. In the app's **Settings**, select the provider under **AI provider**, enter the key and press
+   **Test**. The app stores each key encrypted with an Android Keystore key, and excludes them from
+   backups and device transfers. Keys are never logged.
 
-For development, put the key in `android/local.properties` (gitignored):
+Groq's free tier allows 30 requests per minute, 1,000 per day, 8K tokens per minute and 200K
+tokens per day. To fit the tokens-per-minute limit, Groq replies are capped at 2,048 output tokens,
+so a very long text can fail on Groq with "The reply was cut off because the text is too long".
+Polish a shorter selection, or switch to Anthropic, for those.
+
+For development, put the keys in `android/local.properties` (gitignored):
 
 ```properties
 ANTHROPIC_API_KEY=sk-ant-…
+GROQ_API_KEY=gsk_…
 ```
 
-Debug builds read it to prefill the Settings field; it's stored only once you press Save or Test.
-Release builds never embed it.
+Debug builds read them to prefill each provider's Settings field; a key is stored only once you
+press Save or Test. Release builds never embed them.
 
 ### Build, test and install
 
@@ -411,9 +422,10 @@ warnings as errors, and builds the debug APK. CI runs the same command.
 ./gradlew :core:liveTest
 ```
 
-`liveTest` sends one English and one Spanish text through the real API, using
-`ANTHROPIC_API_KEY` from the environment or `local.properties`, and checks routing, prompts and
-JSON parsing. It costs a few cents and is skipped when no key is set.
+`liveTest` sends short English, Spanish and (on Groq) Catalan texts and a refinement through the
+real APIs, and checks routing, prompts and JSON parsing. It reads `ANTHROPIC_API_KEY` and
+`GROQ_API_KEY` from the environment or `local.properties` and runs each provider's cases only when
+its key is set; with neither key it's skipped. The Anthropic cases cost a few cents.
 
 To install, connect a device with USB debugging on (or start an emulator) and run:
 
