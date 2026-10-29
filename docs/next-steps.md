@@ -43,14 +43,14 @@ Watch the logs while testing:
 
 ---
 
-## 1. All six channels — Spanish input
+## 1. All nine channels — Spanish input
 
-Paste a Spanish paragraph and run it through all six channels. Verify:
+Paste a Spanish paragraph and run it through all nine channels. Verify:
 
 - Each channel produces visibly different output (Slack: short and scannable; informal Slack:
   casual; talking points: spoken bullet list; formal: full paragraphs with headers; AI prompt:
   imperative and explicit; other: structure preserved).
-- No learning summary appears in any of the six results; the summary area shows the
+- No learning summary appears in any of the nine results; the summary area shows the
   translated-input message instead.
 - No em dashes appear in any output (`—`).
 - The Polished Text header shows the model used.
@@ -158,7 +158,7 @@ added that were not in the original.
 - With Keyboard navigation on (System Settings → Keyboard), Tab reaches the formatting toolbars,
   the text input, the channel radio group, Process, Clear, History, Copy, Show changes and the
   Refine buttons.
-- Arrow keys move between the six channel options.
+- Arrow keys move between the nine channel options.
 - ⌘↩ submits from the text input.
 - Focus rings are visible throughout.
 - The skeleton shows while a request runs, and the window stays responsive.
@@ -173,7 +173,7 @@ added that were not in the original.
 
 ## 15. Prompt editor (Settings, ⌘,)
 
-- The sidebar has a Prompts section (Global rules and the six channels) and a Refinements section
+- The sidebar has a Prompts section (Global rules and the nine channels) and a Refinements section
   (Shorter, More casual, More formal).
 - Edit `slack.txt` in the app: the unsaved-changes dot appears. Save (⌘S), process with the Slack
   channel, and confirm the output reflects the change.

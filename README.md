@@ -1,7 +1,7 @@
 # Writing Assistant
 
 A local macOS writing tool that polishes text for different channels (Slack, formal, talking points,
-AI prompts) and produces an English learning summary when you write directly in English.
+AI prompts, email, personal messages, proofreading) and produces an English learning summary when you write directly in English.
 
 **Stack:** Swift 6, SwiftUI, Swift Package Manager, claude CLI for model calls.
 
@@ -65,7 +65,8 @@ vocabulary. Translated input has no learning summary.
 - **Editable output:** edit the polished text in place. **Copy** puts HTML and plain text on the
   clipboard, so pasting into Slack keeps the formatting and emoji. The plain text keeps link
   targets as `label (url)`.
-- **Refine:** **Shorter**, **More casual** and **More formal** rewrite the current (edited)
+- **Refine:** **Shorter**, **More casual**, **More formal**, **More diplomatic** and **More
+  assertive** rewrite the current (edited)
   output for the channel it was polished for, and keep the learning summary.
 - **Show changes:** highlights what changed between your input and the output (hidden for
   translated input).
@@ -116,7 +117,7 @@ If the entry is missing after installing, log out and back in (the build script 
 2. **Select the text and press your shortcut.** Bold, italic, strikethrough, code and links in the
    selection carry over; fonts, sizes and colors are dropped.
 3. **Review the result.** Use **Show changes** to see what was edited, and **Shorter**, **More
-   casual** or **More formal** to adjust it. You can also edit the output directly.
+   casual**, **More formal**, **More diplomatic** or **More assertive** to adjust it. You can also edit the output directly.
 4. **Copy it back.** Press **Copy**, switch back with **⌘Tab** (your selection is usually still
    there), and paste over it. Pasting into Slack keeps the formatting and emoji.
 
@@ -351,16 +352,26 @@ What it does:
   sheet opens, with **Copy** only (Android can't replace shared text).
   Closing a sheet mid-request doesn't cancel it; the result shows when you open the app.
 - **Full-screen composer** from the launcher icon: input, channel chips (the last-used channel is
-  remembered), **Polish** with **Cancel**, the editable polished text with **Copy**, **Shorter**,
-  **More casual** and **More formal**, and a collapsible learning summary for English input.
-  Copy puts HTML and plain text on the clipboard.
+  remembered), **Polish** with **Cancel**, the editable polished text with **Copy**, the five
+  refinements, and a collapsible learning summary for English input. Copy puts HTML and plain
+  text on the clipboard.
+- **History:** the composer's **History** action lists the last 50 polishes, newest first. Tap one
+  to restore its input, edited output, channel and learning summary; delete entries one by one or
+  clear them all. Polishes from the bottom sheet are recorded too.
 - **Settings:** pick the provider (Anthropic | Groq), then enter its API key (masked, with Show),
   **Save**, **Test** (one minimal API call to check the key) and **Clear**. Each provider keeps its
   own key, so switching back and forth doesn't lose either. On first launch without a key the app
   opens Settings, and Polish stays disabled until the selected provider has a key.
+- **Settings → Writing for:** turn channels off to hide their chips (at least one stays on).
+- **Settings → English learning summary:** turn it off to skip the summary; requests get a little
+  shorter and faster.
+- **Settings → Appearance:** Writing Desk, Lagoon, Sepia (the Mac presets) or System, which uses
+  Android's wallpaper colours. Every palette follows the system light/dark setting.
+- **Settings → Prompts:** edit the global rules, any channel or any refinement. Edited files are
+  marked and can be restored to the bundled default. Edits stay on the phone and don't reach the
+  Mac app.
 
-History, the learning log, prompt editing, rich-text input, the diff view and themes are Mac-only.
-The app uses the Writing Desk colours and follows the system light/dark setting.
+The learning log, rich-text input, the diff view and custom colours are Mac-only.
 
 ### Requirements
 

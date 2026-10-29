@@ -398,7 +398,10 @@ android/
       JsonExtraction.kt                extract the JSON object from model output
       PromptAssembler.kt               polish.txt + channel file; DirectoryPromptReader
       PolishService.kt                 Polishing: validate, route, assemble, call, parse,
-                                       invariant; polish and refine
+                                       invariant; polish (optionally without the learning
+                                       summary) and refine
+      PromptOverrideStore.kt           user-edited prompt copies over the bundled defaults
+      HistoryStore.kt                  HistoryEntry + history.json, newest 50, corrupt backup
       api/HttpTransport.kt             shared OkHttp call with cancellation, timeout, key
                                        redaction, JSON config, isWellFormedKey
       api/AnthropicClient.kt           LlmClient backed by POST /v1/messages
@@ -416,7 +419,10 @@ android/
       data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
       data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
-      data/DataStoreAppSettings.kt     last-used channel and provider, in Preferences DataStore
+      data/DataStoreAppSettings.kt     last-used channel, provider, disabled channels, learning
+                                       summary switch and palette, in Preferences DataStore
+      data/HistoryRepository.kt        in-memory history shared by composer and History screen,
+                                       saved to filesDir/history.json
       data/AssetPromptReader.kt        PromptReading from the bundled assets
       intents/                         ProcessTextActivity, ShareActivity, SheetHost (the
                                        bottom sheet both activities show)
@@ -444,8 +450,11 @@ built; tests construct view models with fakes instead.
 directory, so the APK bundles the same `polish.txt`, `channels/*.txt` and `refinements/*.txt` as
 the Mac app, and a change to those bundled defaults reaches both apps with their next build.
 Edits made in the Mac app's Settings live in its Application Support folder and don't reach
-Android. On Android the prompts are read-only: `AssetPromptReader` opens them from the assets
-on each request, and there is no prompt editor or user copy. `:core` tests and `liveTest` read
+Android. On Android, `PromptOverrideStore` (`:core`) reads `filesDir/prompts/<relativePath>` when
+the user edited that file in Settings → Prompts, and otherwise the bundled default through
+`AssetPromptReader`. Saving the default text deletes the edit, and saving follows the same rules
+as the Mac (`PromptValidationException`: not empty, global rules keep the placeholder).
+Files are read on each request, so an edit applies to the next one. `:core` tests and `liveTest` read
 the same directory through `DirectoryPromptReader`, passed in as the `prompts.dir` system
 property.
 
