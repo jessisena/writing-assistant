@@ -59,4 +59,25 @@ class JsonExtractionTest {
     fun emptyInputStaysEmpty() {
         assertEquals("", extractJsonText(" \n "))
     }
+
+    @Test
+    fun unicodeWhitespaceAroundFencedJsonIsTrimmed() {
+        val raw = "```json\u00A0\u2003{\"a\": 1}\u3000\n```"
+        assertEquals("{\"a\": 1}", extractJsonText(raw))
+    }
+
+    @Test
+    fun fenceBodyEndsAtTheNextFence() {
+        assertEquals("", extractJsonText("```json```{\"a\": 1}"))
+    }
+
+    @Test
+    fun unclosedFenceFallsBackToTheBraceSlice() {
+        assertEquals("{\"a\": 1}", extractJsonText("```json\n{\"a\": 1}"))
+    }
+
+    @Test
+    fun languageTagIsOnlyStrippedRightAfterTheOpeningFence() {
+        assertEquals("text json", extractJsonText("``` text json ```"))
+    }
 }
