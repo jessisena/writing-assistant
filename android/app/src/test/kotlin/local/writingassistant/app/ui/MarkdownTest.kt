@@ -178,7 +178,7 @@ class MarkdownTest {
                 LineKind.Heading(1),
                 LineKind.Bullet,
                 LineKind.Bullet,
-                LineKind.Numbered(3, "3. "),
+                LineKind.Plain,
                 LineKind.Plain,
                 LineKind.Plain,
             ),
@@ -224,7 +224,7 @@ class MarkdownTest {
         assertEquals(
             "<meta charset=\"utf-8\">Hi &lt;b&gt; &amp; &quot;q&quot;<br>next" +
                 "<ul><li>a</li><li><b>b</b></li></ul><p><b>T</b></p>" +
-                "<ol start=\"3\"><li>x</li><li>y</li></ol>",
+                "3. x<br>4. y",
             html,
         )
     }
@@ -236,7 +236,18 @@ class MarkdownTest {
                 "<code>c</code> <s>s</s> y",
             Markdown.toHtml("[***x***](https://a.com?a=1&b=2) `c` ~~s~~ [y](file:///etc)"),
         )
-        assertEquals("<meta charset=\"utf-8\"><ol><li>one</li></ol>", Markdown.toHtml("1. one"))
+    }
+
+    @Test
+    fun `numbered lines stay literal text`() {
+        val numbered = "1. one\n2) two"
+        assertEquals(numbered, Markdown.toAnnotatedString(numbered).text)
+        assertEquals(
+            listOf(LineKind.Plain, LineKind.Plain),
+            Markdown.parse(numbered).map { it.kind },
+        )
+        assertEquals("<meta charset=\"utf-8\">1. one<br>2) two", Markdown.toHtml(numbered))
+        assertEquals(numbered, Markdown.toClipboardText(numbered))
     }
 
     @Test
