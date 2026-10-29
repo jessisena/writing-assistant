@@ -40,8 +40,10 @@ class PolishService(
     /**
      * Polishes (or translates, then polishes) [text] for [channel].
      *
-     * When the model reports a truthy `was_translated`, the result never carries a learning
-     * summary, whatever the model returned.
+     * When the model reports a truthy `was_translated`, or [learningSummary] is false, the
+     * result never carries a learning summary, whatever the model returned.
+     *
+     * @param learningSummary False tells the model to skip the summary step, saving tokens.
      *
      * @throws PolishError EmptyInput, InputTooLong, PromptUnavailable, BadFormat, or any error
      *   thrown by the client, unchanged.
@@ -52,10 +54,11 @@ class PolishService(
         learningSummary: Boolean,
     ): PolishResult {
         val input = validatedInput(text)
-        val systemPrompt = loadPrompt { assembler.assemble(channel) }
+        val assembled = loadPrompt { assembler.assemble(channel) }
+        val systemPrompt = if (learningSummary) assembled else "$assembled\n\n$NO_SUMMARY_NOTE"
         val backend = backend()
         val model = backend.models.forTier(ModelRouting.pickTier(input))
-        return parse(send(backend.client, systemPrompt, input, model), model)
+        return parse(send(backend.client, systemPrompt, input, model), model, learningSummary)
     }
 
     /**
@@ -101,6 +104,9 @@ class PolishService(
         private const val REFINEMENT_NOTE =
             "The input is already-polished English: apply the additional instruction on top of " +
                 "the rules above, set was_translated to false and set learning_summary to null."
+        private const val NO_SUMMARY_NOTE =
+            "The author turned the learning summary off: skip Step 4 and set learning_summary " +
+                "to null."
         private val json = Json { ignoreUnknownKeys = true }
 
         private fun validatedInput(text: String): String {
@@ -124,11 +130,17 @@ class PolishService(
         private fun parse(
             raw: String,
             model: String,
+            wantsSummary: Boolean,
         ): PolishResult {
             val response = decodeObject(raw)
             val polishedText = polishedText(response)
             val wasTranslated = isTruthy(response["was_translated"])
-            val summary = if (wasTranslated) null else decodeSummary(response["learning_summary"])
+            val summary =
+                if (wasTranslated || !wantsSummary) {
+                    null
+                } else {
+                    decodeSummary(response["learning_summary"])
+                }
             return PolishResult(
                 polishedText = polishedText,
                 learningSummary = summary,
