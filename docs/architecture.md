@@ -520,7 +520,7 @@ Groq responses map to `PolishError` (key, timeout and network errors as for Anth
 | Response | `PolishError` |
 |---|---|
 | 401, 403 | `InvalidApiKey` |
-| 413 (the request is over the provider's token limits) | A too-long-for-the-provider error |
+| 413 (the request is over the provider's token limits) | `TooLongForProvider` |
 | 429 (includes going over a tokens-per-minute limit), 503 | `Overloaded` |
 | 400 with error code `json_validate_failed` | `BadFormat` |
 | Other non-2xx | `ApiFailed` (status and the API's message) |
