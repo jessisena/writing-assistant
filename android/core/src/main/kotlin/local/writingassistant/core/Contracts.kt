@@ -83,6 +83,10 @@ sealed class PolishError(
     data object InvalidApiKey :
         PolishError("Anthropic rejected the API key. Check it in Settings.")
 
+    /** The key has a character outside printable ASCII, such as a zero-width space or a newline. */
+    data object MalformedApiKey :
+        PolishError("The API key contains characters that aren't allowed. Paste it again.")
+
     data object NoCredits :
         PolishError("Your Anthropic account is out of credits. Add some in the Console.")
 
@@ -100,6 +104,14 @@ sealed class PolishError(
         val status: Int,
         val detail: String,
     ) : PolishError("Claude returned an error (HTTP $status). Please try again.")
+
+    /** Claude hit the output token limit, so the reply is incomplete. */
+    data object OutputTooLong :
+        PolishError("The reply was cut off because the text is too long. Try a shorter selection.")
+
+    /** Claude's safety systems declined the request. */
+    data object Refused :
+        PolishError("Claude declined to process this text. Try rewording it.")
 
     data class BadFormat(
         val detail: String,
@@ -134,8 +146,9 @@ interface ClaudeClient {
     /**
      * Runs [prompt] on [model].
      *
-     * @throws PolishError MissingApiKey, InvalidApiKey, NoCredits, Overloaded, Timeout, Network,
-     *   ApiFailed or BadFormat.
+     * @throws PolishError MissingApiKey, MalformedApiKey, InvalidApiKey, NoCredits, Overloaded,
+     *   Timeout, Network, ApiFailed, OutputTooLong, Refused or BadFormat, or any error the key
+     *   provider throws.
      */
     suspend fun run(
         prompt: String,

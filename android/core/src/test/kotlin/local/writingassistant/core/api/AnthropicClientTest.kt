@@ -294,6 +294,58 @@ class AnthropicClientTest {
         }
 
     @Test
+    fun `a key with characters that can't go in a header fails without a request`() =
+        runTest {
+            val malformed =
+                listOf("$API_KEY\u200B", "\u201C$API_KEY\u201D", "sk-ant-api03\n-test", "sk ant")
+            for (key in malformed) {
+                storedKey = key
+
+                val error = assertFails<PolishError.MalformedApiKey> { runPolish() }
+                assertFalse(error.message.contains("sk-ant"))
+                assertFails<PolishError.MalformedApiKey> { client().checkAvailable() }
+            }
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun `isWellFormedKey accepts printable ASCII only`() {
+        assertTrue(AnthropicClient.isWellFormedKey(API_KEY))
+        assertTrue(AnthropicClient.isWellFormedKey("!~"))
+        assertFalse(AnthropicClient.isWellFormedKey(""))
+        assertFalse(AnthropicClient.isWellFormedKey("sk\tant"))
+        assertFalse(AnthropicClient.isWellFormedKey("sk-ant-é"))
+        assertFalse(AnthropicClient.isWellFormedKey("sk-ant\u007F"))
+    }
+
+    @Test
+    fun `a reply cut off at max_tokens is output too long`() =
+        runTest {
+            enqueue(200, textResponse("""{\"polished_text\": \"Hal""", stopReason = "max_tokens"))
+
+            assertFails<PolishError.OutputTooLong> { runPolish() }
+        }
+
+    @Test
+    fun `a refused request is a refusal error`() =
+        runTest {
+            enqueue(200, """{"content": [], "stop_reason": "refusal"}""")
+
+            assertFails<PolishError.Refused> { runPolish() }
+        }
+
+    @Test
+    fun `run asks for a 16k token reply`() =
+        runTest {
+            enqueue(200, textResponse("Polished."))
+
+            runPolish()
+
+            val body = Json.parseToJsonElement(takeRequest().body!!.utf8()).jsonObject
+            assertEquals(16_000, body["max_tokens"]!!.jsonPrimitive.int)
+        }
+
+    @Test
     fun `cancelling the coroutine cancels the HTTP call`() =
         runTest {
             val canceled = CountDownLatch(1)
@@ -351,9 +403,11 @@ class AnthropicClientTest {
             "Your credit balance is too low to access the Anthropic API. " +
                 "Please go to Plans & Billing to upgrade or purchase credits."
 
-        fun textResponse(text: String) =
-            """{"id": "msg_1", "type": "message", "role": "assistant",
-               "content": [{"type": "text", "text": "$text"}], "stop_reason": "end_turn"}"""
+        fun textResponse(
+            text: String,
+            stopReason: String = "end_turn",
+        ) = """{"id": "msg_1", "type": "message", "role": "assistant",
+               "content": [{"type": "text", "text": "$text"}], "stop_reason": "$stopReason"}"""
 
         fun errorBody(
             type: String,
