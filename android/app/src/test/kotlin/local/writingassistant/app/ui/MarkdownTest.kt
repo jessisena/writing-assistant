@@ -125,6 +125,45 @@ class MarkdownTest {
     }
 
     @Test
+    fun `link destinations keep balanced parentheses`() {
+        val url = "https://en.wikipedia.org/wiki/Foo_(bar)"
+        assertEquals(listOf(span("x", InlineStyle(link = url))), spans("[x]($url)"))
+        assertEquals(
+            listOf(span("x", InlineStyle(link = "https://a.com/(b)")), span(" after")),
+            spans("[x](https://a.com/(b)) after"),
+        )
+    }
+
+    @Test
+    fun `link destinations with unbalanced parentheses stay literal`() {
+        assertEquals(listOf(span("[x](https://a.com/(b)")), spans("[x](https://a.com/(b)"))
+    }
+
+    @Test
+    fun `images stay literal with plain alt text`() {
+        val image = "![alt](https://a.com/i.png)"
+        assertEquals(listOf(span(image)), spans(image))
+        assertEquals(
+            listOf(span("see ![a b](u) now")),
+            spans("see ![a **b**](u) now"),
+        )
+        assertEquals(
+            listOf(span("!"), span("alt", InlineStyle(link = "https://a.com"))),
+            spans("\\![alt](https://a.com)"),
+        )
+    }
+
+    @Test
+    fun `autolinks follow commonmark character classes`() {
+        assertEquals(
+            listOf(span("https://a.com/é", InlineStyle(link = "https://a.com/é"))),
+            spans("<https://a.com/é>"),
+        )
+        assertEquals(listOf(span("<me@a\u2003b.com>")), spans("<me@a\u2003b.com>"))
+        assertEquals(listOf(span("<é@a.com>")), spans("<é@a.com>"))
+    }
+
+    @Test
     fun `bare urls and malformed links stay plain`() {
         assertEquals(listOf(span("go to https://a.com now")), spans("go to https://a.com now"))
         assertEquals(listOf(span("[a] (b)")), spans("[a] (b)"))
@@ -139,7 +178,7 @@ class MarkdownTest {
                 LineKind.Heading(1),
                 LineKind.Bullet,
                 LineKind.Bullet,
-                LineKind.Numbered(3, "3. "),
+                LineKind.Plain,
                 LineKind.Plain,
                 LineKind.Plain,
             ),
@@ -185,7 +224,7 @@ class MarkdownTest {
         assertEquals(
             "<meta charset=\"utf-8\">Hi &lt;b&gt; &amp; &quot;q&quot;<br>next" +
                 "<ul><li>a</li><li><b>b</b></li></ul><p><b>T</b></p>" +
-                "<ol start=\"3\"><li>x</li><li>y</li></ol>",
+                "3. x<br>4. y",
             html,
         )
     }
@@ -197,7 +236,18 @@ class MarkdownTest {
                 "<code>c</code> <s>s</s> y",
             Markdown.toHtml("[***x***](https://a.com?a=1&b=2) `c` ~~s~~ [y](file:///etc)"),
         )
-        assertEquals("<meta charset=\"utf-8\"><ol><li>one</li></ol>", Markdown.toHtml("1. one"))
+    }
+
+    @Test
+    fun `numbered lines stay literal text`() {
+        val numbered = "1. one\n2) two"
+        assertEquals(numbered, Markdown.toAnnotatedString(numbered).text)
+        assertEquals(
+            listOf(LineKind.Plain, LineKind.Plain),
+            Markdown.parse(numbered).map { it.kind },
+        )
+        assertEquals("<meta charset=\"utf-8\">1. one<br>2) two", Markdown.toHtml(numbered))
+        assertEquals(numbered, Markdown.toClipboardText(numbered))
     }
 
     @Test
@@ -218,5 +268,21 @@ class MarkdownTest {
     @Test
     fun `crlf line endings are normalised`() {
         assertEquals("a\nb", Markdown.toClipboardText("a\r\nb"))
+        assertEquals("a\n\nb", Markdown.toClipboardText("a\r\n\r\nb"))
+    }
+
+    @Test
+    fun `lines split on every unicode newline`() {
+        assertEquals("a\nb", Markdown.toClipboardText("a\rb"))
+        assertEquals(listOf("a", "", "b"), Markdown.toClipboardText("a\n\rb").split('\n'))
+        for (separator in listOf("\u2028", "\u2029", "\u0085", "\u000B", "\u000C")) {
+            assertEquals("a\n• b", Markdown.toClipboardText("a$separator- b"))
+        }
+        assertEquals("<meta charset=\"utf-8\">a<ul><li>b</li></ul>", Markdown.toHtml("a\u2028- b"))
+    }
+
+    @Test
+    fun `trailing newline keeps an empty last line`() {
+        assertEquals(listOf(LineKind.Plain, LineKind.Plain), Markdown.parse("a\r").map { it.kind })
     }
 }

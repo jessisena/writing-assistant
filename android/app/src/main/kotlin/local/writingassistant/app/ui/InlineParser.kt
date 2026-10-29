@@ -7,12 +7,31 @@ package local.writingassistant.app.ui
  * Emphasis follows a simplified CommonMark flanking rule: an opening marker must be followed by
  * a non-space character and a closing one preceded by one; `_` also can't open or close inside
  * a word. A marker run that can only open while looking for a closer is matched with its own
- * closer first, so `*a **b** c*` nests.
+ * closer first, so `*a **b** c*` nests. Closer searches are memoised, so parsing stays
+ * polynomial however many markers lack a partner.
+ *
+ * A link destination may contain balanced parentheses. An image, `![alt](url)`, isn't
+ * rendered: it is kept as that literal text, with the alt text's styling dropped.
  */
 internal class InlineParser private constructor(
     private val source: String,
 ) {
     private val spans = mutableListOf<InlineSpan>()
+    private val closers = HashMap<CloserKey, Int>()
+    private val codeSpanEnds = HashMap<Pair<Int, Int>, Int>()
+
+    private data class CloserKey(
+        val marker: Char,
+        val width: Int,
+        val from: Int,
+        val end: Int,
+    )
+
+    private data class LinkParts(
+        val labelEnd: Int,
+        val end: Int,
+        val url: String,
+    )
 
     private fun parseRange(
         start: Int,
@@ -36,6 +55,7 @@ internal class InlineParser private constructor(
                 '`' -> codeSpan(index, end, style)
                 '*', '_', '~' -> emphasis(index, end, style)
                 '[' -> link(index, end, style)
+                '!' -> image(index, end, style)
                 '<' -> autolink(index, end, style)
                 else -> null
             }
@@ -119,39 +139,28 @@ internal class InlineParser private constructor(
         width: Int,
         from: Int,
         end: Int,
+    ): Int =
+        closers.getOrPut(CloserKey(marker, width, from, end)) {
+            scanForCloser(marker, width, from, end)
+        }
+
+    private fun scanForCloser(
+        marker: Char,
+        width: Int,
+        from: Int,
+        end: Int,
     ): Int {
         var index = from
         while (index < end) {
-            val char = source[index]
+            val run = if (source[index] == marker) runLength(index, end, marker) else 0
             index =
-                when (char) {
-                    '\\' -> {
-                        index + 2
-                    }
-
-                    '`' -> {
-                        skipCodeSpan(index, end)
-                    }
-
-                    marker -> {
-                        val run = runLength(index, end, marker)
-                        when {
-                            isOpenerOnly(
-                                index,
-                                run,
-                                marker,
-                                end,
-                            ) -> skipNested(marker, index, run, end)
-
-                            run >= width && canClose(index, run, marker) -> return index
-
-                            else -> index + run
-                        }
-                    }
-
-                    else -> {
-                        index + 1
-                    }
+                when {
+                    source[index] == '\\' -> index + 2
+                    source[index] == '`' -> skipCodeSpan(index, end)
+                    run == 0 -> index + 1
+                    isOpenerOnly(index, run, marker, end) -> skipNested(marker, index, run, end)
+                    run >= width && canClose(index, run, marker) -> return index
+                    else -> index + run
                 }
         }
         return -1
@@ -208,14 +217,51 @@ internal class InlineParser private constructor(
         style: InlineStyle,
     ): Int? {
         if (style.link != null) return null
+        val parts = linkParts(index, end) ?: return null
+        parseRange(index + 1, parts.labelEnd, style.copy(link = parts.url))
+        return parts.end
+    }
+
+    private fun image(
+        index: Int,
+        end: Int,
+        style: InlineStyle,
+    ): Int? {
+        if (source.getOrNull(index + 1) != '[') return null
+        val parts = linkParts(index + 1, end) ?: return null
+        val alt = parse(source.substring(index + 2, parts.labelEnd)).joinToString("") { it.text }
+        emit("![$alt](${parts.url})", style)
+        return parts.end
+    }
+
+    private fun linkParts(
+        index: Int,
+        end: Int,
+    ): LinkParts? {
         val closeBracket = findBracketClose(index + 1, end)
         if (closeBracket < 0 || source.getOrNull(closeBracket + 1) != '(') return null
-        val closeParen = source.indexOf(')', closeBracket + 2)
-        if (closeParen < 0 || closeParen >= end) return null
+        val closeParen = findDestinationClose(closeBracket + 2, end)
+        if (closeParen < 0) return null
         val url = source.substring(closeBracket + 2, closeParen).trim()
         if (url.isEmpty() || url.any { it.isWhitespace() }) return null
-        parseRange(index + 1, closeBracket, style.copy(link = url))
-        return closeParen + 1
+        return LinkParts(closeBracket, closeParen + 1, url)
+    }
+
+    private fun findDestinationClose(
+        from: Int,
+        end: Int,
+    ): Int {
+        var depth = 0
+        var index = from
+        while (index < end) {
+            when (source[index]) {
+                '\\' -> index++
+                '(' -> depth++
+                ')' -> if (depth == 0) return index else depth--
+            }
+            index++
+        }
+        return -1
     }
 
     private fun autolink(
@@ -258,11 +304,12 @@ internal class InlineParser private constructor(
     private fun skipCodeSpan(
         index: Int,
         end: Int,
-    ): Int {
-        val fence = runLength(index, end, '`')
-        val close = findBacktickClose(index + fence, end, fence)
-        return if (close < 0) index + fence else close + fence
-    }
+    ): Int =
+        codeSpanEnds.getOrPut(index to end) {
+            val fence = runLength(index, end, '`')
+            val close = findBacktickClose(index + fence, end, fence)
+            if (close < 0) index + fence else close + fence
+        }
 
     private fun findBacktickClose(
         from: Int,
@@ -307,8 +354,10 @@ internal class InlineParser private constructor(
     companion object {
         private const val MAX_EMPHASIS = 3
         private const val PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
-        private val URI = Regex("[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\s<>]*")
-        private val EMAIL = Regex("[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+")
+        private val URI = Regex("[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\\x00-\\x20\\x7F<>]*")
+        private const val EMAIL_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+        private val EMAIL =
+            Regex("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@$EMAIL_LABEL(?:\\.$EMAIL_LABEL)*")
 
         /** Parses one line of inline Markdown; adjacent spans with the same style are merged. */
         fun parse(line: String): List<InlineSpan> =
