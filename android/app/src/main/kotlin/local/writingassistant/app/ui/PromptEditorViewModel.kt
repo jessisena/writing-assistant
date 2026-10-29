@@ -58,6 +58,11 @@ class PromptEditorViewModel(
     val state: StateFlow<PromptEditorState> = mutableState.asStateFlow()
 
     init {
+        reload()
+    }
+
+    /** Shows the text in effect, dropping unsaved edits and the last status. */
+    fun reload() {
         run {
             val text = store.read(file)
             val customized = store.isCustomized(file)

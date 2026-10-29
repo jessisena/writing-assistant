@@ -448,10 +448,26 @@ class ComposerSessionTest {
 
             val state = session.state.value
             assertEquals("polished: hey", state.output)
-            assertEquals(PolishError.Unexpected("HistoryStoreException"), state.error)
+            assertEquals(PolishError.HistoryFailed("disk full"), state.error)
             assertEquals(listOf("hey"), history.entries.value.map { it.input })
             session.onEvent(ComposerEvent.Retry)
             advanceUntilIdle()
             assertEquals(1, polisher.calls.size)
+        }
+
+    @Test
+    fun `an entry whose save failed still takes the refined output`() =
+        runTest(dispatcher) {
+            var failSave = true
+            val history =
+                testHistory(save = { if (failSave) throw HistoryStoreException("disk full") })
+            val session = session(history = history)
+            polished(session, "hey")
+            failSave = false
+
+            session.onEvent(ComposerEvent.Refine(Refinement.SHORTER))
+            advanceUntilIdle()
+
+            assertEquals(listOf("polished: hey (shorter)"), history.entries.value.map { it.output })
         }
 }

@@ -13,10 +13,12 @@ import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.HistoryStoreException
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Refinement
+import java.util.UUID
 
 /**
  * The composer's state and requests, shared by every screen that shows the composer. It lives
@@ -178,22 +180,16 @@ class ComposerSession(
 
     /**
      * Records [result] and returns the new entry's id with the failure to save it, if any.
-     * A failed save still adds the entry to the history in memory, as its newest entry.
+     * A failed save still adds the entry to the history in memory.
      */
     private suspend fun record(
         result: PolishResult,
         input: String,
         channel: Channel,
-    ): Pair<String?, PolishError?> {
-        var entryId: String? = null
-        val error = historyFailure { entryId = history.record(result, input, channel).id }
-        if (error != null) {
-            entryId =
-                history.entries.value
-                    .firstOrNull()
-                    ?.id
-        }
-        return entryId to error
+    ): Pair<String, PolishError?> {
+        val id = UUID.randomUUID().toString()
+        val error = historyFailure { history.record(result, input, channel, id) }
+        return id to error
     }
 
     /** Runs [body] and returns its failure as a [PolishError] instead of throwing it. */
@@ -253,7 +249,11 @@ class ComposerSession(
     }
 
     private fun asPolishError(e: Exception): PolishError =
-        e as? PolishError ?: PolishError.Unexpected(e.javaClass.simpleName)
+        when (e) {
+            is PolishError -> e
+            is HistoryStoreException -> PolishError.HistoryFailed(e.message.orEmpty())
+            else -> PolishError.Unexpected(e.javaClass.simpleName)
+        }
 
     private fun failed(error: PolishError): (ComposerState) -> ComposerState =
         { state ->

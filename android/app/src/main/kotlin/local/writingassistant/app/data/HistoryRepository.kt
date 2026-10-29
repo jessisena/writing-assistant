@@ -53,17 +53,18 @@ class HistoryRepository internal constructor(
     }
 
     /**
-     * Adds a successful polish as the newest entry, keeping at most `limit`. When saving fails
-     * the entry is still the newest one in [entries].
+     * Adds a successful polish as the newest entry with [id], keeping at most `limit`. When saving
+     * fails the entry is still in [entries], so a caller that passes its own [id] can keep using it.
      */
     suspend fun record(
         result: PolishResult,
         input: String,
         channel: Channel,
+        id: String = UUID.randomUUID().toString(),
     ): HistoryEntry {
         val entry =
             HistoryEntry(
-                id = UUID.randomUUID().toString(),
+                id = id,
                 epochSeconds = now(),
                 channel = channel,
                 input = input,

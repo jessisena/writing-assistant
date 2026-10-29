@@ -72,10 +72,13 @@ private enum class Screen(
 /**
  * Where the main screen is: the screen, and on [Screen.PromptEditor] the edited prompt's path.
  * Both survive recreation; [onLeaveSettings] runs whenever Back leaves Settings.
+ * [promptOpenedState] is true from [openPrompt] until the editor has reloaded the prompt, so a new
+ * visit starts from the stored text while a recreation keeps the unsaved edit.
  */
 private class Navigation(
     private val screenState: MutableState<Screen>,
     private val promptPathState: MutableState<String?>,
+    private val promptOpenedState: MutableState<Boolean>,
     private val onLeaveSettings: () -> Unit,
 ) {
     val screen: Screen get() = screenState.value
@@ -89,7 +92,15 @@ private class Navigation(
 
     fun openPrompt(file: PromptFile) {
         promptPathState.value = file.relativePath
+        promptOpenedState.value = true
         screenState.value = Screen.PromptEditor
+    }
+
+    /** Returns true once per [openPrompt]. */
+    fun consumePromptOpened(): Boolean {
+        val opened = promptOpenedState.value
+        promptOpenedState.value = false
+        return opened
     }
 
     fun up() {
@@ -102,7 +113,10 @@ private class Navigation(
 private fun rememberNavigation(onLeaveSettings: () -> Unit): Navigation {
     val screen = rememberSaveable { mutableStateOf(Screen.Composer) }
     val promptPath = rememberSaveable { mutableStateOf<String?>(null) }
-    return remember(screen, promptPath) { Navigation(screen, promptPath, onLeaveSettings) }
+    val promptOpened = rememberSaveable { mutableStateOf(false) }
+    return remember(screen, promptPath, promptOpened) {
+        Navigation(screen, promptPath, promptOpened, onLeaveSettings)
+    }
 }
 
 @Composable
@@ -236,5 +250,8 @@ private fun MainPromptEditor(
     }
     val editor: PromptEditorViewModel =
         viewModel(key = file.relativePath, factory = PromptEditorViewModel.factory(graph, file))
+    LaunchedEffect(editor) {
+        if (navigation.consumePromptOpened()) editor.reload()
+    }
     PromptEditorScreen(editor, modifier)
 }

@@ -143,6 +143,11 @@ sealed class PolishError(
         val detail: String,
     ) : PolishError("Couldn't read the bundled prompt files ($detail).")
 
+    /** The history file couldn't be read or written; [detail] names the file and what to do. */
+    data class HistoryFailed(
+        val detail: String,
+    ) : PolishError(detail)
+
     /** A failure outside the cases above. [detail] is the exception class, never its message. */
     data class Unexpected(
         val detail: String,

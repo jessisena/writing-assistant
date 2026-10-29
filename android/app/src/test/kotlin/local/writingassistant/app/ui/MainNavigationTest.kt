@@ -1,9 +1,11 @@
 package local.writingassistant.app.ui
 
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -54,6 +56,23 @@ class MainNavigationTest {
             compose.onNodeWithText("AI provider").assertExists()
             back(scenario)
             compose.onNodeWithText("Polish").assertExists()
+        }
+    }
+
+    @Test
+    fun reopeningAPromptDropsTheUnsavedEdit() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithText("Settings").performClick()
+            compose.onNodeWithText("Prompts").performScrollTo().performClick()
+            compose.onNodeWithText("Global rules").performClick()
+            compose.waitForIdle()
+            compose.onNode(hasSetTextAction()).performTextReplacement("unsaved edit")
+            back(scenario)
+            compose.onNodeWithText("Global rules").performClick()
+            compose.waitForIdle()
+
+            compose.onNodeWithText("default polish.txt").assertExists()
+            compose.onNodeWithText("unsaved edit").assertDoesNotExist()
         }
     }
 }

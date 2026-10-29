@@ -33,6 +33,7 @@ class ContractsTest {
                 PolishError.Refused,
                 PolishError.BadFormat("detail"),
                 PolishError.PromptUnavailable("detail"),
+                PolishError.HistoryFailed("detail"),
                 PolishError.Unexpected("detail"),
             )
         val providerNames = Provider.entries.map { it.displayName } + "Claude"

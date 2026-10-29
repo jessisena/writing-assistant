@@ -18,7 +18,9 @@ class FakeAppGraph : AppGraph {
     override val apiKeyStore = FakeApiKeyStore()
     override val settings = FakeAppSettings()
     override val promptStore =
-        PromptOverrideStore(Files.createTempDirectory("prompts").toFile()) { error("no prompts") }
+        PromptOverrideStore(
+            Files.createTempDirectory("prompts").toFile(),
+        ) { "default ${it.relativePath}" }
     override val history = testHistory()
     override val composerSession =
         ComposerSession(
