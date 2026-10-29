@@ -1,5 +1,6 @@
 package local.writingassistant.app.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -292,5 +293,79 @@ class SettingsViewModelTest {
             assertEquals(Provider.GROQ to "groq-new", checked)
             assertEquals("sk-ant-fake", keys.key)
             assertEquals(Status.TestPassed, vm.state.value.status)
+        }
+
+    @Test
+    fun `the provider can't change while a test stores the key`() =
+        runTest(dispatcher) {
+            var checkedProvider: Provider? = null
+            polisher.onCheckReady = { checkedProvider = settings.provider }
+            val vm = viewModel()
+            val write = CompletableDeferred<Unit>()
+            keys.writeGate = write
+
+            vm.onKeyChange("sk-ant-key")
+            vm.test()
+            assertTrue(vm.state.value.isTesting)
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+            write.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(Provider.ANTHROPIC, vm.state.value.provider)
+            assertEquals(vm.state.value.provider, settings.provider)
+            assertEquals(Provider.ANTHROPIC, checkedProvider)
+            assertEquals(Status.TestPassed, vm.state.value.status)
+        }
+
+    @Test
+    fun `a failure from the provider just left isn't shown on the new one`() =
+        runTest(dispatcher) {
+            val vm = viewModel()
+            val write = CompletableDeferred<Unit>()
+            keys.writeGate = write
+
+            vm.onKeyChange("sk-ant-key")
+            vm.save()
+            advanceUntilIdle()
+            vm.selectProvider(Provider.GROQ)
+            advanceUntilIdle()
+            write.completeExceptionally(PolishError.KeyStorageFailed("ProviderException"))
+            advanceUntilIdle()
+
+            assertEquals(Provider.GROQ, vm.state.value.provider)
+            assertEquals(Status.Idle, vm.state.value.status)
+        }
+
+    @Test
+    fun `typing while the key loads keeps the typed text`() =
+        runTest(dispatcher) {
+            keys.key = "sk-stored"
+            val read = CompletableDeferred<Unit>()
+            keys.readGate = read
+            val vm = viewModel()
+
+            vm.onKeyChange("sk-typed")
+            read.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals("sk-typed", vm.state.value.key)
+            assertTrue(vm.state.value.hasStoredKey)
+        }
+
+    @Test
+    fun `choosing the default provider before the saved one loads keeps it`() =
+        runTest(dispatcher) {
+            settings.provider = Provider.GROQ
+            keys.key = "sk-ant-fake"
+            keys.keys[Provider.GROQ] = "groq-stored"
+            val vm = SettingsViewModel(keys, settings, polisher, emptyMap())
+
+            vm.selectProvider(Provider.ANTHROPIC)
+            advanceUntilIdle()
+
+            assertEquals(Provider.ANTHROPIC, vm.state.value.provider)
+            assertEquals(Provider.ANTHROPIC, settings.provider)
+            assertEquals("sk-ant-fake", vm.state.value.key)
         }
 }

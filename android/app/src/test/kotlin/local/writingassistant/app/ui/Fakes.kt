@@ -1,5 +1,6 @@
 package local.writingassistant.app.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.core.Channel
@@ -86,11 +87,17 @@ class FailingKeyStore(
     override suspend fun clear(provider: Provider) = throw error
 }
 
-/** In-memory [ApiKeyStore]; [key] is the Anthropic key, the one most tests care about. */
+/**
+ * In-memory [ApiKeyStore]; [key] is the Anthropic key, the one most tests care about. A set
+ * [readGate] or [writeGate] holds that operation until the test completes it, so a test can act
+ * while it is in flight; completing it exceptionally makes the operation fail.
+ */
 class FakeApiKeyStore(
     key: String? = "sk-test",
 ) : ApiKeyStore {
     val keys = mutableMapOf<Provider, String>()
+    var readGate: CompletableDeferred<Unit>? = null
+    var writeGate: CompletableDeferred<Unit>? = null
 
     var key: String?
         get() = keys[Provider.ANTHROPIC]
@@ -102,12 +109,16 @@ class FakeApiKeyStore(
         this.key = key
     }
 
-    override suspend fun read(provider: Provider): String? = keys[provider]
+    override suspend fun read(provider: Provider): String? {
+        readGate?.await()
+        return keys[provider]
+    }
 
     override suspend fun write(
         provider: Provider,
         key: String,
     ) {
+        writeGate?.await()
         keys[provider] = key
     }
 

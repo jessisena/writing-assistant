@@ -65,51 +65,76 @@ class SettingsViewModel(
     val state: StateFlow<SettingsState> = mutableState.asStateFlow()
     private var providerChosen = false
 
+    /** The provider whose field was typed in since its key started loading, if any. */
+    private var keyEditedFor: Provider? = null
+
     init {
-        launchReporting {
+        launchReporting(state.value.provider) {
             val provider = settings.provider()
             if (providerChosen) return@launchReporting
             mutableState.update { it.copy(provider = provider) }
-            loadKey(provider)
+            launchReporting(provider) { loadKey(provider) }
         }
     }
 
-    /** Makes [provider] the one requests go to and shows its key. */
+    /**
+     * Makes [provider] the one requests go to and shows its key. An explicit choice wins over the
+     * saved provider still loading; ignored while a test runs so the test can't change providers.
+     */
     fun selectProvider(provider: Provider) {
-        if (provider == state.value.provider) return
+        val current = state.value
+        if (current.isTesting || (providerChosen && provider == current.provider)) return
         providerChosen = true
+        keyEditedFor = null
         mutableState.update {
             SettingsState(provider = provider, status = SettingsState.Status.Idle)
         }
-        launchReporting {
+        launchReporting(provider) {
             settings.setProvider(provider)
             loadKey(provider)
         }
     }
 
     fun onKeyChange(key: String) {
-        mutableState.update { it.copy(key = key, status = SettingsState.Status.Idle) }
+        keyEditedFor = state.value.provider
+        mutableState.update {
+            val status = if (it.isTesting) it.status else SettingsState.Status.Idle
+            it.copy(key = key, status = status)
+        }
     }
 
     fun save() {
-        launchReporting { store() }
+        val provider = state.value.provider
+        val key = state.value.key
+        launchReporting(provider) {
+            if (store(provider, key)) {
+                updateFor(provider) { it.copy(status = SettingsState.Status.Saved) }
+            }
+        }
     }
 
-    /** Saves the key, then makes a cheap call to check that the selected provider accepts it. */
+    /**
+     * Saves the key, then makes a cheap call to check that the selected provider accepts it. The
+     * status turns to Testing before anything suspends, so the provider can't change mid-test.
+     */
     fun test() {
-        launchReporting {
-            val provider = store() ?: return@launchReporting
-            updateFor(provider) { it.copy(status = SettingsState.Status.Testing) }
-            // Already saved on selection; saved again so the check can't reach another provider.
-            settings.setProvider(provider)
+        val before = state.value
+        if (before.isTesting) return
+        val provider = before.provider
+        mutableState.update { it.copy(status = SettingsState.Status.Testing) }
+        launchReporting(provider) {
+            if (!store(provider, before.key)) {
+                updateFor(provider) { it.copy(status = before.status) }
+                return@launchReporting
+            }
             polisher.checkReady()
             updateFor(provider) { it.copy(status = SettingsState.Status.TestPassed) }
         }
     }
 
     fun clear() {
-        launchReporting {
-            val provider = state.value.provider
+        val provider = state.value.provider
+        launchReporting(provider) {
             apiKeyStore.clear(provider)
             updateFor(provider) {
                 SettingsState(provider = provider, status = SettingsState.Status.Cleared)
@@ -117,8 +142,14 @@ class SettingsViewModel(
         }
     }
 
-    /** Runs [body], showing any failure as [SettingsState.Status.Failed]. */
-    private fun launchReporting(body: suspend () -> Unit) {
+    /**
+     * Runs [body], showing any failure as [SettingsState.Status.Failed] unless another provider
+     * than [provider] was chosen while it ran.
+     */
+    private fun launchReporting(
+        provider: Provider,
+        body: suspend () -> Unit,
+    ) {
         viewModelScope.launch {
             val error =
                 try {
@@ -131,7 +162,7 @@ class SettingsViewModel(
                 } catch (e: Exception) {
                     PolishError.Unexpected(e.javaClass.simpleName)
                 }
-            mutableState.update { it.copy(status = SettingsState.Status.Failed(error.message)) }
+            updateFor(provider) { it.copy(status = SettingsState.Status.Failed(error.message)) }
         }
     }
 
@@ -143,29 +174,35 @@ class SettingsViewModel(
         mutableState.update { if (it.provider == provider) change(it) else it }
     }
 
-    /** Shows [provider]'s stored key, or its debug prefill when none is stored. */
+    /**
+     * Shows [provider]'s stored key, or its debug prefill when none is stored. Keeps what the user
+     * typed in the field while the key loaded.
+     */
     private suspend fun loadKey(provider: Provider) {
         val stored = apiKeyStore.read(provider)
         val key = stored ?: debugApiKeys[provider]?.takeIf { it.isNotBlank() }.orEmpty()
-        updateFor(provider) { it.copy(key = key, hasStoredKey = stored != null) }
+        updateFor(provider) {
+            val shown = if (keyEditedFor == provider) it.key else key
+            it.copy(key = shown, hasStoredKey = stored != null)
+        }
     }
 
     /**
-     * Stores the typed key for the selected provider.
+     * Stores [typed], trimmed, as [provider]'s key.
      *
-     * @return The provider the key was stored for, or null when the field is blank.
+     * @return False when the key is blank, so nothing was stored.
      * @throws PolishError.MalformedApiKey when the key can't be sent as an HTTP header.
      */
-    private suspend fun store(): Provider? {
-        val provider = state.value.provider
-        val key = state.value.key.trim()
-        if (key.isEmpty()) return null
+    private suspend fun store(
+        provider: Provider,
+        typed: String,
+    ): Boolean {
+        val key = typed.trim()
+        if (key.isEmpty()) return false
         if (!isWellFormedKey(key)) throw PolishError.MalformedApiKey
         apiKeyStore.write(provider, key)
-        updateFor(provider) {
-            it.copy(key = key, hasStoredKey = true, status = SettingsState.Status.Saved)
-        }
-        return provider
+        updateFor(provider) { it.copy(key = key, hasStoredKey = true) }
+        return true
     }
 
     companion object {
