@@ -7,7 +7,7 @@ struct LearningSummaryCard: View {
 
     var body: some View {
         ResultCard(title: "English learning summary") {
-            if result.wasTranslated || result.learningSummary == nil {
+            if result.wasTranslated {
                 NoteText(
                     "Original was in \(result.detectedLanguage) — the summary is only shown when "
                         + "you write directly in English, since that's when your own English "

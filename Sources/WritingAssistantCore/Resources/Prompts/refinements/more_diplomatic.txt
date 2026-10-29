@@ -1,0 +1,7 @@
+Make the tone more diplomatic and tactful, as if writing to a peer you want to keep on side.
+Turn blunt demands and criticism into suggestions or questions, acknowledge the reader's
+perspective or effort where it fits, and prefer collaborative wording ("we could", "would it help
+to"). Keep every point, request, and decision: soften the delivery, not the substance.
+Keep the same structure and meaning. Do not add facts that are not in the text.
+Never use em dashes.
+Keep any emoji and Markdown formatting (bold, italic, lists, links).

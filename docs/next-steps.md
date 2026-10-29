@@ -144,12 +144,13 @@ added that were not in the original.
 ## 12. Service (polish from anywhere)
 
 - Select text in Notes, then Notes → Services → **Polish with Writing Assistant**. The app comes
-  forward and processes the selection with the current channel.
+  forward with the selection as input and the previous result cleared; nothing runs until you
+  click Polish.
 - Run it while a request is running: a banner explains that a request is already running, and
   the input is kept.
 - Close the main window while Settings is open, then run the service: the main window opens again
-  and processes the text.
-- Quit the app and run the service: the app launches and processes the text.
+  with the text loaded.
+- Quit the app and run the service: the app launches with the text loaded.
 - Assign a shortcut in System Settings → Keyboard → Keyboard Shortcuts → Services → Text, and
   confirm it works.
 
@@ -196,6 +197,20 @@ added that were not in the original.
   default is available" with **Restore Default** and **Keep mine**.
 - **Keep mine** removes the badge and the banner, and they don't come back on relaunch.
 
+## 17. Progressive display, summary setting, tokens
+
+- A long English paragraph: the polished text appears while the summary card is still a
+  placeholder. Copy works then. Edit the text before the summary arrives: the edit survives and the
+  view doesn't scroll again.
+- Spanish text: no summary placeholder after the text appears.
+- Cancel after the text appears: the text stays and History has the entry, without a summary.
+- Settings › General: turn off **Show English learning summary**. English text gets no summary
+  card, nothing is added to the learning log, and the reply is faster. Turn it back on.
+- The toolbar token count rises after a polish and after a refinement, and matches Settings ›
+  General. `~/Library/Application Support/Writing Assistant/usage.json` has the current month.
+- **More diplomatic** and **More assertive** visibly change the tone, both prompts are listed in
+  Settings › Prompts, and the Refine row wraps at the minimum window width.
+
 ---
 
 ## Known gaps
@@ -207,3 +222,8 @@ added that were not in the original.
 - Pasted URLs (`public.url`) still take the typing style.
 - Option-Return doesn't continue a bullet list.
 - Image titles aren't kept.
+- If the model writes `polished_text` before `detected_language`/`was_translated` (the prompt asks
+  for the opposite order), the preview shows "Unknown" until the final result, and a cancel at
+  that point saves "Unknown" to history.
+- The preview's model name is routed again in `AppModel` rather than passed from `PolishService`.
+- Tokens of cancelled, timed-out and retried runs aren't counted (see architecture.md).
