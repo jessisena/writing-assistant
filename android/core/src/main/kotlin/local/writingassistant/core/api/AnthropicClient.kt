@@ -45,7 +45,9 @@ class AnthropicClient(
         model: String,
         timeout: Duration,
     ): String {
-        val body = send(MessagesRequest(model, MAX_TOKENS, listOf(Message(prompt))), timeout)
+        val request =
+            MessagesRequest(model, MAX_TOKENS, listOf(Message(prompt)), thinkingOff(model))
+        val body = send(request, timeout)
         return extractText(body)
     }
 
@@ -139,6 +141,12 @@ class AnthropicClient(
         val model: String,
         @SerialName("max_tokens") val maxTokens: Int,
         val messages: List<Message>,
+        val thinking: Thinking? = null,
+    )
+
+    @Serializable
+    private data class Thinking(
+        val type: String,
     )
 
     @Serializable
@@ -169,7 +177,7 @@ class AnthropicClient(
 
         /**
          * Output cap for polish and refine calls. Inputs are capped at 20k characters, and the
-         * cap also covers adaptive thinking on Sonnet. 16k is the documented non-streaming
+         * cap leaves room for long translations. 16k is the documented non-streaming
          * default and is within both models' output limits (Haiku 4.5: 64k, Sonnet 5.5: 128k).
          */
         private const val MAX_TOKENS = 16_000
@@ -181,7 +189,16 @@ class AnthropicClient(
             Json {
                 ignoreUnknownKeys = true
                 encodeDefaults = true
+                explicitNulls = false
             }
+
+        /**
+         * Turns thinking off, as the Mac app does with `MAX_THINKING_TOKENS=0`: it multiplied
+         * latency several times over. Sonnet 5.5 thinks adaptively unless told otherwise and
+         * rejects `disabled`, so it gets `between_tools`; Haiku 4.5 doesn't think by default.
+         */
+        private fun thinkingOff(model: String): Thinking? =
+            if (model == ModelRouting.SONNET_MODEL) Thinking("between_tools") else null
 
         /**
          * Returns whether [key] can be sent as an HTTP header: printable ASCII only, so no

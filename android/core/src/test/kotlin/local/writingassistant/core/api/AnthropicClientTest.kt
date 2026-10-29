@@ -97,8 +97,12 @@ class AnthropicClientTest {
             assertEquals("2023-06-01", request.headers["anthropic-version"])
             assertTrue(request.headers["content-type"].orEmpty().startsWith("application/json"))
             val body = Json.parseToJsonElement(request.body!!.utf8()).jsonObject
-            assertEquals(setOf("model", "max_tokens", "messages"), body.keys)
+            assertEquals(setOf("model", "max_tokens", "messages", "thinking"), body.keys)
             assertEquals("claude-sonnet-5-5", body["model"]!!.jsonPrimitive.content)
+            assertEquals(
+                "between_tools",
+                body["thinking"]!!.jsonObject["type"]!!.jsonPrimitive.content,
+            )
             assertTrue(body["max_tokens"]!!.jsonPrimitive.int > 0)
             val messages = body["messages"]!!.jsonArray
             assertEquals(1, messages.size)
@@ -373,6 +377,17 @@ class AnthropicClientTest {
             val wasCanceled = withContext(Dispatchers.IO) { canceled.await(5, TimeUnit.SECONDS) }
             assertTrue("OkHttp call was not cancelled", wasCanceled)
             assertTrue(pending.isCancelled)
+        }
+
+    @Test
+    fun `haiku requests send no thinking field`() =
+        runTest {
+            enqueue(200, textResponse("Polished."))
+
+            client().run("Fix this text", ModelRouting.HAIKU_MODEL, 5.seconds)
+
+            val body = Json.parseToJsonElement(takeRequest().body!!.utf8()).jsonObject
+            assertEquals(setOf("model", "max_tokens", "messages"), body.keys)
         }
 
     @Test

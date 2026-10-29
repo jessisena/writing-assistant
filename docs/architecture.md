@@ -442,9 +442,11 @@ property.
 ### API client
 
 `AnthropicClient` sends the assembled prompt and the input, joined as in the Swift app, as one
-user message, with `x-api-key`, `anthropic-version: 2023-06-01` and `max_tokens` 8192. It sends
-no thinking parameter, so extended thinking stays off. Each call has a 120 s timeout and is not
-retried. Cancelling the calling coroutine cancels the HTTP call. The key is read from the key
+user message, with `x-api-key`, `anthropic-version: 2023-06-01` and `max_tokens` 16000. Thinking
+stays off, as on the Mac: Sonnet 5.5 requests send `thinking: {"type": "between_tools"}`
+(Sonnet 5.5 thinks adaptively when the field is left out and rejects `disabled`), and Haiku 4.5
+requests send no thinking field, since Haiku doesn't think unless asked. Each call has a 120 s
+timeout and is not retried. Cancelling the calling coroutine cancels the HTTP call. The key is read from the key
 store on every call and redacted from every error message. Responses map to `PolishError`:
 
 | Response | `PolishError` |
