@@ -13,12 +13,18 @@ struct ClipboardContent: Equatable, Sendable {
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
     static let channelDefaultsKey = "selectedChannel"
+    static let learningSummaryDefaultsKey = "learningSummaryEnabled"
 
     var input = NSAttributedString()
     var output = NSAttributedString()
     /// The channel to write for. Each change is saved, so the next launch starts with it.
     var channel: Channel {
         didSet { defaults.set(channel.rawValue, forKey: Self.channelDefaultsKey) }
+    }
+    /// Whether a polish asks for the English learning summary. Turning it off saves time and
+    /// tokens. Each change is saved, so the next launch keeps it.
+    var includesLearningSummary: Bool {
+        didSet { defaults.set(includesLearningSummary, forKey: Self.learningSummaryDefaultsKey) }
     }
     var isLoading: Bool { requests.isRunning }
     private(set) var result: PolishResult? {
@@ -73,8 +79,9 @@ struct ClipboardContent: Equatable, Sendable {
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
-    ///   - defaults: Where the selected channel is kept between launches. A missing or unknown
-    ///     saved value gives Formal document.
+    ///   - defaults: Where the selected channel and the learning summary setting are kept
+    ///     between launches. A missing or unknown saved channel gives Formal document; a missing
+    ///     summary setting turns the summary on.
     init(
         polisher: any Polishing,
         learningLog: LearningLog = .standard(),
@@ -89,6 +96,8 @@ struct ClipboardContent: Equatable, Sendable {
         channel =
             defaults.string(forKey: Self.channelDefaultsKey).flatMap(Channel.init(rawValue:))
             ?? .formal
+        includesLearningSummary =
+            defaults.object(forKey: Self.learningSummaryDefaultsKey) as? Bool ?? true
         self.learningLog = learningLog
         self.historyStore = historyStore
         self.writeToPasteboard = writeToPasteboard
@@ -185,6 +194,7 @@ struct ClipboardContent: Equatable, Sendable {
     private struct PolishRequest {
         let text: String
         let channel: Channel
+        let includesLearningSummary: Bool
         let generation: Int
     }
 
@@ -200,13 +210,17 @@ struct ClipboardContent: Equatable, Sendable {
         leaveCurrentHistoryEntry()
         result = nil
         output = NSAttributedString()
-        return PolishRequest(text: text, channel: channel, generation: generation)
+        return PolishRequest(
+            text: text, channel: channel, includesLearningSummary: includesLearningSummary,
+            generation: generation)
     }
 
     private func polish(_ request: PolishRequest) async {
         let polisher = polisher
         let polished = await finishRequest(request.generation) { () async throws(PolishError) in
-            try await polisher.polish(text: request.text, channel: request.channel)
+            try await polisher.polish(
+                text: request.text, channel: request.channel,
+                includeLearningSummary: request.includesLearningSummary, onPreview: { _ in })
         }
         guard let polished else { return }
         result = polished

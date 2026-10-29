@@ -21,12 +21,15 @@ struct ResultsView: View {
         ZStack(alignment: .top) {
             switch phase {
             case .loading:
-                SkeletonCards().transition(.opacity)
+                SkeletonCards(includesSummary: model.includesLearningSummary)
+                    .transition(.opacity)
             case .result:
                 if let result = model.result {
                     VStack(spacing: 16) {
                         PolishedCard(model: model, result: result)
-                        LearningSummaryCard(result: result)
+                        if showsSummary(of: result) {
+                            LearningSummaryCard(result: result)
+                        }
                     }
                     .transition(
                         .asymmetric(
@@ -34,35 +37,59 @@ struct ResultsView: View {
                     )
                 }
             case .idle:
-                IdleHint()
+                IdleHint(includesSummary: model.includesLearningSummary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phase)
     }
+
+    /// With the summary setting off, the card is left out, unless the result has a summary
+    /// anyway (a history entry from before the setting changed).
+    private func showsSummary(of result: PolishResult) -> Bool {
+        model.includesLearningSummary || result.learningSummary != nil
+    }
 }
 
 private struct IdleHint: View {
+    let includesSummary: Bool
+
     var body: some View {
-        Text("Your polished text and a short English tip will appear here.")
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Text(
+            includesSummary
+                ? "Your polished text and a short English tip will appear here."
+                : "Your polished text will appear here."
+        )
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SkeletonCards: View {
+    let includesSummary: Bool
+
     var body: some View {
         VStack(spacing: 16) {
             ResultCard(title: "Polished text") {
                 Text(String(repeating: "Polished text is on its way. ", count: 8))
             }
-            ResultCard(title: "English learning summary") {
-                Text(String(repeating: "The summary is on its way. ", count: 5))
+            .redacted(reason: .placeholder)
+            if includesSummary {
+                SummarySkeletonCard()
             }
         }
-        .redacted(reason: .placeholder)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Working on your text")
+    }
+}
+
+/// A redacted learning summary card, shown while the summary is on its way.
+private struct SummarySkeletonCard: View {
+    var body: some View {
+        ResultCard(title: "English learning summary") {
+            Text(String(repeating: "The summary is on its way. ", count: 5))
+        }
+        .redacted(reason: .placeholder)
     }
 }
 
