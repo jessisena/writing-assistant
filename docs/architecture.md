@@ -351,27 +351,33 @@ Defined as constants in `Sources/WritingAssistantCore/ModelRouting.swift`:
 - `haikuModel = "claude-haiku-4-5-20251001"`
 - `sonnetModel = "claude-sonnet-5-5"`
 
-The Android app has the same values as `HAIKU_MODEL` and `SONNET_MODEL` in
-`android/core/src/main/kotlin/local/writingassistant/core/ModelRouting.kt`. Update both files
-together when newer models are available.
+The Android app has the same values as `Provider.ANTHROPIC.models` in
+`android/core/src/main/kotlin/local/writingassistant/core/Contracts.kt`. Update both files
+together when newer models are available. Groq's models live next to them in `Provider.GROQ`
+(see [Providers](#providers)).
 
 ---
 
 ## Android
 
 `android/` is a Gradle project (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) with
-two modules. It ports the Core logic to Kotlin and replaces the `claude` CLI with one call to the
-Anthropic Messages API, authenticated with the user's own API key. The CLI runs on subscription
-OAuth as a local subprocess, which Android can't do.
+two modules. It ports the Core logic to Kotlin and replaces the `claude` CLI with one HTTPS call
+to an LLM provider, authenticated with the user's own API key: the Anthropic Messages API by
+default, or Groq's OpenAI-compatible API. The CLI runs on subscription OAuth as a local
+subprocess, which Android can't do.
 
 ### Change logic in both apps
 
 The model routing heuristic, JSON extraction, the polish and refine pipeline and the
 `learning_summary` invariant (always null when `was_translated` is truthy) exist twice: in Swift
 under `Sources/WritingAssistantCore/` and in Kotlin under `android/core/`. The Kotlin tests are
-ports of the Swift tests. A change to any of these, or to the model ID constants, has to be made
+ports of the Swift tests. A change to any of these, or to the Anthropic model IDs, has to be made
 in both languages together with its tests in both. Each Kotlin file names the Swift file it
 mirrors in its doc comment.
+
+Routing differs in one way: Swift's `ModelRouting.pickModel(for:)` returns a Claude model ID,
+while Kotlin's `ModelRouting.pickTier(text)` returns a `ModelTier` (`SMALL` or `LARGE`) that each
+provider maps to its own model. The heuristic is the same, and a change to it still goes in both.
 
 Prompts are not duplicated (see below), so prompt edits need no Android change.
 
@@ -385,28 +391,32 @@ android/
   core/                                pure Kotlin/JVM, no Android dependencies
     src/main/kotlin/local/writingassistant/core/
       Contracts.kt                     Channel, Refinement, PolishResult, LearningSummary,
-                                       PolishError, PromptFile, and the ClaudeClient /
-                                       PromptReading / Polishing interfaces
-      ModelRouting.kt                  pickModel(text) + model ID constants
+                                       PolishError, PromptFile, Provider, Models, ModelTier,
+                                       Backend, and the LlmClient / PromptReading /
+                                       Polishing interfaces
+      ModelRouting.kt                  pickTier(text) → ModelTier
       JsonExtraction.kt                extract the JSON object from model output
       PromptAssembler.kt               polish.txt + channel file; DirectoryPromptReader
       PolishService.kt                 Polishing: validate, route, assemble, call, parse,
                                        invariant; polish and refine
-      api/AnthropicClient.kt           ClaudeClient backed by POST /v1/messages (OkHttp)
+      api/HttpTransport.kt             shared OkHttp call with cancellation, timeout, key
+                                       redaction, JSON config, isWellFormedKey
+      api/AnthropicClient.kt           LlmClient backed by POST /v1/messages
+      api/GroqClient.kt                LlmClient backed by POST /openai/v1/chat/completions
     src/test/                          JUnit ports of the Swift Core tests, MockWebServer
-                                       tests for AnthropicClient
-    src/testFixtures/                  FakeClaudeClient, shared with :app tests
-    src/liveTest/                      LivePolishTest against the real API
+                                       tests for both clients
+    src/testFixtures/                  FakeLlmClient, shared with :app tests
+    src/liveTest/                      LivePolishTest against the real APIs
   app/                                 Android app, Jetpack Compose, minSdk 31
     src/main/AndroidManifest.xml       MainActivity, ProcessTextActivity, ShareActivity
     src/main/kotlin/local/writingassistant/app/
       WritingAssistantApp.kt           Application, owns the AppGraph
-      AppGraph.kt                      wires PolishService, AnthropicClient, key store, settings
+      AppGraph.kt                      wires PolishService, both clients, key store, settings
       MainActivity.kt                  full-screen composer and Settings
       data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
       data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
-      data/DataStoreAppSettings.kt     last-used channel, in Preferences DataStore
+      data/DataStoreAppSettings.kt     last-used channel and provider, in Preferences DataStore
       data/AssetPromptReader.kt        PromptReading from the bundled assets
       intents/                         ProcessTextActivity, ShareActivity, SheetHost (the
                                        bottom sheet both activities show)
@@ -414,8 +424,8 @@ android/
                                        learning summary, Copy and Replace
       ui/ComposerSession.kt            composer state and the one in-flight request, app-scoped
       ui/ComposerViewModel.kt          thin wrapper exposing the session to a screen
-      ui/SettingsScreen.kt             API key entry with Save, Test and Clear
-      ui/SettingsViewModel.kt          reads and writes the key, runs the test call
+      ui/SettingsScreen.kt             provider picker, API key entry with Save, Test and Clear
+      ui/SettingsViewModel.kt          reads and writes the provider and its key, runs the test
       ui/Markdown.kt, InlineParser.kt  Markdown subset → AnnotatedString, HTML and plain text
       ui/Clipboard.kt                  ClipData.newHtmlText with a plain-text fallback
       ui/Theme.kt                      Material 3 colour schemes from the Writing Desk palette
@@ -439,15 +449,43 @@ on each request, and there is no prompt editor or user copy. `:core` tests and `
 the same directory through `DirectoryPromptReader`, passed in as the `prompts.dir` system
 property.
 
-### API client
+Every provider gets the same prompts, so they must keep producing a single valid JSON object on
+each of them. Groq's JSON mode also rejects a prompt that doesn't contain the word "JSON";
+`polish.txt` contains it, and refine prompts include `polish.txt`.
+
+### Providers
+
+`Provider` (`Contracts.kt`) lists the services the user can pick: `ANTHROPIC` and `GROQ`. Each has
+a stable `id` (used in storage keys), a `displayName`, a `keyUrl` for the Settings link, and a
+`Models(small, large)` pair:
+
+| Provider | `small` | `large` |
+|---|---|---|
+| Anthropic | `claude-haiku-4-5-20251001` | `claude-sonnet-5-5` |
+| Groq | `openai/gpt-oss-20b` | `openai/gpt-oss-120b` |
+
+`PolishService` takes a `suspend () -> Backend`, where `Backend` is an `LlmClient` plus its
+`Models`. `polish`, `refine` and `checkReady` resolve the backend once per call, so a provider
+change in Settings applies to the next request, and pick
+`models.forTier(ModelRouting.pickTier(input))`. `modelUsed` reports that model ID. A secondary
+constructor, `PolishService(client, prompts)`, always uses Anthropic's models; tests use it.
+
+`AnthropicClient` and `GroqClient` share `api/HttpTransport.kt`: the OkHttp call wrapper with
+the per-call timeout and cancellation, timeout and network error mapping, the key `Redactor`,
+the JSON configuration, and `isWellFormedKey`.
+
+### API clients
 
 `AnthropicClient` sends the assembled prompt and the input, joined as in the Swift app, as one
 user message, with `x-api-key`, `anthropic-version: 2023-06-01` and `max_tokens` 16000. Thinking
 stays off, as on the Mac: Sonnet 5.5 requests send `thinking: {"type": "between_tools"}`
 (Sonnet 5.5 thinks adaptively when the field is left out and rejects `disabled`), and Haiku 4.5
-requests send no thinking field, since Haiku doesn't think unless asked. Each call has a 120 s
-timeout and is not retried. Cancelling the calling coroutine cancels the HTTP call. The key is read from the key
-store on every call and redacted from every error message. Responses map to `PolishError`:
+requests send no thinking field, since Haiku doesn't think unless asked.
+
+Each call, on either client, has a 120 s timeout and is not retried. Cancelling the calling
+coroutine cancels the HTTP call. Each client
+reads its provider's key from the key store on every call and redacts it from every error
+message. Anthropic responses map to `PolishError`:
 
 | Response | `PolishError` |
 |---|---|
@@ -461,25 +499,59 @@ store on every call and redacted from every error message. Responses map to `Pol
 | Timeout | `Timeout` |
 | Other network failure | `Network` |
 | `stop_reason` `max_tokens` | `OutputTooLong`: "The reply was cut off because the text is too long. Try a shorter selection." |
-| `stop_reason` `refusal` | `Refused`: "Claude declined to process this text. Try rewording it." |
+| `stop_reason` `refusal` | `Refused`: "The AI service declined to process this text. Try rewording it." |
 | No text content block, or unparsable body | `BadFormat` |
 | Any other exception in the composer or Settings | `Unexpected`: "Something went wrong (exception class). Please try again." |
 
 `checkAvailable()`, used by the Settings Test button, sends "Hi" to Haiku with `max_tokens` 1.
 
+`GroqClient` sends the same single user message to `POST /openai/v1/chat/completions` with
+`Authorization: Bearer <key>` and:
+
+- `response_format: {"type": "json_object"}` on every polish and refine call (JSON mode).
+- `reasoning_effort: "low"` and `include_reasoning: false`, because gpt-oss always reasons: `low`
+  is the lowest effort Groq allows, and the reasoning stays out of the reply.
+- `max_completion_tokens` 2,048. The free tier allows 8K tokens per minute and counts this cap
+  against that budget before the reply starts, so a 16K cap like Anthropic's would fail every
+  request with 413. 2,048 leaves room for a polish and a refine in the same minute.
+
+Groq responses map to `PolishError` (key, timeout and network errors as for Anthropic):
+
+| Response | `PolishError` |
+|---|---|
+| 401, 403 | `InvalidApiKey` |
+| 413 (the request is over the provider's token limits) | A too-long-for-the-provider error |
+| 429 (includes going over a tokens-per-minute limit), 503 | `Overloaded` |
+| 400 with error code `json_validate_failed` | `BadFormat` |
+| Other non-2xx | `ApiFailed` (status and the API's message) |
+| `finish_reason` `length` | `OutputTooLong` |
+| No `choices`, no message content, or unparsable body | `BadFormat` |
+
+Groq has no credit or refusal case, so `NoCredits` and `Refused` only come from Anthropic.
+`checkAvailable()` sends "Hi" to the small model with `max_completion_tokens` 1 and no JSON mode.
+
 ### API key and settings
 
-`KeystoreApiKeyStore` encrypts the key with an AES-256-GCM key held in the Android Keystore and
-stores the IV and ciphertext, Base64-encoded, in a `secrets` Preferences DataStore. A value that
+`ApiKeyStore` is keyed by provider (`read`, `write` and `clear` take a `Provider`).
+`KeystoreApiKeyStore` encrypts each key with one AES-256-GCM key held in the Android Keystore and
+stores the IV and ciphertext, Base64-encoded, in a `secrets` Preferences DataStore under
+`<provider id>_api_key`, so the Anthropic key keeps the `anthropic_api_key` name it had before
+Groq was added. A value that
 can't be decrypted (for example after the Keystore key was invalidated) is cleared and read as no
 key. `allowBackup` is off and the data extraction rules exclude everything, since the ciphertext
 is useless without the device's Keystore key.
 
-Debug builds get `BuildConfig.DEBUG_API_KEY` from `ANTHROPIC_API_KEY` in `android/local.properties`.
-`SettingsViewModel` uses it only to prefill the field when nothing is stored; it is stored once
-the user saves or tests it. Release builds set `DEBUG_API_KEY` to an empty string.
+Debug builds get `BuildConfig.DEBUG_API_KEY` from `ANTHROPIC_API_KEY` and
+`BuildConfig.DEBUG_GROQ_API_KEY` from `GROQ_API_KEY` in `android/local.properties`.
+`SettingsViewModel` uses them only to prefill the field when the selected provider has nothing
+stored; a key is stored once the user saves or tests it. Release builds set both to an empty
+string.
 
-`DataStoreAppSettings` keeps the last-used channel, which the composer preselects.
+`DataStoreAppSettings` keeps the last-used channel, which the composer preselects, and the
+selected provider (Anthropic until the user picks another). `AppGraph` builds both clients once
+and gives `PolishService` a backend lambda that reads `settings.provider()` on every request. The
+Settings screen's Anthropic | Groq segmented buttons save the choice right away and load that
+provider's key; Save, Test and Clear act on the selected provider.
 
 ### Composer
 
@@ -489,8 +561,9 @@ coroutine scope owned by `AppGraph`, so the full-screen app and the sheets share
 cancel the request: opening the app (or selecting the same text again) shows the result. Cancel
 cancels the job, and a generation number keeps a cancelled or replaced request from overwriting
 newer state, as `RequestRunner.swift` does. Opening a sheet with different text cancels any
-request and starts over, so Replace never returns a result for other text. A failed request can be retried from the error banner. Polish is
-disabled while the key store holds no key, and `MainActivity` opens Settings once in that case.
+request and starts over, so Replace never returns a result for other text. A failed request can
+be retried from the error banner. Polish is disabled while the key store holds no key for the
+selected provider, and `MainActivity` opens Settings once in that case.
 
 ### System integration
 
@@ -510,6 +583,6 @@ blocked while the sheet is open.
 Kotlin compiles with warnings as errors, and Android lint runs with `warningsAsErrors` on both
 modules. ktlint runs on every module. The CI `android` job in `.github/workflows/ci.yml` runs
 `./gradlew :core:test :app:testDebugUnitTest lint ktlintCheck :app:assembleDebug` on JDK 21.
-`:core:liveTest` is a separate test source set that calls the real API; it is skipped when
-`ANTHROPIC_API_KEY` is missing from both the environment and `local.properties`, so CI never needs
-the key.
+`:core:liveTest` is a separate test source set that calls the real APIs. Each provider's cases
+run only when its key (`ANTHROPIC_API_KEY`, `GROQ_API_KEY`) is set in the environment or
+`local.properties`, and the task is skipped when neither is, so CI never needs a key.
