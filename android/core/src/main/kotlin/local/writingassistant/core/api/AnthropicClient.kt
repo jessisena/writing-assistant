@@ -2,13 +2,11 @@ package local.writingassistant.core.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import local.writingassistant.core.LlmClient
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Provider
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -57,7 +55,7 @@ class AnthropicClient(
                 .url(baseUrl.newBuilder().addPathSegments("v1/messages").build())
                 .header("x-api-key", key)
                 .header("anthropic-version", ANTHROPIC_VERSION)
-                .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
+                .post(apiJson.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         val redactor = Redactor(key)
         val reply = httpClient.execute(request, timeout, redactor)
@@ -116,16 +114,8 @@ class AnthropicClient(
          * default and is within both models' output limits (Haiku 4.5: 64k, Sonnet 5.5: 128k).
          */
         private const val MAX_TOKENS = 16_000
-        private const val EXCERPT_LENGTH = 200
         private val CHECK_TIMEOUT = 20.seconds
         private val OVERLOADED_STATUSES = setOf(429, 503, 529)
-        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
-        private val json =
-            Json {
-                ignoreUnknownKeys = true
-                encodeDefaults = true
-                explicitNulls = false
-            }
 
         /**
          * Turns thinking off, as the Mac app does with `MAX_THINKING_TOKENS=0`: it multiplied
@@ -138,7 +128,7 @@ class AnthropicClient(
         private fun extractText(body: String): String {
             val response =
                 try {
-                    json.decodeFromString<MessagesResponse>(body)
+                    apiJson.decodeFromString<MessagesResponse>(body)
                 } catch (e: IllegalArgumentException) {
                     throw PolishError.BadFormat("Unparseable response: ${e.message}")
                 }
@@ -177,7 +167,7 @@ class AnthropicClient(
                 else -> {
                     PolishError.ApiFailed(
                         reply.status,
-                        redactor.clean(message ?: excerpt(reply.body)),
+                        redactor.clean(message ?: bodyExcerpt(reply.body)),
                     )
                 }
             }
@@ -185,14 +175,9 @@ class AnthropicClient(
 
         private fun errorMessage(body: String): String? =
             try {
-                json.decodeFromString<ErrorEnvelope>(body).error.message
+                apiJson.decodeFromString<ErrorEnvelope>(body).error.message
             } catch (_: IllegalArgumentException) {
                 null
-            }
-
-        private fun excerpt(body: String): String =
-            body.trim().take(EXCERPT_LENGTH).ifEmpty {
-                "Empty response body"
             }
     }
 }

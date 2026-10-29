@@ -1,9 +1,11 @@
 package local.writingassistant.core.api
 
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.Json
 import local.writingassistant.core.PolishError
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -23,6 +25,24 @@ import kotlin.time.toJavaDuration
  * newlines, zero-width characters or smart quotes picked up while pasting.
  */
 fun isWellFormedKey(key: String): Boolean = key.isNotEmpty() && key.all { it in '!'..'~' }
+
+internal val JSON_MEDIA_TYPE = "application/json".toMediaType()
+
+/** Encodes requests without null fields and decodes replies that carry extra fields. */
+internal val apiJson =
+    Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        explicitNulls = false
+    }
+
+private const val EXCERPT_LENGTH = 200
+
+/** The start of a non-JSON error [body], for error details. */
+internal fun bodyExcerpt(body: String): String =
+    body.trim().take(EXCERPT_LENGTH).ifEmpty {
+        "Empty response body"
+    }
 
 internal class HttpReply(
     val status: Int,
