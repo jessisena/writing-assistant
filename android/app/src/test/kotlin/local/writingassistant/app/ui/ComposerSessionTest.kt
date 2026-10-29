@@ -17,15 +17,25 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import local.writingassistant.app.data.AppSettings
+import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.app.ui.ComposerEvent.Cancel
 import local.writingassistant.app.ui.ComposerEvent.ChannelSelected
 import local.writingassistant.app.ui.ComposerEvent.DismissError
 import local.writingassistant.app.ui.ComposerEvent.Open
+import local.writingassistant.app.ui.ComposerEvent.OutputChanged
 import local.writingassistant.app.ui.ComposerEvent.Polish
+import local.writingassistant.app.ui.ComposerEvent.Refine
+import local.writingassistant.app.ui.ComposerEvent.RestoreHistory
+import local.writingassistant.app.ui.ComposerEvent.SaveOutput
 import local.writingassistant.app.ui.ComposerState.Phase
 import local.writingassistant.core.Channel
+import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.HistoryStoreException
+import local.writingassistant.core.LearningSummary
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Provider
+import local.writingassistant.core.Refinement
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,8 +68,36 @@ class ComposerSessionTest {
 
     private val sessionScope = CoroutineScope(SupervisorJob() + dispatcher)
 
-    private fun session() =
-        ComposerSession(polisher, FakeAppSettings(), FakeApiKeyStore(), testHistory(), sessionScope)
+    private fun session(
+        settings: AppSettings = FakeAppSettings(),
+        history: HistoryRepository = testHistory(),
+    ) = ComposerSession(polisher, settings, FakeApiKeyStore(), history, sessionScope)
+
+    private val savedEntry =
+        HistoryEntry(
+            id = "saved",
+            epochSeconds = 1,
+            channel = Channel.EMAIL,
+            input = "old input",
+            output = "old output",
+            learningSummary = LearningSummary(emptyList(), "insight", emptyList()),
+            detectedLanguage = "pt",
+            wasTranslated = true,
+            modelUsed = "model",
+        )
+
+    private fun HistoryRepository.outputs() = entries.value.map { it.output }
+
+    /** Opens [text] and polishes it to the end. */
+    private fun TestScope.polished(
+        session: ComposerSession,
+        text: String,
+    ) {
+        if (!gate.isCompleted) gate.complete(Unit)
+        session.onEvent(Open(text))
+        session.onEvent(Polish)
+        advanceUntilIdle()
+    }
 
     /** A view model owned by [store], the way an activity owns it. */
     private fun viewModelIn(
@@ -221,5 +259,199 @@ class ComposerSessionTest {
             session.onEvent(ComposerEvent.RefreshApiKey)
             advanceUntilIdle()
             assertFalse(session.state.value.needsApiKey)
+        }
+
+    @Test
+    fun `disabled channels are hidden and a hidden selection moves to the first shown`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val session = session(settings)
+            session.onEvent(ChannelSelected(Channel.FORMAL))
+            settings.disabledChannels.value = setOf(Channel.SLACK, Channel.FORMAL)
+            advanceUntilIdle()
+
+            val state = session.state.value
+            assertEquals(Channel.entries - Channel.SLACK - Channel.FORMAL, state.enabledChannels)
+            assertEquals(Channel.SLACK_INFORMAL, state.channel)
+            assertEquals(Channel.FORMAL, settings.channel)
+        }
+
+    @Test
+    fun `turning every channel off still shows them all`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val session = session(settings)
+            settings.disabledChannels.value = Channel.entries.toSet()
+            advanceUntilIdle()
+
+            assertEquals(Channel.entries, session.state.value.enabledChannels)
+            assertEquals(Channel.SLACK, session.state.value.channel)
+        }
+
+    @Test
+    fun `a restored last channel that is now hidden falls back`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings(channel = Channel.EMAIL)
+            settings.disabledChannels.value = setOf(Channel.SLACK, Channel.EMAIL)
+            val session = session(settings)
+            advanceUntilIdle()
+
+            assertEquals(Channel.SLACK_INFORMAL, session.state.value.channel)
+            assertEquals(Channel.EMAIL, settings.channel)
+        }
+
+    @Test
+    fun `the learning summary setting is shown and sent with each polish`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            settings.learningSummaryEnabled.value = false
+            val session = session(settings)
+            advanceUntilIdle()
+            assertFalse(session.state.value.showLearningSummary)
+
+            polished(session, "hey")
+            settings.learningSummaryEnabled.value = true
+            advanceUntilIdle()
+            session.onEvent(Polish)
+            advanceUntilIdle()
+
+            assertTrue(session.state.value.showLearningSummary)
+            assertEquals(listOf(false, true), polisher.learningSummaryRequests)
+        }
+
+    @Test
+    fun `a successful polish is recorded in the history`() =
+        runTest(dispatcher) {
+            val history = testHistory()
+            val session = session(history = history)
+            session.onEvent(ChannelSelected(Channel.EMAIL))
+
+            polished(session, "hey")
+
+            val entry = history.entries.value.single()
+            assertEquals("hey", entry.input)
+            assertEquals("polished: hey", entry.output)
+            assertEquals(Channel.EMAIL, entry.channel)
+        }
+
+    @Test
+    fun `a refinement updates the current entry`() =
+        runTest(dispatcher) {
+            val history = testHistory()
+            val session = session(history = history)
+            polished(session, "hey")
+
+            session.onEvent(Refine(Refinement.SHORTER))
+            advanceUntilIdle()
+
+            assertEquals(listOf("polished: hey (shorter)"), history.outputs())
+        }
+
+    @Test
+    fun `saving writes the edited output and ignores blank output`() =
+        runTest(dispatcher) {
+            val history = testHistory()
+            val session = session(history = history)
+            polished(session, "hey")
+
+            session.onEvent(OutputChanged("edited"))
+            session.onEvent(SaveOutput)
+            advanceUntilIdle()
+            assertEquals(listOf("edited"), history.outputs())
+
+            session.onEvent(OutputChanged("  "))
+            session.onEvent(SaveOutput)
+            advanceUntilIdle()
+            assertEquals(listOf("edited"), history.outputs())
+        }
+
+    @Test
+    fun `edited output is saved before a new polish and before other text opens`() =
+        runTest(dispatcher) {
+            val history = testHistory()
+            val session = session(history = history)
+            polished(session, "one")
+            session.onEvent(OutputChanged("one edited"))
+            session.onEvent(Polish)
+            advanceUntilIdle()
+            session.onEvent(OutputChanged("two edited"))
+
+            session.onEvent(Open("three"))
+            advanceUntilIdle()
+
+            assertEquals(listOf("two edited", "one edited"), history.outputs())
+        }
+
+    @Test
+    fun `restoring an entry loads its texts, channel and result`() =
+        runTest(dispatcher) {
+            val history = testHistory(saved = listOf(savedEntry))
+            val session = session(history = history)
+            polished(session, "hey")
+            session.onEvent(OutputChanged("hey edited"))
+            polisher.onPolish = { throw PolishError.Overloaded }
+            session.onEvent(Polish)
+            advanceUntilIdle()
+
+            session.onEvent(RestoreHistory("saved"))
+            advanceUntilIdle()
+
+            val state = session.state.value
+            assertEquals("old input", state.input)
+            assertEquals("old output", state.output)
+            assertEquals(Channel.EMAIL, state.channel)
+            val summary = savedEntry.learningSummary
+            assertEquals(PolishResult("old output", summary, "pt", true, "model"), state.result)
+            assertNull(state.error)
+            assertEquals("hey edited", history.outputs().first())
+            session.onEvent(ComposerEvent.Retry)
+            advanceUntilIdle()
+            assertEquals(2, polisher.calls.size)
+        }
+
+    @Test
+    fun `edits after a restore go to the restored entry`() =
+        runTest(dispatcher) {
+            val history = testHistory(saved = listOf(savedEntry))
+            val session = session(history = history)
+            advanceUntilIdle()
+
+            session.onEvent(RestoreHistory("saved"))
+            session.onEvent(OutputChanged("new output"))
+            session.onEvent(SaveOutput)
+            advanceUntilIdle()
+
+            assertEquals(listOf(savedEntry.copy(output = "new output")), history.entries.value)
+        }
+
+    @Test
+    fun `restoring is ignored while a request runs`() =
+        runTest(dispatcher) {
+            val session = session(history = testHistory(saved = listOf(savedEntry)))
+            session.onEvent(Open("hey"))
+            session.onEvent(Polish)
+            advanceUntilIdle()
+
+            session.onEvent(RestoreHistory("saved"))
+
+            assertEquals("hey", session.state.value.input)
+            assertEquals(Phase.Working(null), session.state.value.phase)
+        }
+
+    @Test
+    fun `a history save failure is shown but the result is kept`() =
+        runTest(dispatcher) {
+            val history = testHistory(save = { throw HistoryStoreException("disk full") })
+            val session = session(history = history)
+
+            polished(session, "hey")
+
+            val state = session.state.value
+            assertEquals("polished: hey", state.output)
+            assertEquals(PolishError.Unexpected("HistoryStoreException"), state.error)
+            assertEquals(listOf("hey"), history.entries.value.map { it.input })
+            session.onEvent(ComposerEvent.Retry)
+            advanceUntilIdle()
+            assertEquals(1, polisher.calls.size)
         }
 }

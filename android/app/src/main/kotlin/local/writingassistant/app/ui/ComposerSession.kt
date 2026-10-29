@@ -12,7 +12,9 @@ import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.core.Channel
+import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Refinement
 
@@ -22,6 +24,11 @@ import local.writingassistant.core.Refinement
  * the next screen that opens. One request runs at a time; [ComposerEvent.Cancel] stops it,
  * and a generation number makes sure a cancelled or replaced request can't overwrite newer
  * state.
+ *
+ * Follows the enabled channels and the learning-summary switch in [settings]. Each successful
+ * polish is recorded in [history] and becomes the current entry, whose output is kept up to
+ * date by refinements, [ComposerEvent.SaveOutput], and before the screen moves on to other
+ * text. History failures go to the error banner and never hide a result.
  */
 class ComposerSession(
     private val polisher: Polishing,
@@ -38,11 +45,21 @@ class ComposerSession(
     private var lastFailed: ComposerEvent? = null
     private var channelChosen = false
 
+    /** The history entry the output on screen belongs to; null when it belongs to none. */
+    private var currentHistoryId: String? = null
+
     init {
+        launchReporting { history.load() }
         launchReporting {
             val restored = settings.lastChannel()
             if (restored != null && !channelChosen) {
-                mutableState.update { it.copy(channel = restored) }
+                mutableState.update { it.copy(channel = restored).withEnabledChannel() }
+            }
+        }
+        launchReporting { settings.disabledChannels.collect(::applyDisabledChannels) }
+        launchReporting {
+            settings.learningSummaryEnabled.collect { enabled ->
+                mutableState.update { it.copy(showLearningSummary = enabled) }
             }
         }
     }
@@ -59,17 +76,61 @@ class ComposerSession(
             ComposerEvent.DismissError -> mutableState.update { it.copy(error = null) }
             ComposerEvent.Retry -> lastFailed?.let(::onEvent)
             ComposerEvent.RefreshApiKey -> refreshApiKey()
-            ComposerEvent.SaveOutput -> TODO()
-            is ComposerEvent.RestoreHistory -> TODO()
+            ComposerEvent.SaveOutput -> saveOutput()
+            is ComposerEvent.RestoreHistory -> restore(event.id)
         }
     }
 
     private fun open(text: String) {
         if (text == state.value.input) return
         cancel()
+        saveOutput()
+        currentHistoryId = null
         lastFailed = null
         mutableState.update {
-            ComposerState(input = text, channel = it.channel, needsApiKey = it.needsApiKey)
+            ComposerState(
+                input = text,
+                channel = it.channel,
+                needsApiKey = it.needsApiKey,
+                enabledChannels = it.enabledChannels,
+                showLearningSummary = it.showLearningSummary,
+            )
+        }
+    }
+
+    /** Shows every channel not in [disabled] (all of them if that leaves none). */
+    private fun applyDisabledChannels(disabled: Set<Channel>) {
+        val enabled = Channel.entries.filterNot { it in disabled }.ifEmpty { Channel.entries }
+        mutableState.update { it.copy(enabledChannels = enabled).withEnabledChannel() }
+    }
+
+    /** Selects the first enabled channel when the selected one is hidden; not persisted. */
+    private fun ComposerState.withEnabledChannel(): ComposerState =
+        if (channel in enabledChannels) this else copy(channel = enabledChannels.first())
+
+    /** Writes the output on screen into the current history entry, if it changed. */
+    private fun saveOutput() {
+        val id = currentHistoryId ?: return
+        val output = state.value.output
+        launchReporting { history.updateOutput(id, output) }
+    }
+
+    private fun restore(id: String) {
+        if (state.value.isWorking) return
+        saveOutput()
+        val entry = history.entries.value.firstOrNull { it.id == id } ?: return
+        currentHistoryId = entry.id
+        channelChosen = true
+        lastFailed = null
+        mutableState.update {
+            it
+                .copy(
+                    input = entry.input,
+                    output = entry.output,
+                    channel = entry.channel,
+                    result = entry.toResult(),
+                    error = null,
+                ).withEnabledChannel()
         }
     }
 
@@ -103,20 +164,59 @@ class ComposerSession(
     private fun polish() {
         val current = state.value
         if (!current.canPolish) return
+        saveOutput()
         start(ComposerEvent.Polish, null) {
-            val result = polisher.polish(current.input, current.channel)
+            val result =
+                polisher.polish(current.input, current.channel, current.showLearningSummary)
+            val (entryId, historyError) = record(result, current.input, current.channel)
             return@start { state: ComposerState ->
-                state.copy(result = result, output = result.polishedText)
+                currentHistoryId = entryId
+                state.copy(result = result, output = result.polishedText, error = historyError)
             }
         }
     }
 
+    /**
+     * Records [result] and returns the new entry's id with the failure to save it, if any.
+     * A failed save still adds the entry to the history in memory, as its newest entry.
+     */
+    private suspend fun record(
+        result: PolishResult,
+        input: String,
+        channel: Channel,
+    ): Pair<String?, PolishError?> {
+        var entryId: String? = null
+        val error = historyFailure { entryId = history.record(result, input, channel).id }
+        if (error != null) {
+            entryId =
+                history.entries.value
+                    .firstOrNull()
+                    ?.id
+        }
+        return entryId to error
+    }
+
+    /** Runs [body] and returns its failure as a [PolishError] instead of throwing it. */
+    private suspend fun historyFailure(body: suspend () -> Unit): PolishError? =
+        try {
+            body()
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            asPolishError(e)
+        }
+
     private fun refine(refinement: Refinement) {
         val current = state.value
         if (!current.canUseOutput) return
+        val entryId = currentHistoryId
         start(ComposerEvent.Refine(refinement), refinement) {
             val refined = polisher.refine(current.output, current.channel, refinement)
-            return@start { state: ComposerState -> state.copy(output = refined) }
+            val historyError = entryId?.let { historyFailure { history.updateOutput(it, refined) } }
+            return@start { state: ComposerState ->
+                state.copy(output = refined, error = historyError)
+            }
         }
     }
 
@@ -169,3 +269,12 @@ class ComposerSession(
         mutableState.update { it.copy(phase = ComposerState.Phase.Idle) }
     }
 }
+
+private fun HistoryEntry.toResult() =
+    PolishResult(
+        polishedText = output,
+        learningSummary = learningSummary,
+        detectedLanguage = detectedLanguage,
+        wasTranslated = wasTranslated,
+        modelUsed = modelUsed,
+    )
