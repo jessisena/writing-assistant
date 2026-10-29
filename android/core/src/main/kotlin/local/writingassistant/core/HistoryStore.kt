@@ -2,12 +2,20 @@ package local.writingassistant.core
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
 /**
  * One processed request, as kept in the history. Mirrors `HistoryEntry` in `HistoryStore.swift`.
@@ -55,8 +63,12 @@ class HistoryStore(
     /** The most entries [save] keeps; must be positive. */
     val limit: Int = DEFAULT_LIMIT,
 ) {
+    init {
+        require(limit > 0) { "HistoryStore limit must be positive, got $limit" }
+    }
+
     /** The damaged file is moved here, next to [file]. */
-    val backupFile: File get() = TODO()
+    val backupFile: File get() = File(file.absoluteFile.parentFile, BACKUP_NAME)
 
     /**
      * Reads the saved entries, newest first; empty when there is no file yet.
@@ -64,16 +76,84 @@ class HistoryStore(
      * @throws HistoryStoreException when the file can't be read, or can't be decoded (it is moved
      *   to [backupFile] first, so the next load is empty).
      */
-    fun load(): List<HistoryEntry> = TODO()
+    fun load(): List<HistoryEntry> {
+        if (!file.exists()) {
+            return emptyList()
+        }
+        val text =
+            try {
+                file.readText(Charsets.UTF_8)
+            } catch (e: IOException) {
+                throw HistoryStoreException(
+                    "Couldn't read the history at ${file.path}: ${reason(e)}. Check that the " +
+                        "file is readable, or move it away to start a new history.",
+                    e,
+                )
+            }
+        val entries =
+            try {
+                json.decodeFromString<List<HistoryEntry>>(text)
+            } catch (e: SerializationException) {
+                moveAside(e)
+                throw HistoryStoreException(
+                    "The history file was damaged, so history starts empty. The old file was " +
+                        "moved to ${backupFile.path}; open it to recover past texts or delete it.",
+                    e,
+                )
+            }
+        return entries.sortedByDescending { it.epochSeconds }
+    }
 
     /**
      * Writes [entries] atomically, sorted newest first and cut to [limit]; creates the folder.
      *
      * @throws HistoryStoreException naming the file.
      */
-    fun save(entries: List<HistoryEntry>): Unit = TODO()
+    fun save(entries: List<HistoryEntry>) {
+        val kept = entries.sortedByDescending { it.epochSeconds }.take(limit)
+        val target = file.absoluteFile.toPath()
+        try {
+            val directory = Files.createDirectories(target.parent)
+            val temp = Files.createTempFile(directory, ".history", ".tmp")
+            try {
+                Files.writeString(temp, json.encodeToString(kept))
+                Files.move(temp, target, ATOMIC_MOVE, REPLACE_EXISTING)
+            } finally {
+                Files.deleteIfExists(temp)
+            }
+        } catch (e: IOException) {
+            throw HistoryStoreException(
+                "Couldn't save the history to ${file.path}: ${reason(e)}. Check that the folder " +
+                    "exists and is writable.",
+                e,
+            )
+        }
+    }
+
+    private fun moveAside(decodeError: SerializationException) {
+        try {
+            Files.move(file.toPath(), backupFile.toPath(), REPLACE_EXISTING)
+        } catch (e: IOException) {
+            e.addSuppressed(decodeError)
+            throw HistoryStoreException(
+                "The history file at ${file.path} is damaged and couldn't be moved to " +
+                    "${backupFile.path}: ${reason(e)}. Move or delete it to start a new history.",
+                e,
+            )
+        }
+    }
 
     companion object {
         const val DEFAULT_LIMIT = 50
+        private const val BACKUP_NAME = "history.corrupt.json"
+
+        private val json =
+            Json {
+                ignoreUnknownKeys = true
+                prettyPrint = true
+            }
+
+        private fun reason(e: IOException): String =
+            listOfNotNull(e.javaClass.simpleName, e.message).joinToString(": ")
     }
 }
