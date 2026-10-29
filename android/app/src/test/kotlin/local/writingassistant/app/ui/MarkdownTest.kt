@@ -125,6 +125,35 @@ class MarkdownTest {
     }
 
     @Test
+    fun `link destinations keep balanced parentheses`() {
+        val url = "https://en.wikipedia.org/wiki/Foo_(bar)"
+        assertEquals(listOf(span("x", InlineStyle(link = url))), spans("[x]($url)"))
+        assertEquals(
+            listOf(span("x", InlineStyle(link = "https://a.com/(b)")), span(" after")),
+            spans("[x](https://a.com/(b)) after"),
+        )
+    }
+
+    @Test
+    fun `link destinations with unbalanced parentheses stay literal`() {
+        assertEquals(listOf(span("[x](https://a.com/(b)")), spans("[x](https://a.com/(b)"))
+    }
+
+    @Test
+    fun `images stay literal with plain alt text`() {
+        val image = "![alt](https://a.com/i.png)"
+        assertEquals(listOf(span(image)), spans(image))
+        assertEquals(
+            listOf(span("see ![a b](u) now")),
+            spans("see ![a **b**](u) now"),
+        )
+        assertEquals(
+            listOf(span("!"), span("alt", InlineStyle(link = "https://a.com"))),
+            spans("\\![alt](https://a.com)"),
+        )
+    }
+
+    @Test
     fun `bare urls and malformed links stay plain`() {
         assertEquals(listOf(span("go to https://a.com now")), spans("go to https://a.com now"))
         assertEquals(listOf(span("[a] (b)")), spans("[a] (b)"))

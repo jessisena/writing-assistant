@@ -9,6 +9,9 @@ package local.writingassistant.app.ui
  * a word. A marker run that can only open while looking for a closer is matched with its own
  * closer first, so `*a **b** c*` nests. Closer searches are memoised, so parsing stays
  * polynomial however many markers lack a partner.
+ *
+ * A link destination may contain balanced parentheses. An image, `![alt](url)`, isn't
+ * rendered: it is kept as that literal text, with the alt text's styling dropped.
  */
 internal class InlineParser private constructor(
     private val source: String,
@@ -22,6 +25,12 @@ internal class InlineParser private constructor(
         val width: Int,
         val from: Int,
         val end: Int,
+    )
+
+    private data class LinkParts(
+        val labelEnd: Int,
+        val end: Int,
+        val url: String,
     )
 
     private fun parseRange(
@@ -46,6 +55,7 @@ internal class InlineParser private constructor(
                 '`' -> codeSpan(index, end, style)
                 '*', '_', '~' -> emphasis(index, end, style)
                 '[' -> link(index, end, style)
+                '!' -> image(index, end, style)
                 '<' -> autolink(index, end, style)
                 else -> null
             }
@@ -207,14 +217,51 @@ internal class InlineParser private constructor(
         style: InlineStyle,
     ): Int? {
         if (style.link != null) return null
+        val parts = linkParts(index, end) ?: return null
+        parseRange(index + 1, parts.labelEnd, style.copy(link = parts.url))
+        return parts.end
+    }
+
+    private fun image(
+        index: Int,
+        end: Int,
+        style: InlineStyle,
+    ): Int? {
+        if (source.getOrNull(index + 1) != '[') return null
+        val parts = linkParts(index + 1, end) ?: return null
+        val alt = parse(source.substring(index + 2, parts.labelEnd)).joinToString("") { it.text }
+        emit("![$alt](${parts.url})", style)
+        return parts.end
+    }
+
+    private fun linkParts(
+        index: Int,
+        end: Int,
+    ): LinkParts? {
         val closeBracket = findBracketClose(index + 1, end)
         if (closeBracket < 0 || source.getOrNull(closeBracket + 1) != '(') return null
-        val closeParen = source.indexOf(')', closeBracket + 2)
-        if (closeParen < 0 || closeParen >= end) return null
+        val closeParen = findDestinationClose(closeBracket + 2, end)
+        if (closeParen < 0) return null
         val url = source.substring(closeBracket + 2, closeParen).trim()
         if (url.isEmpty() || url.any { it.isWhitespace() }) return null
-        parseRange(index + 1, closeBracket, style.copy(link = url))
-        return closeParen + 1
+        return LinkParts(closeBracket, closeParen + 1, url)
+    }
+
+    private fun findDestinationClose(
+        from: Int,
+        end: Int,
+    ): Int {
+        var depth = 0
+        var index = from
+        while (index < end) {
+            when (source[index]) {
+                '\\' -> index++
+                '(' -> depth++
+                ')' -> if (depth == 0) return index else depth--
+            }
+            index++
+        }
+        return -1
     }
 
     private fun autolink(
