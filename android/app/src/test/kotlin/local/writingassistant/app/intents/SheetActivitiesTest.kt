@@ -3,6 +3,7 @@ package local.writingassistant.app.intents
 import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Intent
+import android.os.Bundle
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -13,12 +14,17 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.awaitCancellation
+import local.writingassistant.app.ui.ComposerEvent
+import local.writingassistant.app.ui.ComposerState
 import local.writingassistant.app.ui.FakePolishing
+import local.writingassistant.core.Refinement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
@@ -143,6 +149,33 @@ class SheetActivitiesTest {
             compose.onNodeWithText("hello").performTextReplacement("edited")
             scenario.recreate()
             compose.onNodeWithText("edited").assertExists()
+        }
+    }
+
+    @Test
+    fun blankShareKeepsTheRunningSession() {
+        val session = app.graph.composerSession
+        session.onEvent(ComposerEvent.Open("draft"))
+        session.onEvent(ComposerEvent.Polish)
+        app.graph.polisher.onRefine = { _, _ -> awaitCancellation() }
+        session.onEvent(ComposerEvent.Refine(Refinement.entries.first()))
+        for (blank in listOf(null, "", "  \n")) {
+            ActivityScenario.launch<ShareActivity>(share(blank)).use {
+                compose.onNodeWithText("draft").assertExists()
+            }
+            val state = session.state.value
+            assertEquals("draft", state.input)
+            assertEquals("polished: draft", state.output)
+            assertTrue("the refinement was cancelled", state.phase is ComposerState.Phase.Working)
+        }
+    }
+
+    @Test
+    fun theTextIsLoadedAgainAfterProcessDeath() {
+        val savedBeforeDeath = Bundle()
+        Robolectric.buildActivity(ShareActivity::class.java, share("hello")).use {
+            it.setup(savedBeforeDeath)
+            compose.onNodeWithText("hello").assertExists()
         }
     }
 }

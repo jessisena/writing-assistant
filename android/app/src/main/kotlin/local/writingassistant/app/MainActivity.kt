@@ -68,14 +68,8 @@ private fun MainScreen(graph: AppGraph) {
         topBar = {
             TopAppBar(
                 title = {
-                    val title =
-                        if (screen ==
-                            Screen.Settings
-                        ) {
-                            R.string.settings_title
-                        } else {
-                            R.string.app_name
-                        }
+                    val inSettings = screen == Screen.Settings
+                    val title = if (inSettings) R.string.settings_title else R.string.app_name
                     Text(stringResource(title))
                 },
                 navigationIcon = {
