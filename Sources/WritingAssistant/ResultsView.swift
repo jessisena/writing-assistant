@@ -76,6 +76,7 @@ private struct SkeletonCards: View {
         VStack(spacing: 16) {
             ResultCard(title: "Polished text") {
                 Text(String(repeating: "Polished text is on its way. ", count: 8))
+                    .shimmering()
             }
             .redacted(reason: .placeholder)
             if includesSummary {
@@ -244,6 +245,7 @@ private struct ResultMeta: View {
 
 private struct CopyButton: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button {
@@ -254,6 +256,8 @@ private struct CopyButton: View {
                 systemImage: model.copied ? "checkmark" : "doc.on.doc"
             )
             .contentTransition(.symbolEffect(.replace))
+            .symbolEffect(.bounce, value: model.copyGeneration)
+            .symbolEffectsRemoved(reduceMotion)
         }
         .tint(model.copied ? .green : nil)
         .sensoryFeedback(.alignment, trigger: model.copyGeneration)
@@ -283,6 +287,7 @@ private struct RefinementRow: View {
                             }
                         }
                     }
+                    .buttonStyle(ChipStyle())
                     .accessibilityLabel("Refine: \(refinement.displayName)")
                     .help("Rewrites the polished text, including your edits")
                 }
@@ -291,5 +296,51 @@ private struct RefinementRow: View {
         .disabled(!model.canRefine)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Refine polished text")
+    }
+}
+
+extension View {
+    /// Sweeps a brighter band across a redacted placeholder, left to right, while it's on screen.
+    /// Reduce Motion leaves the placeholder still.
+    func shimmering() -> some View {
+        modifier(Shimmer())
+    }
+}
+
+private struct Shimmer: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isSweeping = false
+
+    private static let dimmed = Color.black.opacity(0.45)
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content
+                .mask { band }
+                .onAppear { isSweeping = true }
+        }
+    }
+
+    /// A gradient three times the content's width, dim except for a bright stripe in its middle,
+    /// slid from the stripe left of the content to the stripe right of it.
+    private var band: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            LinearGradient(
+                stops: [
+                    .init(color: Self.dimmed, location: 0.4),
+                    .init(color: .black, location: 0.5),
+                    .init(color: Self.dimmed, location: 0.6),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: width * 3, height: proxy.size.height)
+            .offset(x: isSweeping ? 0 : -width * 2)
+            .animation(
+                .linear(duration: 1.4).repeatForever(autoreverses: false), value: isSweeping)
+        }
     }
 }
