@@ -149,10 +149,12 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: model.result) { oldValue, newValue in
-                // Not when only the summary arrives after a preview: the user may be editing.
-                guard let newValue, oldValue?.polishedText != newValue.polishedText else {
-                    return
-                }
+                // Once when a polish first shows text, not again while it streams in or when
+                // the summary arrives after it: the user may be reading or editing.
+                guard let newValue,
+                    oldValue == nil
+                        || (!model.isLoading && oldValue?.polishedText != newValue.polishedText)
+                else { return }
                 if reduceMotion {
                     proxy.scrollTo(Self.resultsID, anchor: .bottom)
                 } else {

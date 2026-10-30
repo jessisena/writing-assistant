@@ -94,6 +94,7 @@ private struct ComposerFooter: View {
                 isPolishing: model.isLoading && model.runningRefinement == nil,
                 canClear: model.canClear,
                 requestStartedAt: model.requestStartedAt,
+                stage: model.polishStage ?? .detectingLanguage,
                 onPolish: model.startProcessing,
                 onClear: onClear,
                 onCancel: model.cancel
@@ -156,6 +157,7 @@ private struct ActionRow: View {
     let isPolishing: Bool
     let canClear: Bool
     let requestStartedAt: Date?
+    let stage: PolishStage
     let onPolish: () -> Void
     let onClear: () -> Void
     let onCancel: () -> Void
@@ -185,6 +187,7 @@ private struct ActionRow: View {
                 isPolishing: isPolishing,
                 isOverLimit: isOverLimit,
                 requestStartedAt: requestStartedAt,
+                stage: stage,
                 action: onPolish
             )
         }
@@ -215,6 +218,7 @@ private struct PolishButton: View {
     let isPolishing: Bool
     let isOverLimit: Bool
     let requestStartedAt: Date?
+    let stage: PolishStage
     let action: () -> Void
     @Environment(\.theme) private var theme
 
@@ -232,7 +236,7 @@ private struct PolishButton: View {
         .controlSize(.large)
         .disabled(isOverLimit)
         .keyboardShortcut(.return, modifiers: .command)
-        .accessibilityLabel(isPolishing ? "Polishing" : "Polish")
+        .accessibilityLabel(isPolishing ? stage.label : "Polish")
         .help(isOverLimit ? tooLongHelp : "Polish the text (⌘↵)")
     }
 
@@ -240,7 +244,7 @@ private struct PolishButton: View {
         if isPolishing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                ProgressText(startedAt: requestStartedAt)
+                ProgressText(stage: stage, startedAt: requestStartedAt)
             }
         } else {
             HStack(spacing: 8) {
@@ -258,8 +262,10 @@ private struct PolishButton: View {
     }
 }
 
-/// "Polishing…", with the seconds elapsed once the request has run for a while.
+/// The polish's stage ("Detecting language…", "Polishing…", …), with the seconds elapsed once
+/// the request has run for a while.
 private struct ProgressText: View {
+    let stage: PolishStage
     let startedAt: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -269,17 +275,18 @@ private struct ProgressText: View {
         if let startedAt {
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(startedAt))
-                Text(Self.text(elapsedSeconds: elapsed))
+                Text(text(elapsedSeconds: elapsed))
                     .monospacedDigit()
                     .contentTransition(.numericText(value: Double(elapsed)))
                     .animation(reduceMotion ? nil : .snappy, value: elapsed)
             }
         } else {
-            Text(Self.text(elapsedSeconds: 0))
+            Text(text(elapsedSeconds: 0))
         }
     }
 
-    private static func text(elapsedSeconds: Int) -> String {
-        elapsedSeconds >= showsElapsedAfter ? "Polishing… \(elapsedSeconds) s" : "Polishing…"
+    private func text(elapsedSeconds: Int) -> String {
+        elapsedSeconds >= Self.showsElapsedAfter
+            ? "\(stage.label) \(elapsedSeconds) s" : stage.label
     }
 }

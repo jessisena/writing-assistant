@@ -180,9 +180,11 @@ private struct PolishedCard: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .disabled(model.isStreamingText)
                 .help("Highlights what changed between your input and the polished text")
             }
             CopyButton(model: model)
+                .disabled(model.isStreamingText)
         } content: {
             ZStack(alignment: .top) {
                 if showsDiff {
@@ -202,12 +204,15 @@ private struct PolishedCard: View {
     private var editor: some View {
         VStack(alignment: .leading, spacing: 6) {
             FormattingToolbar(controller: outputController)
+                .disabled(model.isStreamingText)
+            // Read-only while the text streams in: the next update would replace any edit.
             RichTextEditor(
                 text: $model.output,
                 controller: outputController,
                 accessibilityLabel: "Polished text",
                 minHeight: 80,
-                maxHeight: 480
+                maxHeight: 480,
+                isEditable: !model.isStreamingText
             )
         }
         .background(
@@ -218,13 +223,19 @@ private struct PolishedCard: View {
     }
 }
 
-/// The detected language and the model, as one quiet line. A translation gets a capsule.
+/// The detected language and the model, as one quiet line. A translation gets a capsule. An
+/// unknown language (the reply hasn't named it yet, or never did) shows only the model.
 private struct ResultMeta: View {
     let result: PolishResult
 
+    private var isLanguageKnown: Bool { result.detectedLanguage != "Unknown" }
+
     var body: some View {
         HStack(spacing: 8) {
-            if result.wasTranslated {
+            if !isLanguageKnown {
+                Text(result.modelUsed)
+                    .accessibilityLabel("Model \(result.modelUsed)")
+            } else if result.wasTranslated {
                 Text("Translated from \(result.detectedLanguage)")
                     .font(.caption)
                     .foregroundStyle(.tint)

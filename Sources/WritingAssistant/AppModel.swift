@@ -14,6 +14,16 @@ struct ClipboardContent: Equatable, Sendable {
     static let copiedDuration: Duration = .seconds(2)
     static let channelDefaultsKey = "selectedChannel"
     static let learningSummaryDefaultsKey = "learningSummaryEnabled"
+    /// The shortest time between two streamed text updates on screen (about 30 per second).
+    /// Each update parses the Markdown so far and replaces the editor's text, so following
+    /// every streamed piece (often 50–100 a second) would redo that work several times per frame
+    /// for no visible gain.
+    static let previewInterval: Duration = .milliseconds(33)
+    /// The time between two streamed updates is also at least this many times what the last
+    /// update took, so updates use at most a fifth of the main actor however long the text
+    /// grows. Converting the Markdown takes about 3.5 ms for 2,000 characters and 44 ms for
+    /// 20,000 (debug build), growing linearly.
+    static let previewCostFactor = 5
 
     var input = NSAttributedString()
     var output = NSAttributedString()
@@ -36,6 +46,12 @@ struct ClipboardContent: Equatable, Sendable {
     var showsChanges = false
     /// True while a polish shows its polished text but its learning summary is still coming.
     private(set) var isAwaitingSummary = false
+    /// True while a polish shows its polished text as it streams in, before it is complete. The
+    /// output is read-only and Copy is off until then, so nothing is edited or copied that the
+    /// next update would replace.
+    private(set) var isStreamingText = false
+    /// What the running polish is doing, for its status line. Nil when no polish is running.
+    private(set) var polishStage: PolishStage?
     private(set) var errorMessage: String?
     private(set) var copied = false
     /// Counts successful copies, so views can react to every copy, even two within `copiedDuration`.
@@ -75,6 +91,8 @@ struct ClipboardContent: Equatable, Sendable {
     /// The preview on screen for the running polish. It is kept until the request ends, so a
     /// cancel or failure can still save the polished text to history.
     @ObservationIgnored private var shownPreview: ShownPreview?
+    /// When the next streamed preview may reach the screen (see `previewInterval`).
+    @ObservationIgnored private var nextPreviewAt: ContinuousClock.Instant?
 
     /// Creates the model.
     ///
@@ -177,14 +195,16 @@ struct ClipboardContent: Equatable, Sendable {
     }
 
     /// Stops the running request, with no error banner. A late answer from the stopped request
-    /// is ignored. A polish that already showed its polished text keeps it on screen and saves
-    /// it to history without a learning summary; otherwise the screen returns to the empty state.
+    /// is ignored. A polish that already showed its complete polished text keeps it on screen and
+    /// saves it to history without a learning summary; otherwise, including text that was still
+    /// streaming in, the screen returns to the empty state.
     func cancel() {
         requests.cancel()
         requestStartedAt = nil
         runningRefinement = nil
+        polishStage = nil
         if let shown = endPreview() {
-            recordPreviewInHistory(shown)
+            endWithoutResult(shown)
         }
     }
 
@@ -233,10 +253,11 @@ struct ClipboardContent: Equatable, Sendable {
         let generation: Int
     }
 
-    /// A polish request's preview and the result made from it.
+    /// A polish request's preview on screen and the result made from it.
     private struct ShownPreview {
         let request: PolishRequest
-        let result: PolishResult
+        var result: PolishResult
+        var isTextComplete: Bool
     }
 
     private func beginProcessing() -> PolishRequest? {
@@ -251,59 +272,109 @@ struct ClipboardContent: Equatable, Sendable {
         leaveCurrentHistoryEntry()
         result = nil
         output = NSAttributedString()
+        polishStage = .detectingLanguage
+        nextPreviewAt = nil
         return PolishRequest(
             text: text, channel: channel, includesLearningSummary: includesLearningSummary,
             generation: generation)
     }
 
-    /// Runs `request` and shows its result. When a preview was shown first, the final result
-    /// only adds the learning summary: the output, which the user may have edited meanwhile,
-    /// stays. History and the learning log are written once, when the request ends.
+    /// Runs `request` and shows its result. Streamed previews show its stage and its polished
+    /// text as it arrives (see `showPreview(_:for:)`). When the complete text was shown first,
+    /// the final result only adds the learning summary: the output, which the user may have
+    /// edited meanwhile, stays. History and the learning log are written once, when the request
+    /// ends.
     private func polish(_ request: PolishRequest) async {
         let polisher = polisher
+        let mailbox = PreviewMailbox()
         let onPreview: @Sendable (PolishPreview) -> Void = { [weak self] preview in
-            Task { @MainActor in self?.showPreview(preview, for: request) }
+            guard mailbox.post(preview) else { return }
+            Task { @MainActor in await self?.deliverPreview(from: mailbox, for: request) }
         }
         let polished = await finishRequest(request.generation) { () async throws(PolishError) in
             try await polisher.polish(
                 text: request.text, channel: request.channel,
                 includeLearningSummary: request.includesLearningSummary, onPreview: onPreview)
         }
+        if !requests.isRunning {
+            polishStage = nil
+        }
         let preview = shownPreview?.request.generation == request.generation ? endPreview() : nil
         guard let polished else {
-            if let preview { recordPreviewInHistory(preview) }
+            if let preview { endWithoutResult(preview) }
             return
         }
-        if preview == nil {
-            result = polished
-            output = Self.editorText(fromMarkdown: polished.polishedText)
-            recordHistory(polished, input: request.text, channel: request.channel)
-        } else {
+        if preview?.isTextComplete == true {
             let keepsChanges = showsChanges
             result = polished
             showsChanges = keepsChanges
             recordHistory(polished, input: request.text, channel: request.channel)
             saveOutputToHistory()
+        } else {
+            result = polished
+            output = Self.editorText(fromMarkdown: polished.polishedText)
+            recordHistory(polished, input: request.text, channel: request.channel)
         }
         appendToLearningLog(polished, channel: request.channel)
     }
 
-    /// Shows the polished text of `request` while its learning summary is still coming. Ignored
-    /// when the request is no longer running (it finished, failed or was cancelled) or already
-    /// showed a preview.
+    /// Shows the newest preview in `mailbox`, first waiting until `nextPreviewAt`. Previews
+    /// posted meanwhile replace the one waiting, so only the newest is shown.
+    private func deliverPreview(from mailbox: PreviewMailbox, for request: PolishRequest) async {
+        if let nextPreviewAt {
+            try? await Task.sleep(until: nextPreviewAt, clock: .continuous)
+        }
+        guard let preview = mailbox.take() else { return }
+        let started = ContinuousClock.now
+        showPreview(preview, for: request)
+        let cost = ContinuousClock.now - started
+        nextPreviewAt = started + max(Self.previewInterval, cost * Self.previewCostFactor)
+    }
+
+    /// Shows what the reply of `request` has said so far: its stage, and its polished text while
+    /// it streams in, read-only until complete. Once the text is complete, later previews only
+    /// update the language, so the output the user may be editing stays. Ignored when the
+    /// request is no longer running (it finished, failed or was cancelled).
     private func showPreview(_ preview: PolishPreview, for request: PolishRequest) {
-        guard requests.isCurrent(request.generation), shownPreview == nil else { return }
-        let shown = PolishResult(
-            polishedText: preview.polishedText,
-            learningSummary: nil,
-            detectedLanguage: preview.detectedLanguage ?? "Unknown",
-            wasTranslated: preview.wasTranslated ?? false,
-            modelUsed: ModelRouting.pickModel(for: request.text)
+        guard requests.isCurrent(request.generation) else { return }
+        polishStage = PolishStage(preview, includesLearningSummary: request.includesLearningSummary)
+        if shownPreview?.isTextComplete == true {
+            updateLanguage(from: preview)
+            return
+        }
+        guard let text = preview.polishedText, !text.isEmpty || preview.isTextComplete else {
+            return
+        }
+        let shown = ShownPreview(
+            request: request,
+            result: PolishResult(
+                polishedText: text,
+                learningSummary: nil,
+                detectedLanguage: preview.detectedLanguage ?? "Unknown",
+                wasTranslated: preview.wasTranslated ?? false,
+                modelUsed: ModelRouting.pickModel(for: request.text)
+            ),
+            isTextComplete: preview.isTextComplete
         )
-        shownPreview = ShownPreview(request: request, result: shown)
-        result = shown
-        output = Self.editorText(fromMarkdown: shown.polishedText)
-        isAwaitingSummary = request.includesLearningSummary && !shown.wasTranslated
+        shownPreview = shown
+        result = shown.result
+        output = Self.editorText(fromMarkdown: text)
+        isStreamingText = !shown.isTextComplete
+        isAwaitingSummary = request.includesLearningSummary && !shown.result.wasTranslated
+    }
+
+    /// Takes the language of a preview that came after the complete text into the result on
+    /// screen, for replies that write `polished_text` first. Keeps the output and Show changes.
+    private func updateLanguage(from preview: PolishPreview) {
+        guard var shown = shownPreview else { return }
+        shown.result.detectedLanguage = preview.detectedLanguage ?? "Unknown"
+        shown.result.wasTranslated = preview.wasTranslated ?? false
+        guard shown.result != result else { return }
+        shownPreview = shown
+        let keepsChanges = showsChanges
+        result = shown.result
+        showsChanges = keepsChanges && !shown.result.wasTranslated
+        isAwaitingSummary = shown.request.includesLearningSummary && !shown.result.wasTranslated
     }
 
     /// Forgets the shown preview, which stays on screen, and stops waiting for its summary.
@@ -311,13 +382,20 @@ struct ClipboardContent: Equatable, Sendable {
         let shown = shownPreview
         shownPreview = nil
         isAwaitingSummary = false
+        isStreamingText = false
         return shown
     }
 
-    /// Saves a preview whose request ended without a final result, with the output as edited.
-    private func recordPreviewInHistory(_ shown: ShownPreview) {
-        recordHistory(shown.result, input: shown.request.text, channel: shown.request.channel)
-        saveOutputToHistory()
+    /// Ends a preview whose request stopped without a final result. A complete text stays and is
+    /// saved to history, with the output as edited; text that was still streaming in is removed.
+    private func endWithoutResult(_ shown: ShownPreview) {
+        if shown.isTextComplete {
+            recordHistory(shown.result, input: shown.request.text, channel: shown.request.channel)
+            saveOutputToHistory()
+        } else {
+            result = nil
+            output = NSAttributedString()
+        }
     }
 
     /// Empties the input, the output, the result and the error banner, after saving the edited
@@ -413,9 +491,9 @@ struct ClipboardContent: Equatable, Sendable {
     }
 
     /// Copies the edited output as HTML and plain text and shows "Copied" for `copiedDuration`.
-    /// The edited output is saved to history first.
+    /// The edited output is saved to history first. Ignored while the text is still streaming in.
     func copyResult() async {
-        guard result != nil else { return }
+        guard result != nil, !isStreamingText else { return }
         saveOutputToHistory()
         let text = RichTextBridge.attributedString(from: output)
         writeToPasteboard(
