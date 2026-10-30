@@ -12,6 +12,7 @@ import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStore
 import local.writingassistant.core.HistoryStoreException
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishResult
 import java.util.UUID
 
@@ -70,12 +71,14 @@ class HistoryRepository internal constructor(
         input: String,
         channel: Channel,
         id: String = UUID.randomUUID().toString(),
+        mode: Mode = Mode.WORK,
     ): HistoryEntry {
         val entry =
             HistoryEntry(
                 id = id,
                 epochSeconds = now(),
                 channel = channel,
+                mode = mode,
                 input = input,
                 output = result.polishedText,
                 learningSummary = result.learningSummary,

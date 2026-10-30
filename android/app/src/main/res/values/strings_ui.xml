@@ -45,10 +45,13 @@
     <string name="settings_testing">Testing the key…</string>
     <string name="settings_test_passed">The key works.</string>
 
+    <string name="prefs_modes">Modes</string>
+    <string name="prefs_modes_hint">Switch modes at the top of the composer. Each mode remembers its channel.</string>
+    <string name="prefs_output_language">Write the result in</string>
     <string name="prefs_writing_for">Writing for</string>
-    <string name="prefs_writing_for_hint">The modes offered in the composer. At least one stays on.</string>
+    <string name="prefs_writing_for_hint">The channels offered in this mode. At least one stays on.</string>
     <string name="prefs_summary">English learning summary</string>
-    <string name="prefs_summary_hint">Explains what changed in English texts. Turning it off skips the summary and makes requests a bit faster.</string>
+    <string name="prefs_summary_hint">Only for text you wrote in English. Turning it off skips the summary and makes requests a bit faster.</string>
     <string name="prefs_appearance">Appearance</string>
     <string name="prefs_prompts">Prompts</string>
     <string name="prefs_prompts_hint">Edit the instructions behind each mode and refinement.</string>
@@ -58,6 +61,7 @@
     <string name="prompts_group_global">Every mode</string>
     <string name="prompts_group_channels">Writing for</string>
     <string name="prompts_group_refinements">Refine</string>
+    <string name="prompts_group_modes">Modes and languages</string>
     <string name="prompts_edited">Edited</string>
     <string name="prompt_editor_label">Prompt</string>
     <string name="prompt_editor_customized">You edited this prompt; requests use your text.</string>
@@ -74,7 +78,9 @@
     <string name="history_title">History</string>
     <string name="history_busy">A request is running. Wait for it or cancel it to restore an entry.</string>
     <string name="history_empty">Nothing here yet. Polished texts show up here so you can come back to them.</string>
-    <string name="history_entry_meta">%1$s · %2$s</string>
+    <string name="history_entry_meta">%1$s · %2$s · %3$s</string>
+    <string name="history_filter_all">All</string>
+    <string name="history_filter_empty">No %1$s entries yet.</string>
     <string name="history_delete">Delete</string>
     <string name="history_clear_all">Clear all</string>
     <string name="history_clear_confirm">Delete every entry?</string>

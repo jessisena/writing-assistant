@@ -32,7 +32,11 @@ class LivePolishTest {
 
     private suspend fun assertShortEnglishUsesSmallModel(provider: Provider) {
         val result =
-            serviceFor(provider).polish("hey can u check the PR before tomorow? thx", Channel.SLACK)
+            serviceFor(provider).polish(
+                "hey can u check the PR before tomorow? thx",
+                Channel.SLACK,
+                WORK,
+            )
 
         assertEquals(provider.models.small, result.modelUsed)
         assertTrue(result.polishedText.isNotBlank())
@@ -43,7 +47,7 @@ class LivePolishTest {
         provider: Provider,
         text: String,
     ) {
-        val result = serviceFor(provider).polish(text, Channel.SLACK)
+        val result = serviceFor(provider).polish(text, Channel.SLACK, WORK)
 
         assertEquals(provider.models.large, result.modelUsed)
         assertTrue(result.wasTranslated)
@@ -96,3 +100,5 @@ class LivePolishTest {
                 "standup meeting tomorrow morning because I have a dentist appointment."
     }
 }
+
+private val WORK = PolishOptions(Mode.WORK, OutputLanguage.ENGLISH, includesLearningSummary = true)

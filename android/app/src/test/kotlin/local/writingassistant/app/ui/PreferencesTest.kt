@@ -13,9 +13,14 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import local.writingassistant.app.data.ModeProfile
+import local.writingassistant.app.data.ModeSettings
 import local.writingassistant.app.data.PalettePreset
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -43,43 +48,70 @@ class PreferencesTest {
     }
 
     @Test
-    fun turningAChannelOffStoresIt() {
+    fun turningAChannelOffStoresItForTheCurrentMode() {
         show()
         val row = compose.onNodeWithText(Channel.EMAIL.displayName).performScrollTo()
         row.assertIsOn().performClick()
         compose.waitForIdle()
-        assertEquals(setOf(Channel.EMAIL), settings.disabledChannels.value)
+        assertFalse(Channel.EMAIL in settings.modes.value.work.visibleChannels)
+        assertTrue(Channel.EMAIL in settings.modes.value.personal.visibleChannels)
         compose.onNodeWithText(Channel.EMAIL.displayName).assertIsOff()
     }
 
     @Test
-    fun turningAChannelBackOnStoresIt() {
-        settings.disabledChannels.value = setOf(Channel.FORMAL)
+    fun turningAChannelOnAppendsIt() {
         show()
-        val row = compose.onNodeWithText(Channel.FORMAL.displayName).performScrollTo()
+        val row = compose.onNodeWithText(Channel.OTHER.displayName).performScrollTo()
         row.assertIsOff().performClick()
         compose.waitForIdle()
-        assertEquals(emptySet<Channel>(), settings.disabledChannels.value)
+        assertEquals(
+            Channel.OTHER,
+            settings.modes.value.work.visibleChannels
+                .last(),
+        )
     }
 
     @Test
-    fun theLastEnabledChannelCantBeTurnedOff() {
-        val allButSlack = Channel.entries.toSet() - Channel.SLACK
-        settings.disabledChannels.value = allButSlack
+    fun thePersonalTabEditsPersonalMode() {
+        show()
+        compose.onNodeWithText("Personal").performScrollTo().performClick()
+        compose.onNodeWithText(Channel.PERSONAL_MESSAGE.displayName).performScrollTo().assertIsOn()
+        compose
+            .onNodeWithText(
+                Channel.SLACK.displayName,
+            ).performScrollTo()
+            .assertIsOff()
+            .performClick()
+        compose.onNodeWithText("English").performScrollTo().performClick()
+        compose.waitForIdle()
+        val personal = settings.modes.value.personal
+        assertTrue(Channel.SLACK in personal.visibleChannels)
+        assertEquals(OutputLanguage.ENGLISH, personal.outputLanguage)
+        assertEquals(Mode.WORK, settings.modes.value.current)
+    }
+
+    @Test
+    fun theLastVisibleChannelCantBeTurnedOff() {
+        val onlySlack =
+            ModeProfile
+                .defaults(
+                    Mode.WORK,
+                ).copy(visibleChannels = listOf(Channel.SLACK))
+        settings.modes.value = ModeSettings(work = onlySlack)
         show()
         compose.onNodeWithText(Channel.SLACK.displayName).performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText(Channel.EMAIL.displayName).performScrollTo().assertIsEnabled()
-        viewModel.setChannelEnabled(Channel.SLACK, false)
+        viewModel.setChannelVisible(Channel.SLACK, false)
         compose.waitForIdle()
-        assertEquals(allButSlack, settings.disabledChannels.value)
+        assertEquals(listOf(Channel.SLACK), settings.modes.value.work.visibleChannels)
     }
 
     @Test
-    fun theLearningSummarySwitchStoresTheChoice() {
+    fun theLearningSummarySwitchStoresTheChoiceForTheMode() {
         show()
         compose.onNodeWithText("English learning summary").performScrollTo().performClick()
         compose.waitForIdle()
-        assertEquals(false, settings.learningSummaryEnabled.value)
+        assertEquals(false, settings.modes.value.work.learningSummary)
         compose.onNodeWithText("faster", substring = true).performScrollTo()
     }
 

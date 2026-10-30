@@ -66,7 +66,10 @@ data class LearningSummary(
 
 data class PolishResult(
     val polishedText: String,
-    /** Always null when [wasTranslated] is true (enforced by `PolishService`). */
+    /**
+     * Null unless the request's [PolishOptions] allow one for this language (enforced by
+     * `PolishService`): always null for a translation or non-English input.
+     */
     val learningSummary: LearningSummary?,
     val detectedLanguage: String,
     val wasTranslated: Boolean,
@@ -180,6 +183,16 @@ sealed class PromptFile(
         val refinement: Refinement,
     ) : PromptFile("refinements/${refinement.id}.txt", refinement.displayName)
 
+    /** The tone baseline inserted into the polish prompt for [mode]. */
+    data class ForMode(
+        val mode: Mode,
+    ) : PromptFile("modes/${mode.id}.txt", "${mode.displayName} mode tone")
+
+    /** The language rules inserted into the polish prompt. */
+    data class ForLanguage(
+        val language: OutputLanguage,
+    ) : PromptFile("languages/${language.fileName}.txt", "Language: ${language.displayName}")
+
     /** The placeholder a saved copy must keep, because the request is pointless without it. */
     val requiredPlaceholder: String?
         get() =
@@ -194,13 +207,20 @@ sealed class PromptFile(
         const val ALWAYS_PLACEHOLDER = "{{ALWAYS_RULES}}"
         const val LEARNING_SUMMARY_PLACEHOLDER = "{{LEARNING_SUMMARY}}"
         const val INSTRUCTION_PLACEHOLDER = "{{REFINEMENT_INSTRUCTION}}"
+        const val MODE_PLACEHOLDER = "{{MODE_GUIDELINES}}"
+        const val LANGUAGE_POLICY_PLACEHOLDER = "{{LANGUAGE_POLICY}}"
 
-        /** Every prompt file: the top-level files, then channels, then refinements. */
+        /**
+         * Every prompt file: the top-level files, then channels, refinements, modes and
+         * languages.
+         */
         val all: List<PromptFile>
             get() =
                 listOf(Global, Always, LearningSummary, Refine) +
                     Channel.entries.map(::ForChannel) +
-                    Refinement.entries.map(::ForRefinement)
+                    Refinement.entries.map(::ForRefinement) +
+                    Mode.entries.map(::ForMode) +
+                    OutputLanguage.entries.map(::ForLanguage)
 
         fun fromRelativePath(path: String): PromptFile? =
             all.firstOrNull { it.relativePath == path }
@@ -288,13 +308,14 @@ interface Polishing {
     /**
      * Polishes (or translates, then polishes) [text] for [channel]. Throws [PolishError].
      *
-     * @param learningSummary False asks the model to skip the learning summary, and the result
-     *   never carries one.
+     * @param options The mode's tone, the output language and whether to ask for a learning
+     *   summary. The result only has a summary when [PolishOptions.allowsLearningSummary] holds
+     *   for it.
      */
     suspend fun polish(
         text: String,
         channel: Channel,
-        learningSummary: Boolean = true,
+        options: PolishOptions,
     ): PolishResult
 
     /** Rewrites already-polished [text] with one extra instruction; returns only the new text. */

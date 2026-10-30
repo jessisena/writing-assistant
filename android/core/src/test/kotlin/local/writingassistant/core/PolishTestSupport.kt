@@ -49,9 +49,31 @@ class StubPromptReader(
             is PromptFile.ForRefinement -> {
                 "  ${file.refinement.id.uppercase()} INSTRUCTION \n"
             }
+
+            is PromptFile.ForMode -> {
+                " ${file.mode.id.uppercase()} TONE "
+            }
+
+            is PromptFile.ForLanguage -> {
+                " ${file.language.id.uppercase()} LANGUAGE "
+            }
         }
     }
 }
+
+/** Work mode, English output, with the learning summary as given. */
+fun englishOptions(summary: Boolean = true) =
+    PolishOptions(Mode.WORK, OutputLanguage.ENGLISH, summary)
+
+/** Personal mode, output in the draft's language, with the learning summary as given. */
+fun sameAsInputOptions(summary: Boolean = true) =
+    PolishOptions(Mode.PERSONAL, OutputLanguage.SAME_AS_INPUT, summary)
+
+/** A polish in Work mode with the summary on, for tests that don't care about the options. */
+suspend fun Polishing.polish(
+    text: String,
+    channel: Channel,
+): PolishResult = polish(text, channel, englishOptions())
 
 fun summaryObject(): JsonObject =
     buildJsonObject {

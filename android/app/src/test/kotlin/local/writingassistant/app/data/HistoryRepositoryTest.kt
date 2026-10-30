@@ -6,6 +6,7 @@ import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStoreException
 import local.writingassistant.core.LearningSummary
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -68,6 +69,21 @@ class HistoryRepositoryTest {
             assertEquals(1_000L, entry.epochSeconds)
             assertEquals(listOf(entry), history.entries.value)
             assertEquals(listOf(entry), file)
+            assertEquals(Mode.WORK, entry.mode)
+        }
+
+    @Test
+    fun `a recorded polish keeps its mode`() =
+        runTest {
+            val entry =
+                repository().record(
+                    result("out"),
+                    "in",
+                    Channel.EMAIL,
+                    mode = Mode.PERSONAL,
+                )
+
+            assertEquals(Mode.PERSONAL, entry.mode)
         }
 
     @Test

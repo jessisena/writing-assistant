@@ -103,7 +103,7 @@ class PolishServiceTest {
             val prompts = StubPromptReader(missing = setOf(PromptFile.LearningSummary))
 
             PolishService(client, prompts)
-                .polish("Hello there", Channel.FORMAL, learningSummary = false)
+                .polish("Hello there", Channel.FORMAL, englishOptions(summary = false))
 
             assertEquals(
                 "SYSTEM FORMAL RULES\n\n<draft>\nHello there\n</draft>",
@@ -116,13 +116,121 @@ class PolishServiceTest {
         runTest {
             val client = replying(englishResponse)
 
-            service(client).polish("Hello there", Channel.FORMAL, learningSummary = true)
+            service(client).polish("Hello there", Channel.FORMAL, englishOptions())
 
             assertEquals(
                 "SYSTEM FORMAL RULES\nLEARNING RULES\n\n<draft>\nHello there\n</draft>",
                 client.calls.single().prompt,
             )
         }
+
+    private fun untranslated(
+        language: String?,
+        summary: kotlinx.serialization.json.JsonElement = summaryObject(),
+    ): String {
+        val fields =
+            listOfNotNull(
+                "was_translated" to JsonPrimitive(false),
+                "polished_text" to JsonPrimitive("Hola, ¿quedamos mañana?"),
+                "learning_summary" to summary,
+                language?.let { "detected_language" to JsonPrimitive(it) },
+            )
+        return json(*fields.toTypedArray())
+    }
+
+    @Test
+    fun promptCarriesTheModeToneAndLanguagePolicy() =
+        runTest {
+            val prompts = StubPromptReader()
+            val template =
+                "${PromptFile.LANGUAGE_POLICY_PLACEHOLDER}\n${PromptFile.MODE_PLACEHOLDER}\n" +
+                    PromptFile.CHANNEL_PLACEHOLDER
+            val reader =
+                PromptReading {
+                    if (it ==
+                        PromptFile.Global
+                    ) {
+                        template
+                    } else {
+                        prompts.read(it)
+                    }
+                }
+            val client = replying(untranslated("Spanish"), englishResponse)
+            val service = PolishService(client, reader)
+
+            service.polish("hola", Channel.PERSONAL_MESSAGE, sameAsInputOptions(summary = false))
+            service.polish("hi", Channel.PERSONAL_MESSAGE, englishOptions(summary = false))
+
+            assertEquals(
+                "SAMEASINPUT LANGUAGE\nPERSONAL TONE\nPERSONAL_MESSAGE RULES",
+                client.calls[0].prompt.substringBefore("\n\n<draft>"),
+            )
+            assertEquals(
+                "ENGLISH LANGUAGE\nWORK TONE\nPERSONAL_MESSAGE RULES",
+                client.calls[1].prompt.substringBefore("\n\n<draft>"),
+            )
+        }
+
+    @Test
+    fun sameAsInputDropsTheSummaryOfNonEnglishInput() =
+        runTest {
+            listOf("Spanish", "Català", "Inglés", "", null).forEach { language ->
+                val result =
+                    service(replying(untranslated(language)))
+                        .polish(
+                            "hola, quedamos mañana?",
+                            Channel.PERSONAL_MESSAGE,
+                            sameAsInputOptions(),
+                        )
+
+                assertNull("$language should drop the summary", result.learningSummary)
+                assertFalse(result.wasTranslated)
+                assertEquals("Hola, ¿quedamos mañana?", result.polishedText)
+            }
+        }
+
+    @Test
+    fun sameAsInputKeepsTheSummaryOfEnglishInput() =
+        runTest {
+            listOf("English", "english", " English (US) ").forEach { language ->
+                val result =
+                    service(replying(untranslated(language)))
+                        .polish("hi", Channel.PERSONAL_MESSAGE, sameAsInputOptions())
+
+                assertNotNull("$language should keep the summary", result.learningSummary)
+            }
+        }
+
+    @Test
+    fun englishPolicyKeepsTheSummaryOfUntranslatedInputWithoutALanguage() =
+        runTest {
+            val result = service(replying(untranslated(null))).polish("hi", Channel.SLACK)
+
+            assertEquals("Unknown", result.detectedLanguage)
+            assertNotNull(result.learningSummary)
+        }
+
+    @Test
+    fun aMalformedSummaryThatIsDroppedAnywayDoesNotFailTheRequest() =
+        runTest {
+            listOf(sameAsInputOptions(), englishOptions(summary = false)).forEach { options ->
+                val output = untranslated("Spanish", summary = JsonPrimitive("not an object"))
+
+                val result = service(replying(output)).polish("hola", Channel.SLACK, options)
+
+                assertNull(result.learningSummary)
+            }
+        }
+
+    @Test
+    fun translationOrSummaryOffNeverAllowsASummary() {
+        listOf(englishOptions(), sameAsInputOptions()).forEach {
+            assertFalse(it.allowsLearningSummary("English", wasTranslated = true))
+        }
+        listOf(englishOptions(summary = false), sameAsInputOptions(summary = false)).forEach {
+            assertFalse(it.allowsLearningSummary("English", wasTranslated = false))
+        }
+    }
 
     @Test
     fun draftTagsCantBeClosedFromInside() =
@@ -149,7 +257,11 @@ class PolishServiceTest {
         runTest {
             val result =
                 service(replying(englishResponse))
-                    .polish("Send me the report pls", Channel.SLACK, learningSummary = false)
+                    .polish(
+                        "Send me the report pls",
+                        Channel.SLACK,
+                        englishOptions(summary = false),
+                    )
 
             assertNull(result.learningSummary)
             assertEquals("Please send me the report by end of day.", result.polishedText)
@@ -165,7 +277,10 @@ class PolishServiceTest {
                     "learning_summary" to JsonPrimitive(42),
                 )
 
-            val result = service(replying(output)).polish("Hi", Channel.SLACK, false)
+            val result =
+                service(
+                    replying(output),
+                ).polish("Hi", Channel.SLACK, englishOptions(summary = false))
 
             assertNull(result.learningSummary)
         }

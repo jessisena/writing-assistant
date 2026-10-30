@@ -135,6 +135,36 @@ class HistoryStoreTest {
     }
 
     @Test
+    fun entryWithoutAKnownModeLoadsAsWork() {
+        listOf("", "\"mode\": \"family\",").forEach { modeField ->
+            historyFile.parentFile.mkdirs()
+            historyFile.writeText(
+                """
+                [{"id": "a", "epochSeconds": 7, "channel": "slack", $modeField "input": "in",
+                  "output": "out", "learningSummary": null, "detectedLanguage": "English",
+                  "wasTranslated": false, "modelUsed": "m"}]
+                """.trimIndent(),
+            )
+
+            val loaded = HistoryStore(historyFile).load().single()
+
+            assertEquals(Mode.WORK, loaded.mode)
+            assertEquals("out", loaded.output)
+        }
+    }
+
+    @Test
+    fun modeIsStoredByIdAndRoundTrips() {
+        val store = HistoryStore(historyFile)
+        val personal = entry(1).copy(mode = Mode.PERSONAL)
+
+        store.save(listOf(personal))
+
+        assertTrue(historyFile.readText().contains("\"mode\": \"personal\""))
+        assertEquals(listOf(personal), store.load())
+    }
+
+    @Test
     fun unreadableFileIsAReadFailureNamingThePath() {
         historyFile.mkdirs()
 
