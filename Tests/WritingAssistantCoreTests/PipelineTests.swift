@@ -6,6 +6,7 @@ private actor FakeRunner: ClaudeRunning {
     private let output: Result<String, PolishError>
     private let availability: Result<Void, PolishError>
     private let usage: TokenUsage?
+    private let costUSD: Double?
     private let streamed: [String]
     private(set) var calls: [(prompt: String, model: String, timeout: Duration)] = []
 
@@ -14,11 +15,13 @@ private actor FakeRunner: ClaudeRunning {
         output: Result<String, PolishError>,
         availability: Result<Void, PolishError> = .success(()),
         usage: TokenUsage? = nil,
+        costUSD: Double? = nil,
         streamed: [String] = []
     ) {
         self.output = output
         self.availability = availability
         self.usage = usage
+        self.costUSD = costUSD
         self.streamed = streamed
     }
 
@@ -28,7 +31,7 @@ private actor FakeRunner: ClaudeRunning {
     ) async throws(PolishError) -> ClaudeReply {
         calls.append((prompt, model, timeout))
         streamed.forEach(onText)
-        return ClaudeReply(text: try output.get(), usage: usage)
+        return ClaudeReply(text: try output.get(), usage: usage, costUSD: costUSD)
     }
 
     func checkAvailable() async throws(PolishError) {
@@ -629,41 +632,58 @@ private final class PreviewLog: @unchecked Sendable {
 }
 
 private final class RecordingUsage: UsageRecording, @unchecked Sendable {
+    struct Entry: Equatable {
+        let tokens: TokenUsage
+        let costUSD: Double?
+    }
+
     private let lock = NSLock()
-    private var _recorded: [TokenUsage] = []
+    private var _recorded: [Entry] = []
     private let failure: (any Error)?
 
     init(failure: (any Error)? = nil) {
         self.failure = failure
     }
 
-    var recorded: [TokenUsage] { lock.withLock { _recorded } }
+    var recorded: [Entry] { lock.withLock { _recorded } }
 
-    func record(_ usage: TokenUsage) throws {
+    func record(_ usage: TokenUsage, costUSD: Double?) throws {
         if let failure { throw failure }
-        lock.withLock { _recorded.append(usage) }
+        lock.withLock { _recorded.append(Entry(tokens: usage, costUSD: costUSD)) }
     }
 }
 
 @Suite struct UsageRecordingTests {
     private let tokens = TokenUsage(input: 3, output: 40, cacheCreation: 100, cacheRead: 2_000)
+    private var priced: RecordingUsage.Entry { .init(tokens: tokens, costUSD: 0.25) }
 
     private func service(
-        responding output: String, usage reported: TokenUsage?, into usage: RecordingUsage
+        responding output: String, usage reported: TokenUsage?, costUSD: Double? = 0.25,
+        into usage: RecordingUsage
     ) -> PolishService {
         PolishService(
-            runner: FakeRunner(output: .success(output), usage: reported),
+            runner: FakeRunner(output: .success(output), usage: reported, costUSD: costUSD),
             prompts: StubPromptStore(), usage: usage)
     }
 
-    @Test func polishAndRefineRecordTheReplyTokens() async throws {
+    @Test func polishAndRefineRecordTheReplyTokensAndCost() async throws {
         let usage = RecordingUsage()
         let service = service(responding: englishResponse, usage: tokens, into: usage)
 
         _ = try await service.polish(text: "Hello", channel: .slack)
         _ = try await service.refine(text: "Hello", channel: .slack, refinement: .shorter)
 
-        #expect(usage.recorded == [tokens, tokens])
+        #expect(usage.recorded == [priced, priced])
+    }
+
+    @Test func replyWithoutCostStillRecordsItsTokens() async throws {
+        let usage = RecordingUsage()
+        let service = service(
+            responding: englishResponse, usage: tokens, costUSD: nil, into: usage)
+
+        _ = try await service.polish(text: "Hello", channel: .slack)
+
+        #expect(usage.recorded == [RecordingUsage.Entry(tokens: tokens, costUSD: nil)])
     }
 
     @Test func replyThatFailsToParseIsStillRecorded() async {
@@ -676,7 +696,7 @@ private final class RecordingUsage: UsageRecording, @unchecked Sendable {
             guard case .badFormat = error as? PolishError else { return false }
             return true
         }
-        #expect(usage.recorded == [tokens])
+        #expect(usage.recorded == [priced])
     }
 
     @Test func replyWithoutUsageRecordsNothing() async throws {

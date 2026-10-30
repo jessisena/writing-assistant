@@ -89,14 +89,15 @@ private func deltaEvent(_ text: String, type: String = "text_delta") -> String {
     ])
 }
 
-private func resultEvent(_ text: String, isError: Bool = false, usage: [String: Int]? = nil)
-    -> String
-{
+private func resultEvent(
+    _ text: String, isError: Bool = false, usage: [String: Int]? = nil, cost: Any? = nil
+) -> String {
     var event: [String: Any] = [
         "type": "result", "subtype": isError ? "error" : "success", "is_error": isError,
         "result": text,
     ]
     event["usage"] = usage
+    event["total_cost_usd"] = cost
     return jsonLine(event)
 }
 
@@ -200,7 +201,8 @@ private func setEnvironment(_ name: String, _ value: String?) {
                 usage: [
                     "input_tokens": 3, "output_tokens": 27, "cache_creation_input_tokens": 100,
                     "cache_read_input_tokens": 2_000,
-                ]))
+                ],
+                cost: 0.0125))
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
         let log = TextLog()
@@ -212,6 +214,27 @@ private func setEnvironment(_ name: String, _ value: String?) {
         #expect(reply.text == "Hello \"wörld\" 👋\n!")
         #expect(
             reply.usage == TokenUsage(input: 3, output: 27, cacheCreation: 100, cacheRead: 2_000))
+        #expect(reply.costUSD == 0.0125)
+    }
+
+    @Test(arguments: [nil, "0.02"] as [String?])
+    func costThatIsMissingOrNotANumberIsNil(cost: String?) async throws {
+        let fake = try FakeClaude(script: printLines(resultEvent("done", cost: cost)))
+        defer { fake.remove() }
+
+        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+
+        #expect(reply.text == "done")
+        #expect(reply.costUSD == nil)
+    }
+
+    @Test func wholeNumberCostIsRead() async throws {
+        let fake = try FakeClaude(script: printLines(resultEvent("done", cost: 1)))
+        defer { fake.remove() }
+
+        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+
+        #expect(reply.costUSD == 1)
     }
 
     @Test func deltasArriveWhileTheProcessIsStillRunning() async throws {
@@ -272,6 +295,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         #expect(
             reply.usage
                 == TokenUsage(input: 3, output: 27, cacheCreation: 10_175, cacheRead: 14_585))
+        #expect(reply.costUSD == 0.0219465)
     }
 
     @Test func errorResultFailsWithItsText() async throws {

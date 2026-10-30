@@ -252,7 +252,7 @@ delegate when they appear. The activation step is injected, so tests run without
   prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
   history.json             the newest 50 requests
   history.corrupt.json     a history file that couldn't be read, moved aside
-  usage.json               token totals per month
+  usage.json               token and cost totals per month
   usage.corrupt.json       a usage file that couldn't be read, moved aside
   learning-log.md          learning summaries, newest last
 ```
@@ -277,8 +277,8 @@ with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
 `MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
 stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. stdout is read as
 one JSON event per line (`StreamJSONReader`): `text_delta` events go to the caller's `onText` as
-they arrive, and the final `result` event gives the reply text and its `usage` (input, output,
-cache write and cache read tokens). After 120 s the process gets SIGTERM, then SIGKILL after a 2 s
+they arrive, and the final `result` event gives the reply text, its `usage` (input, output,
+cache write and cache read tokens) and `total_cost_usd`. After 120 s the process gets SIGTERM, then SIGKILL after a 2 s
 grace. A non-zero exit is retried once, but only if no text was streamed yet; a timeout is never
 retried. Cancelling the request or quitting the app terminates a running `claude` process.
 
@@ -286,7 +286,7 @@ The `result` event arrives about 2.5 s after the model's last token (CLI shutdow
 also carries about 24K tokens of Claude Code's own system prompt, mostly cache reads. Both show in
 the token count; the preview makes the first.
 
-### Progressive display, summary setting and token count
+### Progressive display, summary setting, token count and cost
 
 `PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which reports the
 top-level `polished_text` the moment its JSON string closes (with `detected_language` and
@@ -305,6 +305,16 @@ Runs that end without a `result` event (cancelled, timed out, crashed) report no
 counted, and neither is a failed first attempt that was retried, so the count is a slight
 undercount. The toolbar and Settings › General show the current month, re-read after each request,
 when the app becomes active and when Settings opens.
+
+The cost is the CLI's own `total_cost_usd`, summed per month as `costUSD` next to the tokens; the
+app keeps no price table. The CLI prices each run per model at API list prices (`"costBasis":
+"list"`), including its 1-hour cache writes, which cost more than 5-minute ones and which the
+token counts don't distinguish. The app runs on the user's subscription login, so the figure is
+what the tokens would cost through the API, not what is billed; the UI says so. A `result` without
+a numeric `total_cost_usd` still counts its tokens and adds nothing to the cost. The toolbar shows
+cents ("48.2K tokens · $0.42 this month"); its tooltip and Settings show four decimals. A cost
+above zero but under the smallest step shows as "<$0.01". `costUSD` is required in `usage.json`,
+so a file written before it existed is treated as damaged and moved aside.
 
 ### Logging
 

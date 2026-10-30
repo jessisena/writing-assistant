@@ -32,9 +32,9 @@ public struct ClaudeCLI: ClaudeRunning {
     /// Sends `prompt` on stdin to `claude --print` and returns the reply of its `result` event.
     ///
     /// The CLI streams newline-delimited JSON events. Each text delta goes to `onText` as it
-    /// arrives; the final `result` event supplies the reply text (trimmed) and the token usage.
-    /// A non-zero exit is retried once, but only when no text delta reached `onText` yet: a
-    /// retry after that would make the caller see the reply text twice. A timeout is never
+    /// arrives; the final `result` event supplies the reply text (trimmed), the token usage and
+    /// the cost. A non-zero exit is retried once, but only when no text delta reached `onText`
+    /// yet: a retry after that would make the caller see the reply text twice. A timeout is never
     /// retried. Cancelling the calling task terminates the process (SIGTERM, then SIGKILL after
     /// a grace period).
     ///
@@ -155,7 +155,7 @@ public struct ClaudeCLI: ClaudeRunning {
             claudeLogger.error("claude CLI reported an error: \(detail, privacy: .public)")
             return .failure(.cliFailed(stderr: detail))
         }
-        return .success(ClaudeReply(text: text, usage: result.usage))
+        return .success(ClaudeReply(text: text, usage: result.usage, costUSD: result.costUSD))
     }
 
     /// Prefers stderr, then an error `result` event, then the stdout lines that aren't JSON:
