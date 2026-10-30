@@ -22,24 +22,43 @@ struct HistoryButton: View {
     }
 }
 
-/// Lists past requests, newest first. Selecting one restores it and closes the popover. Rows and
-/// Clear History are disabled while a request runs.
+/// Lists past requests, newest first, optionally only one mode's. Selecting one restores it and
+/// closes the popover. Rows and Clear History are disabled while a request runs.
 struct HistoryView: View {
     let model: AppModel
     let onRestore: () -> Void
     @State private var isConfirmingClear = false
+    /// The mode whose requests are listed; nil lists every request.
+    @State private var modeFilter: Mode?
+
+    private var entries: [HistoryEntry] { model.historyEntries(in: modeFilter) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("History")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Text("History")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Picker("Show", selection: $modeFilter) {
+                    Text("All").tag(Mode?.none)
+                    ForEach(Mode.allCases) { Text($0.displayName).tag(Mode?.some($0)) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("Show requests from")
+            }
             if model.history.isEmpty {
                 Text("No history yet. Processed texts appear here.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 60)
+            } else if let modeFilter, entries.isEmpty {
+                Text("No \(modeFilter.displayName) requests yet.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 60)
             } else {
-                HistoryList(model: model, onRestore: onRestore)
+                HistoryList(model: model, entries: entries, onRestore: onRestore)
                     .disabled(model.isLoading)
             }
             Divider()
@@ -67,12 +86,13 @@ struct HistoryView: View {
 
 private struct HistoryList: View {
     let model: AppModel
+    let entries: [HistoryEntry]
     let onRestore: () -> Void
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(model.history) { entry in
+                ForEach(entries) { entry in
                     HistoryRow(
                         entry: entry,
                         isCurrent: entry.id == model.currentHistoryID,
@@ -107,6 +127,8 @@ private struct HistoryRow: View {
                         Text(entry.date, format: .relative(presentation: .named))
                         Text("·")
                         Text(entry.channel.displayName)
+                        Text("·")
+                        Text(entry.mode.displayName)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -139,7 +161,8 @@ private struct HistoryRow: View {
     private var accessibilityLabel: String {
         let date = entry.date.formatted(.relative(presentation: .named))
         let current = isCurrent ? ", shown now" : ""
-        return "\(entry.channel.displayName), \(date)\(current): \(preview)"
+        return "\(entry.channel.displayName), \(entry.mode.displayName), \(date)\(current): "
+            + preview
     }
 
     /// The first non-empty line of the output as plain text, without Markdown markers.

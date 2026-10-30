@@ -10,7 +10,7 @@
         private var _readiness: PolishError?
         private var _previews: [PolishPreview]
         private var _calls: [(text: String, channel: Channel)] = []
-        private var _summaryRequests: [Bool] = []
+        private var _requestedOptions: [PolishOptions] = []
         private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
         let delay: Duration
 
@@ -31,8 +31,8 @@
             set { lock.withLock { _previews = newValue } }
         }
 
-        /// The `includeLearningSummary` value of each `polish` call, in call order.
-        var summaryRequests: [Bool] { lock.withLock { _summaryRequests } }
+        /// The `options` of each `polish` call, in call order.
+        var requestedOptions: [PolishOptions] { lock.withLock { _requestedOptions } }
 
         var outcome: Result<PolishResult, PolishError> {
             get { lock.withLock { _outcome } }
@@ -51,12 +51,12 @@
         }
 
         func polish(
-            text: String, channel: Channel, includeLearningSummary: Bool,
+            text: String, channel: Channel, options: PolishOptions,
             onPreview: @escaping @Sendable (PolishPreview) -> Void
         ) async throws(PolishError) -> PolishResult {
             let previews = lock.withLock {
                 _calls.append((text, channel))
-                _summaryRequests.append(includeLearningSummary)
+                _requestedOptions.append(options)
                 return _previews
             }
             for preview in previews {
@@ -115,7 +115,7 @@
         }
 
         func polish(
-            text: String, channel: Channel, includeLearningSummary: Bool,
+            text: String, channel: Channel, options: PolishOptions,
             onPreview: @escaping @Sendable (PolishPreview) -> Void
         ) async throws(PolishError) -> PolishResult {
             try await wait(onPreview: onPreview)
@@ -170,6 +170,12 @@
             }
             for refinement in Refinement.allCases {
                 seeded[.refinement(refinement)] = "\(refinement.rawValue) instruction"
+            }
+            for mode in Mode.allCases {
+                seeded[.mode(mode)] = "\(mode.rawValue) tone"
+            }
+            for language in OutputLanguage.allCases {
+                seeded[.languagePolicy(language)] = "\(language.rawValue) language"
             }
             defaults = seeded
             self.files = files ?? seeded

@@ -33,8 +33,8 @@ struct WritingAssistantApp: App {
         Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
-                .environment(\.theme, themeSettings.palette)
-                .tint(themeSettings.palette.ink)
+                .environment(\.theme, themeSettings.palette.forMode(model.mode))
+                .tint(themeSettings.palette.forMode(model.mode).ink)
                 .task { await model.checkReadiness() }
                 .handsMainWindowOpener(to: appDelegate)
         }
@@ -43,6 +43,7 @@ struct WritingAssistantApp: App {
         .commands {
             FormatCommands()
             LearningLogCommands(model: model)
+            ModeCommands(model: model)
         }
 
         Settings {
@@ -170,6 +171,9 @@ struct MainWindowView: View {
             model.refreshMonthlyUsage()
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                ModePicker(model: model)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 MonthlyUsageLabel(model: model)
                 HistoryButton(model: model)

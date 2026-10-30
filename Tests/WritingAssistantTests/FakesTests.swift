@@ -13,7 +13,9 @@ import WritingAssistantCore
 
     @Test func fakePromptStoreAssemblesChannelIntoGlobal() throws {
         let store = FakePromptStore()
-        #expect(try store.assemble(for: .slack, learningSummary: true) == "Rules\nslack guidelines")
+        let options = PolishOptions(
+            mode: .work, outputLanguage: .english, includesLearningSummary: true)
+        #expect(try store.assemble(for: .slack, options: options) == "Rules\nslack guidelines")
     }
 
     @Test func fakePromptStoreAssemblesTheRefinePrompt() throws {

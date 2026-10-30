@@ -38,7 +38,30 @@ import WritingAssistantCore
     func stageFollowsWhatTheReplySaid(
         preview: PolishPreview?, includesSummary: Bool, expected: PolishStage
     ) {
-        #expect(PolishStage(preview, includesLearningSummary: includesSummary) == expected)
+        let options = PolishOptions(
+            mode: .work, outputLanguage: .english, includesLearningSummary: includesSummary)
+        #expect(PolishStage(preview, options: options) == expected)
+    }
+
+    private static let sameAsInputCases: [(PolishPreview, PolishStage)] = [
+        (
+            PolishPreview(
+                polishedText: "Hola", isTextComplete: true, detectedLanguage: "Spanish",
+                wasTranslated: false), .finishing
+        ),
+        (PolishPreview(polishedText: "Hola", isTextComplete: true), .finishing),
+        (
+            PolishPreview(
+                polishedText: "Hi", isTextComplete: true, detectedLanguage: "English",
+                wasTranslated: false), .writingTips
+        ),
+    ]
+
+    @Test(arguments: sameAsInputCases)
+    func sameAsInputOnlyWritesTipsForEnglish(preview: PolishPreview, expected: PolishStage) {
+        let options = PolishOptions(
+            mode: .personal, outputLanguage: .sameAsInput, includesLearningSummary: true)
+        #expect(PolishStage(preview, options: options) == expected)
     }
 
     @Test(arguments: [

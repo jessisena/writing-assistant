@@ -38,7 +38,7 @@ import WritingAssistantCore
         let text = try #require(logText())
         #expect(text.components(separatedBy: "### Corrections").count == 2)
         #expect(text.contains("I will to review → I'll review"))
-        #expect(text.contains(Channel.formal.displayName))
+        #expect(text.contains(Channel.slack.displayName))
         #expect(model.errorMessage == nil)
     }
 

@@ -18,11 +18,12 @@ extension AppModel {
         }
     }
 
-    /// Restores the entry with `id`: its input, output, channel and result (learning summary,
-    /// language, translation flag and model) come back, and it becomes the current entry. The
-    /// output on screen is saved to its own entry first, and a failure to save it is shown in the
-    /// error banner even when `id` is unknown. An unknown `id` leaves the screen as it is.
-    /// Ignored while a request is running.
+    /// Restores the entry with `id`: its input, output, mode, channel and result (learning
+    /// summary, language, translation flag and model) come back, and it becomes the current
+    /// entry. A channel now hidden in that mode is remembered, but the chips select the mode's
+    /// first visible channel (see `AppModel.channel`). The output on screen is saved to its own
+    /// entry first, and a failure to save it is shown in the error banner even when `id` is
+    /// unknown. An unknown `id` leaves the screen as it is. Ignored while a request is running.
     func restoreHistoryEntry(id: UUID) {
         guard !isLoading else { return }
         var saveError: (any Error)?
@@ -32,6 +33,7 @@ extension AppModel {
             saveError = error
         }
         if let entry = history.first(where: { $0.id == id }) {
+            switchMode(to: entry.mode)
             channel = entry.channel
             show(
                 Self.result(for: entry), input: Self.editorText(fromMarkdown: entry.inputMarkdown))
@@ -61,10 +63,11 @@ extension AppModel {
 
     /// Adds a finished request as the newest entry and makes it current: a successful one, or a
     /// polish that showed its polished text before it failed or was cancelled.
-    func recordHistory(_ result: PolishResult, input: String, channel: Channel) {
+    func recordHistory(_ result: PolishResult, input: String, channel: Channel, mode: Mode) {
         let entry = HistoryEntry(
             date: .now,
             channel: channel,
+            mode: mode,
             inputMarkdown: input,
             outputMarkdown: result.polishedText,
             learningSummary: result.learningSummary,
