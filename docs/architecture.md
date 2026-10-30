@@ -314,13 +314,41 @@ measurement of single requests; `usage.json` was deliberately not reset.
 
 ### Progressive display, summary setting, token count and cost
 
-`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which reports the
-top-level `polished_text` the moment its JSON string closes (with `detected_language` and
-`was_translated` if they came first). `AppModel` shows it as the result with no summary and a
-placeholder summary card; the final result fills in the summary but keeps the output editor's
-text, so edits made during the wait survive. A preview for a request that is no longer current is
-ignored. After a cancel or failure the previewed text stays and is saved to history without a
-summary.
+`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which calls `onPreview`
+with a `PolishPreview` after every piece that changes what the reply has said:
+`detected_language` and `was_translated` once each value ends (before or after the text), and the
+top-level `polished_text` decoded as it arrives (`""` when its string opens, longer with each
+piece, `isTextComplete` when it closes). Escapes are decoded one scalar at a time with
+`JSONSerialization`'s rules, and an escape (`\n`, `\u00e9`, the `\uD83D\uDE80` surrogate
+pair) is only added once complete, so a partial text never ends in half an escape. A malformed
+top-level string stops the scan, so it never reports a complete text. Scanning stops when the
+top-level object closes.
+
+`AppModel` hands previews to the main actor through `PreviewMailbox`, which keeps only the newest
+and one delivery in flight, so updates stay in order and a busy main actor skips stale ones.
+Deliveries are at least 33 ms apart (about 30 a second) and at least five times what the last one
+took: each update converts the Markdown so far (about 3.5 ms for 2,000 characters and 44 ms for
+20,000 in a debug build) and replaces the editor's text, and the CLI sends 50–100 pieces a second.
+
+- While the text streams in, the polished card shows it read-only: the formatting toolbar, Edit /
+  Changes and Copy are disabled, since the next update would replace an edit. Partial Markdown
+  shows as typed (`**bol` until the closing `**` arrives). There's no typewriter or fade effect,
+  so Reduce Motion has nothing to turn off beyond the existing card transitions.
+- Once the text is complete it is editable and Copy works. Later previews only update the
+  language, and the final result only adds the summary, so edits made meanwhile survive.
+- The window scrolls to the results once, when the first text appears, not while it streams or
+  when the summary arrives.
+- The Polish button's progress text follows `PolishStage`: "Detecting language…" until the reply
+  says `was_translated` or starts the text, then "Translating from Spanish…" (or "Translating…"
+  without a language) or "Polishing…", then "Writing tips…" once the text is complete and a
+  summary is coming, or "Finishing…" when none is (summary off, or a translation). A reply that
+  writes `polished_text` first reads "Polishing…", and its card shows only the model until the
+  language arrives; a late `was_translated: true` removes the summary placeholder.
+- A cancel or failure after the text is complete keeps it and saves it to history without a
+  summary. While the text is still streaming in, a cancel returns to the empty state and a
+  failure shows only the error; neither saves a half text to history.
+- A preview for a request that is no longer current is ignored. If the final result arrives
+  before the complete text was shown, it replaces the streamed text.
 
 Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
 When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
@@ -388,7 +416,7 @@ paste + channel, Process (⌘↩)
       │
       ▼  one ClaudeCLI.run() call, stream-json
          MAX_THINKING_TOKENS=0, MCP disabled
-         polished_text closes → onPreview (shown at once)
+         every piece → onPreview (text streams in, stage line)
 ┌────────────────────────────────────────┐
 │ polish.txt  (4 steps)                  │
 │  1. detect language                    │
