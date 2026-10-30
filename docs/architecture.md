@@ -270,11 +270,31 @@ installing `claude` works without relaunching. Those directories are prefixed on
 
 ```
 claude --print --output-format stream-json --verbose --include-partial-messages \
-  --model <model> --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
+  --model <model> --system-prompt-file <file> --tools "" --setting-sources "" \
+  --disable-slash-commands --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+  --no-session-persistence
 ```
 
-with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
-`MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
+with only the user's text written to stdin, and environment `MAX_THINKING_TOKENS=0`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`,
+no `ANTHROPIC_API_KEY`.
+
+- `--system-prompt-file` replaces Claude Code's own system prompt with the assembled polish (or
+  refinement) prompt. The file is written for each request into a new `WritingAssistant-<UUID>`
+  directory in the temporary directory (directory 0700, file 0600), so the prompt never shows in
+  `ps` or meets `ARG_MAX`, and the directory is deleted when the call returns, including after a
+  failure, timeout or cancel. Both attempts of a retried call use the same file.
+- `--tools ""` removes every built-in tool, so a draft can't trigger tool use, and
+  `--disable-slash-commands` drops skills and commands.
+- `--setting-sources ""` loads no user, project or local settings file, so the user's hooks,
+  plugins and other settings don't run on polish calls. Settings such as `DISABLE_TELEMETRY` that
+  usually live in `~/.claude/settings.json` are therefore set in the child environment instead.
+  Managed (policy) settings and Claude Code's built-in plugins still load.
+- `--bare` isn't used: it also skips the keychain, where the subscription login lives.
+- An older `claude` that doesn't know one of these flags exits with "unknown option" (on stderr,
+  or for some errors on stdout). That maps to `PolishError.cliOutdated`, which asks the user to
+  run `claude update`, and is never retried.
+
 stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. stdout is read as
 one JSON event per line (`StreamJSONReader`): `text_delta` events go to the caller's `onText` as
 they arrive, and the final `result` event gives the reply text, its `usage` (input, output,
@@ -282,9 +302,15 @@ cache write and cache read tokens) and `total_cost_usd`. After 120 s the process
 grace. A non-zero exit is retried once, but only if no text was streamed yet; a timeout is never
 retried. Cancelling the request or quitting the app terminates a running `claude` process.
 
-The `result` event arrives about 2.5 s after the model's last token (CLI shutdown), and each call
-also carries about 24K tokens of Claude Code's own system prompt, mostly cache reads. Both show in
-the token count; the preview makes the first.
+The `result` event arrives about 2.5 s after the model's last token (CLI shutdown); the preview
+makes up for it. Before 2026-10-30 each call also carried about 24K tokens of Claude Code's own
+system prompt and tool definitions, cache-written at the 1-hour rate or read from the cache. With
+the flags above, a Slack polish with the bundled prompts sends about 2K input tokens, none cached
+(the prompt is below the cacheable minimum), and costs about a sixth as much.
+
+Note (2026-10-30): the switch to these flags happened mid-month, so the October 2026 totals in
+`usage.json` mix runs before and after it. Per-request comparisons need November data or a
+measurement of single requests; `usage.json` was deliberately not reset.
 
 ### Progressive display, summary setting, token count and cost
 

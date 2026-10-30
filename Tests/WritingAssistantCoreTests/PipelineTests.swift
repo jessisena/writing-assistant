@@ -8,7 +8,8 @@ private actor FakeRunner: ClaudeRunning {
     private let usage: TokenUsage?
     private let costUSD: Double?
     private let streamed: [String]
-    private(set) var calls: [(prompt: String, model: String, timeout: Duration)] = []
+    private(set) var calls:
+        [(systemPrompt: String, input: String, model: String, timeout: Duration)] = []
 
     /// - Parameter streamed: Pieces passed to `onText`, in order, before `output` is returned.
     init(
@@ -26,10 +27,10 @@ private actor FakeRunner: ClaudeRunning {
     }
 
     func run(
-        prompt: String, model: String, timeout: Duration,
+        systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
-        calls.append((prompt, model, timeout))
+        calls.append((systemPrompt, input, model, timeout))
         streamed.forEach(onText)
         return ClaudeReply(text: try output.get(), usage: usage, costUSD: costUSD)
     }
@@ -382,7 +383,8 @@ private func expectBadFormat(_ output: String) async {
         let result = try await service(runner).polish(text: "  Hello there \n", channel: .formal)
         let calls = await runner.calls
         #expect(calls.count == 1)
-        #expect(calls.first?.prompt == "SYSTEM PROMPT\n\n---\n\nHello there")
+        #expect(calls.first?.systemPrompt == "SYSTEM PROMPT")
+        #expect(calls.first?.input == "Hello there")
         #expect(calls.first?.model == ModelRouting.haikuModel)
         #expect(calls.first?.timeout == .seconds(7))
         #expect(result.modelUsed == ModelRouting.haikuModel)
@@ -412,17 +414,18 @@ private func expectBadFormat(_ output: String) async {
     }
 
     @Test(arguments: Refinement.allCases)
-    func promptAppendsTheRefinementInstructionBeforeTheInput(refinement: Refinement) async throws {
+    func systemPromptAppendsTheRefinementInstruction(refinement: Refinement) async throws {
         let runner = FakeRunner(output: .success(refinedResponse))
         _ = try await service(runner).refine(
             text: "  Please send me the report.\n", channel: .formal, refinement: refinement)
 
-        let prompt = try #require(await runner.calls.first?.prompt)
+        let call = try #require(await runner.calls.first)
         let instruction = "\(refinement.rawValue.uppercased()) INSTRUCTION"
+        let prompt = call.systemPrompt
         #expect(prompt.hasPrefix("SYSTEM PROMPT\n\n## Additional instruction\n\n\(instruction)\n"))
-        #expect(prompt.hasSuffix("\n\n---\n\nPlease send me the report."))
         #expect(prompt.contains("already-polished English"))
-        #expect(prompt.contains("learning_summary to null"))
+        #expect(prompt.hasSuffix("learning_summary to null."))
+        #expect(call.input == "Please send me the report.")
     }
 
     @Test func returnsOnlyThePolishedText() async throws {
@@ -530,8 +533,8 @@ private func expectBadFormat(_ output: String) async {
         #expect(result.learningSummary == nil)
         #expect(result.polishedText == "Please send me the report by end of day.")
         #expect(
-            await runner.calls.first?.prompt
-                == "SYSTEM PROMPT\n\n\(PolishService.summaryOffNote)\n\n---\n\nHello there")
+            await runner.calls.first?.systemPrompt
+                == "SYSTEM PROMPT\n\n\(PolishService.summaryOffNote)")
     }
 
     @Test func turnedOnKeepsThePromptAndTheSummary() async throws {
@@ -543,7 +546,7 @@ private func expectBadFormat(_ output: String) async {
             onPreview: { _ in })
 
         #expect(result.learningSummary != nil)
-        #expect(await runner.calls.first?.prompt == "SYSTEM PROMPT\n\n---\n\nHello there")
+        #expect(await runner.calls.first?.systemPrompt == "SYSTEM PROMPT")
     }
 }
 

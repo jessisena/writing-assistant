@@ -127,15 +127,16 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
-    /// Runs the prompt on the routed model, returning the raw reply and the model used. The
-    /// reply's tokens are recorded; a recording failure is logged and doesn't fail the request.
+    /// Runs `input` under `systemPrompt` on the routed model, returning the raw reply and the
+    /// model used. The reply's tokens are recorded; a recording failure is logged and doesn't
+    /// fail the request.
     private func send(
         _ systemPrompt: String, input: String,
         onText: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws(PolishError) -> (raw: String, model: String) {
         let model = ModelRouting.pickModel(for: input)
         let reply = try await runner.run(
-            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout,
+            systemPrompt: systemPrompt, input: input, model: model, timeout: timeout,
             onText: onText)
         record(reply.usage, costUSD: reply.costUSD)
         return (reply.text, model)

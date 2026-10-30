@@ -73,13 +73,14 @@ import WritingAssistantCore
 }
 
 private actor RecordingRunner: ClaudeRunning {
+    /// The system prompt of each call.
     private(set) var prompts: [String] = []
 
     func run(
-        prompt: String, model: String, timeout: Duration,
+        systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
-        prompts.append(prompt)
+        prompts.append(systemPrompt)
         return ClaudeReply(
             text: #"{"polished_text": "Hi", "was_translated": false, "learning_summary": null}"#,
             usage: nil)

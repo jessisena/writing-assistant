@@ -214,6 +214,8 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
     case claudeNotFound
     case timeout(seconds: Int)
     case cliFailed(stderr: String)
+    /// The installed claude rejected a flag this app passes; `detail` is what it printed.
+    case cliOutdated(detail: String)
     case badFormat(detail: String)
     case promptUnavailable(detail: String)
 
@@ -230,6 +232,9 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
             "Claude took longer than \(seconds) seconds. Please try again."
         case .cliFailed:
             "Claude returned an error. Check the logs."
+        case .cliOutdated:
+            "Your Claude Code is too old for this app. Update it by running `claude update` in a "
+                + "terminal, then try again."
         case .badFormat:
             "Unexpected response format from Claude. Check the logs."
         case .promptUnavailable(let detail):
@@ -296,12 +301,13 @@ public enum PromptValidationError: LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Runs one prompt through the claude CLI and returns its reply.
-/// Throws `PolishError.claudeNotFound`, `.timeout`, or `.cliFailed`.
+/// Runs one request through the claude CLI and returns its reply.
+/// Throws `PolishError.claudeNotFound`, `.timeout`, `.cliOutdated`, or `.cliFailed`.
 public protocol ClaudeRunning: Sendable {
+    /// Sends `input` as the user turn under `systemPrompt`, which replaces Claude Code's own.
     /// `onText` receives the reply text in order, piece by piece, while it is generated.
     func run(
-        prompt: String, model: String, timeout: Duration,
+        systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
