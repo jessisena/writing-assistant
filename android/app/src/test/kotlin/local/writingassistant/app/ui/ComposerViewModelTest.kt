@@ -25,6 +25,7 @@ import local.writingassistant.app.ui.ComposerEvent.RefreshApiKey
 import local.writingassistant.app.ui.ComposerEvent.Retry
 import local.writingassistant.app.ui.ComposerState.Phase
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Refinement
 import org.junit.After
@@ -219,14 +220,14 @@ class ComposerViewModelTest {
     @Test
     fun `last channel is restored on start`() =
         runTest(dispatcher) {
-            settings.channel = Channel.AI_PROMPT
+            settings.setLastChannel(Mode.WORK, Channel.AI_PROMPT)
             assertEquals(Channel.AI_PROMPT, viewModel().state.value.channel)
         }
 
     @Test
     fun `a channel picked before the restore finishes wins`() =
         runTest(dispatcher) {
-            settings.channel = Channel.AI_PROMPT
+            settings.setLastChannel(Mode.WORK, Channel.AI_PROMPT)
             val vm = newViewModel()
             vm.onEvent(ChannelSelected(Channel.TALKING_POINTS))
             advanceUntilIdle()

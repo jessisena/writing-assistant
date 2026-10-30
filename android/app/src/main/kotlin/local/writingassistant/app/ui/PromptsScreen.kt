@@ -72,6 +72,12 @@ fun PromptListScreen(
             onOpen,
         )
         PromptGroup(
+            R.string.prompts_group_modes,
+            PromptFile.all.filter { it is PromptFile.ForMode || it is PromptFile.ForLanguage },
+            edited,
+            onOpen,
+        )
+        PromptGroup(
             R.string.prompts_group_channels,
             PromptFile.all.filterIsInstance<PromptFile.ForChannel>(),
             edited,

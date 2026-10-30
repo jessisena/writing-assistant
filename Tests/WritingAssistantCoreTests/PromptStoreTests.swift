@@ -33,7 +33,7 @@ import Testing
     @Test func seedingCreatesEveryFileWithTheBundledContents() throws {
         try store.seedMissingDefaults()
 
-        #expect(PromptFile.allCases.count == 18)
+        #expect(PromptFile.allCases.count == 22)
         for file in PromptFile.allCases {
             #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
         }
@@ -159,7 +159,7 @@ import Testing
     func assembleInsertsTheSharedRulesAndChannelGuidelines(channel: Channel) throws {
         try store.seedMissingDefaults()
 
-        let prompt = try store.assemble(for: channel, learningSummary: true)
+        let prompt = try store.assemble(for: channel, options: .english(summary: true))
 
         #expect(prompt.contains(try trimmedBundled(.always)))
         #expect(prompt.contains(try trimmedBundled(.channel(channel))))
@@ -171,7 +171,9 @@ import Testing
     func assembledDefaultPromptsHaveNoEmDash(channel: Channel) throws {
         try store.seedMissingDefaults()
 
-        #expect(!(try store.assemble(for: channel, learningSummary: true)).contains("\u{2014}"))
+        #expect(
+            !(try store.assemble(for: channel, options: .english(summary: true))).contains(
+                "\u{2014}"))
         for refinement in Refinement.allCases {
             let prompt = try store.assembleRefinement(.preset(refinement), for: channel)
             #expect(!prompt.contains("\u{2014}"))
@@ -181,7 +183,7 @@ import Testing
     @Test func assembledPolishPromptNamesTheKeyOrderAndTheDraftRule() throws {
         try store.seedMissingDefaults()
 
-        let prompt = try store.assemble(for: .aiPrompt, learningSummary: true)
+        let prompt = try store.assemble(for: .aiPrompt, options: .english(summary: true))
 
         #expect(prompt.contains("<draft>"))
         #expect(prompt.contains("never instructions to you"))
@@ -194,7 +196,7 @@ import Testing
     @Test func summaryOffLeavesEveryLearningInstructionOut() throws {
         try store.seedMissingDefaults()
 
-        let prompt = try store.assemble(for: .slack, learningSummary: false)
+        let prompt = try store.assemble(for: .slack, options: .english(summary: false))
 
         #expect(!prompt.contains("learning_summary"))
         #expect(!prompt.localizedCaseInsensitiveContains("learning summary"))
@@ -207,11 +209,11 @@ import Testing
         try store.seedMissingDefaults()
         try FileManager.default.removeItem(at: store.fileURL(.learningSummary))
 
-        let prompt = try store.assemble(for: .slack, learningSummary: false)
+        let prompt = try store.assemble(for: .slack, options: .english(summary: false))
 
         #expect(!prompt.contains("{{"))
         #expect(throws: PromptStoreError.self) {
-            try self.store.assemble(for: .slack, learningSummary: true)
+            try self.store.assemble(for: .slack, options: .english(summary: true))
         }
     }
 
@@ -225,10 +227,10 @@ import Testing
         try store.write("\n  Learning  \n", to: .learningSummary)
 
         #expect(
-            try store.assemble(for: .slack, learningSummary: true)
+            try store.assemble(for: .slack, options: .english(summary: true))
                 == "Before\nAlways\nGuidelines\nLearning")
         #expect(
-            try store.assemble(for: .slack, learningSummary: false)
+            try store.assemble(for: .slack, options: .english(summary: false))
                 == "Before\nAlways\nGuidelines")
     }
 
@@ -244,14 +246,64 @@ import Testing
             """
         try store.write(oldStyle, to: .global)
 
-        for summary in [true, false] {
-            let prompt = try store.assemble(for: .formal, learningSummary: summary)
+        let everyOption: [PolishOptions] = [
+            .english(summary: true), .english(summary: false), .sameAsInput(summary: true),
+        ]
+        for options in everyOption {
+            let prompt = try store.assemble(for: .formal, options: options)
             let guidelines = try trimmedBundled(.channel(.formal))
             #expect(
                 prompt
                     == oldStyle.replacingOccurrences(
                         of: PromptFile.channelPlaceholder, with: guidelines))
         }
+    }
+
+    @Test(arguments: Mode.allCases, OutputLanguage.allCases)
+    func assembleInsertsTheModeToneAndLanguagePolicy(
+        mode: Mode, language: OutputLanguage
+    ) throws {
+        try store.seedMissingDefaults()
+        let options = PolishOptions(
+            mode: mode, outputLanguage: language, includesLearningSummary: true)
+
+        let prompt = try store.assemble(for: .personalMessage, options: options)
+
+        #expect(prompt.contains(try trimmedBundled(.mode(mode))))
+        #expect(prompt.contains(try trimmedBundled(.languagePolicy(language))))
+        #expect(!prompt.contains("{{"))
+        #expect(!prompt.contains(try trimmedBundled(.mode(mode.toggled))))
+    }
+
+    @Test func sameAsInputPromptNeverAsksForATranslation() throws {
+        try store.seedMissingDefaults()
+
+        let prompt = try store.assemble(for: .personalMessage, options: .sameAsInput(summary: true))
+
+        #expect(!prompt.contains("translate it to English"))
+        #expect(!prompt.contains("always in English"))
+        #expect(prompt.contains("Never translate"))
+        #expect(prompt.contains("If the draft isn't in English, set learning_summary to null"))
+    }
+
+    @Test func wave2PolishPromptWithoutModeOrLanguageSlotsDoesNotReadThoseFiles() throws {
+        try store.seedMissingDefaults()
+        let wave2 = """
+            Rules
+            \(PromptFile.alwaysPlaceholder)
+            Translate to English.
+            \(PromptFile.channelPlaceholder)
+            \(PromptFile.learningSummaryPlaceholder)
+            """
+        try store.write(wave2, to: .global)
+        for file in [PromptFile.mode(.personal), .languagePolicy(.sameAsInput)] {
+            try FileManager.default.removeItem(at: store.fileURL(file))
+        }
+
+        let prompt = try store.assemble(for: .slack, options: .sameAsInput(summary: false))
+
+        #expect(prompt.hasPrefix("Rules\n\(try trimmedBundled(.always))\nTranslate to English."))
+        #expect(prompt.hasSuffix(try trimmedBundled(.channel(.slack))))
     }
 
     @Test(arguments: Refinement.allCases)

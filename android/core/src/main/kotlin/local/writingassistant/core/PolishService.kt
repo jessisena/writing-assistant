@@ -52,10 +52,12 @@ class PolishService(
     /**
      * Polishes (or translates, then polishes) [text] for [channel].
      *
-     * When the model reports a truthy `was_translated`, or [learningSummary] is false, the
-     * result never carries a learning summary, whatever the model returned.
+     * The result only carries a learning summary when [PolishOptions.allowsLearningSummary]
+     * holds for the reply: never for a translation, for non-English input or with the summary
+     * off, whatever the model returned.
      *
-     * @param learningSummary False leaves the learning summary section out of the prompt.
+     * @param options Select the mode tone and language policy inserted into the prompt; a false
+     *   [PolishOptions.includesLearningSummary] leaves the learning summary section out.
      *
      * @throws PolishError EmptyInput, InputTooLong, PromptUnavailable, BadFormat, or any error
      *   thrown by the client, unchanged.
@@ -63,13 +65,13 @@ class PolishService(
     override suspend fun polish(
         text: String,
         channel: Channel,
-        learningSummary: Boolean,
+        options: PolishOptions,
     ): PolishResult {
         val input = validatedInput(text)
-        val systemPrompt = loadPrompt { assembler.assemble(channel, learningSummary) }
+        val systemPrompt = loadPrompt { assembler.assemble(channel, options) }
         val backend = backend()
         val model = backend.models.forTier(ModelRouting.pickTier(input))
-        return parse(send(backend.client, systemPrompt, input, model), model, learningSummary)
+        return parse(send(backend.client, systemPrompt, input, model), model, options)
     }
 
     /**
@@ -135,24 +137,29 @@ class PolishService(
             return trimmed
         }
 
+        /**
+         * Reads the reply. `learning_summary` is only decoded when [options] allow a summary for
+         * the reply's language fields; otherwise it is ignored, even when malformed.
+         */
         private fun parse(
             raw: String,
             model: String,
-            wantsSummary: Boolean,
+            options: PolishOptions,
         ): PolishResult {
             val response = decodeObject(raw)
             val polishedText = polishedText(response)
             val wasTranslated = isTruthy(response["was_translated"])
+            val language = stringValue(response["detected_language"]) ?: "Unknown"
             val summary =
-                if (wasTranslated || !wantsSummary) {
-                    null
-                } else {
+                if (options.allowsLearningSummary(language, wasTranslated)) {
                     decodeSummary(response["learning_summary"])
+                } else {
+                    null
                 }
             return PolishResult(
                 polishedText = polishedText,
                 learningSummary = summary,
-                detectedLanguage = stringValue(response["detected_language"]) ?: "Unknown",
+                detectedLanguage = language,
                 wasTranslated = wasTranslated,
                 modelUsed = model,
             )

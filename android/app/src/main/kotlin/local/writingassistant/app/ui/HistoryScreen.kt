@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,6 +38,7 @@ import local.writingassistant.app.AppGraph
 import local.writingassistant.app.R
 import local.writingassistant.app.data.HistoryRepository
 import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.Mode
 import java.text.DateFormat
 import java.util.Date
 
@@ -79,8 +81,9 @@ class HistoryViewModel(
 }
 
 /**
- * The history, newest first: each row shows the date, the channel and the first line of the
- * output, and has Delete. "Clear all" asks for an inline confirmation.
+ * The history, newest first, optionally only one mode's: each row shows the date, the channel,
+ * the mode and the first line of the output, and has Delete. "Clear all" asks for an inline
+ * confirmation.
  *
  * @param entries Newest first.
  * @param failure Shown above the list when the last change couldn't be written.
@@ -103,8 +106,20 @@ fun HistoryScreen(
         return
     }
     val format = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    var filterId by rememberSaveable { mutableStateOf<String?>(null) }
+    val filter = filterId?.let(Mode::fromId)
+    val shown = entriesIn(entries, filter)
     LazyColumn(modifier) {
         item {
+            ModeFilter(filter) { filterId = it?.id }
+            if (filter != null && shown.isEmpty()) {
+                Text(
+                    stringResource(R.string.history_filter_empty, filter.displayName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             failure?.let {
                 Text(
                     it,
@@ -123,9 +138,39 @@ fun HistoryScreen(
             }
             if (entries.isNotEmpty()) ClearAll(actions.onClear)
         }
-        items(entries, key = { it.id }) { entry ->
+        items(shown, key = { it.id }) { entry ->
             HistoryRow(entry, format, actions)
             HorizontalDivider()
+        }
+    }
+}
+
+/** The entries made in [mode], newest first; every entry when [mode] is null. */
+internal fun entriesIn(
+    entries: List<HistoryEntry>,
+    mode: Mode?,
+): List<HistoryEntry> = if (mode == null) entries else entries.filter { it.mode == mode }
+
+@Composable
+private fun ModeFilter(
+    selected: Mode?,
+    onSelect: (Mode?) -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        FilterChip(
+            selected = selected == null,
+            onClick = { onSelect(null) },
+            label = { Text(stringResource(R.string.history_filter_all)) },
+        )
+        for (mode in Mode.entries) {
+            FilterChip(
+                selected = selected == mode,
+                onClick = { onSelect(mode) },
+                label = { Text(mode.displayName) },
+            )
         }
     }
 }
@@ -194,7 +239,12 @@ private fun HistoryRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                stringResource(R.string.history_entry_meta, date, entry.channel.shortName),
+                stringResource(
+                    R.string.history_entry_meta,
+                    date,
+                    entry.channel.shortName,
+                    entry.mode.displayName,
+                ),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

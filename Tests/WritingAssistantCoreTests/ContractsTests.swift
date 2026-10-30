@@ -22,12 +22,28 @@ import WritingAssistantCore
         let expected: [PromptFile] =
             [.global, .always, .learningSummary, .refine] + Channel.allCases.map { .channel($0) }
             + Refinement.allCases.map { .refinement($0) }
+            + [.mode(.work), .mode(.personal), .languagePolicy(.english)]
+            + [.languagePolicy(.sameAsInput)]
         #expect(PromptFile.allCases == expected)
         #expect(
             [PromptFile.global, .always, .learningSummary, .refine].map(\.relativePath) == [
                 "polish.txt", "always.txt", "learning_summary.txt", "refine.txt",
             ])
         #expect(PromptFile.channel(.slackInformal).relativePath == "channels/slack_informal.txt")
+        #expect(
+            [PromptFile.mode(.work), .mode(.personal)].map(\.relativePath) == [
+                "modes/work.txt", "modes/personal.txt",
+            ])
+        #expect(
+            OutputLanguage.allCases.map { PromptFile.languagePolicy($0).relativePath } == [
+                "languages/english.txt", "languages/same_as_input.txt",
+            ])
+    }
+
+    @Test func modesAndLanguagesHaveStableRawValues() {
+        #expect(Mode.allCases.map(\.rawValue) == ["work", "personal"])
+        #expect(Mode.work.toggled == .personal && Mode.personal.toggled == .work)
+        #expect(OutputLanguage.allCases.map(\.rawValue) == ["english", "sameAsInput"])
     }
 
     @Test func refinementsMatchPromptFileNames() {

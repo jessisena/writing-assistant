@@ -24,6 +24,7 @@ import WritingAssistantCore
 
     private func polishedModel(_ polisher: FakePolisher) async -> AppModel {
         let model = makeModel(polisher)
+        model.channel = .formal
         model.input = NSAttributedString(string: "I will to review the doc")
         await model.process()
         return model

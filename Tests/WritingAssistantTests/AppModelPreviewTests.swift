@@ -182,7 +182,7 @@ import WritingAssistantCore
     @Test func summaryOffNeverWritesTips() async {
         let polisher = GatedPolisher()
         let model = makeModel(polisher)
-        model.includesLearningSummary = false
+        model.modes.setLearningSummary(false, for: .work)
         await start(model, polisher)
 
         await send(partial("Prev"), to: model, polisher)
@@ -404,7 +404,7 @@ import WritingAssistantCore
     @Test func previewWithTheSummaryOffDoesNotWaitForOne() async {
         let polisher = GatedPolisher()
         let model = makeModel(polisher)
-        model.includesLearningSummary = false
+        model.modes.setLearningSummary(false, for: .work)
 
         await startWithPreview(model, polisher)
 

@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.writingassistant.core.Channel
 import local.writingassistant.core.Correction
 import local.writingassistant.core.LearningSummary
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Refinement
 import org.junit.Assert.assertEquals
@@ -127,6 +128,20 @@ class ComposerUiTest {
         compose.onNodeWithText(Channel.SLACK.shortName).assertIsDisplayed()
         compose.onNodeWithText(Channel.EMAIL.shortName).assertIsDisplayed()
         compose.onNodeWithText(Channel.PROOFREAD.shortName).assertDoesNotExist()
+    }
+
+    @Test
+    fun theModeToggleSwitchesMode() {
+        val events = mutableListOf<ComposerEvent>()
+        show(ComposerState(), events = events)
+        compose.onNodeWithText("Personal").performClick()
+        assertEquals(listOf<ComposerEvent>(ComposerEvent.ModeSelected(Mode.PERSONAL)), events)
+    }
+
+    @Test
+    fun theModeToggleIsDisabledWhileWorking() {
+        show(polished.copy(phase = ComposerState.Phase.Working(null)))
+        compose.onNodeWithText("Personal").assertIsNotEnabled()
     }
 
     @Test

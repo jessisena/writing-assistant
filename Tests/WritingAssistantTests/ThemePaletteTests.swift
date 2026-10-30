@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import WritingAssistantCore
 
 @testable import WritingAssistant
 
@@ -35,6 +36,16 @@ import Testing
 
         #expect(palette.ink.hex(in: .aqua) == 0x00_0000)
         #expect(palette.ink.hex(in: .darkAqua) == 0xFF_FFFF)
+    }
+
+    @Test(arguments: ThemePreset.allCases)
+    func personalModeTintsWithThePersonalAccent(preset: ThemePreset) {
+        let palette = preset.palette
+
+        #expect(palette.forMode(.work) == palette)
+        #expect(palette.forMode(.personal)[.ink] == palette[.personalInk])
+        #expect(palette[.personalInk] != palette[.ink])
+        #expect(palette.forMode(.personal)[.paper] == palette[.paper])
     }
 
     @Test func sameValueGivesAnEqualColor() {

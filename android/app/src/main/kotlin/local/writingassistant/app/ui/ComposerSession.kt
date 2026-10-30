@@ -11,9 +11,12 @@ import kotlinx.coroutines.launch
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
+import local.writingassistant.app.data.ModeProfile
+import local.writingassistant.app.data.ModeSettings
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStoreException
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
@@ -27,7 +30,8 @@ import java.util.UUID
  * and a generation number makes sure a cancelled or replaced request can't overwrite newer
  * state.
  *
- * Follows the enabled channels and the learning-summary switch in [settings]. Each successful
+ * Follows the current mode and its channels, language and learning summary in [settings]; a
+ * mode switch is instant and refused while a request runs. Each successful
  * polish is recorded in [history] and becomes the current entry, whose output is kept up to
  * date by refinements, [ComposerEvent.SaveOutput], and before the screen moves on to other
  * text. History failures go to the error banner and never hide a result.
@@ -50,20 +54,12 @@ class ComposerSession(
     /** The history entry the output on screen belongs to; null when it belongs to none. */
     private var currentHistoryId: String? = null
 
+    /** The mode settings as last stored; null until they have loaded. */
+    private var modes: ModeSettings? = null
+
     init {
         launchReporting { history.load() }
-        launchReporting {
-            val restored = settings.lastChannel()
-            if (restored != null && !channelChosen) {
-                mutableState.update { it.copy(channel = restored).withEnabledChannel() }
-            }
-        }
-        launchReporting { settings.disabledChannels.collect(::applyDisabledChannels) }
-        launchReporting {
-            settings.learningSummaryEnabled.collect { enabled ->
-                mutableState.update { it.copy(showLearningSummary = enabled) }
-            }
-        }
+        launchReporting { settings.modes.collect(::applyModes) }
     }
 
     fun onEvent(event: ComposerEvent) {
@@ -72,6 +68,7 @@ class ComposerSession(
             is ComposerEvent.InputChanged -> mutableState.update { it.copy(input = event.text) }
             is ComposerEvent.OutputChanged -> mutableState.update { it.copy(output = event.text) }
             is ComposerEvent.ChannelSelected -> selectChannel(event.channel)
+            is ComposerEvent.ModeSelected -> selectMode(event.mode)
             ComposerEvent.Polish -> polish()
             is ComposerEvent.Refine -> refine(event.refinement)
             ComposerEvent.Cancel -> cancel()
@@ -94,16 +91,64 @@ class ComposerSession(
                 input = text,
                 channel = it.channel,
                 needsApiKey = it.needsApiKey,
+                mode = it.mode,
                 enabledChannels = it.enabledChannels,
                 showLearningSummary = it.showLearningSummary,
+                outputLanguage = it.outputLanguage,
             )
         }
     }
 
-    /** Shows every channel not in [disabled] (all of them if that leaves none). */
-    private fun applyDisabledChannels(disabled: Set<Channel>) {
-        val enabled = Channel.entries.filterNot { it in disabled }.ifEmpty { Channel.entries }
-        mutableState.update { it.copy(enabledChannels = enabled).withEnabledChannel() }
+    /**
+     * Takes stored mode settings into the state. The first load selects the stored mode and its
+     * channel, unless the user already picked a channel or mode. After that the session's own
+     * mode wins, since only it switches modes (a late write can't switch back), and a change to
+     * that mode's visible channels moves the selection off a channel that was hidden.
+     */
+    private fun applyModes(stored: ModeSettings) {
+        val previous = modes
+        modes = stored
+        val adoptsStored = previous == null && !channelChosen
+        mutableState.update { state ->
+            val mode = if (adoptsStored) stored.current else state.mode
+            val profile = stored[mode]
+            val next = state.withProfile(mode, profile)
+            when {
+                adoptsStored -> {
+                    next.copy(channel = profile.channel)
+                }
+
+                previous != null && previous[mode].visibleChannels != profile.visibleChannels -> {
+                    next.withEnabledChannel()
+                }
+
+                else -> {
+                    next
+                }
+            }
+        }
+    }
+
+    private fun ComposerState.withProfile(
+        mode: Mode,
+        profile: ModeProfile,
+    ): ComposerState =
+        copy(
+            mode = mode,
+            enabledChannels = profile.visibleChannels,
+            showLearningSummary = profile.learningSummary,
+            outputLanguage = profile.outputLanguage,
+        )
+
+    private fun profile(mode: Mode): ModeProfile = modes?.get(mode) ?: ModeProfile.defaults(mode)
+
+    private fun selectMode(mode: Mode) {
+        val current = state.value
+        if (!current.canSwitchMode || mode == current.mode) return
+        channelChosen = true
+        val profile = profile(mode)
+        mutableState.update { it.withProfile(mode, profile).copy(channel = profile.channel) }
+        launchReporting { settings.setMode(mode) }
     }
 
     /** Selects the first enabled channel when the selected one is hidden; not persisted. */
@@ -124,8 +169,10 @@ class ComposerSession(
         currentHistoryId = entry.id
         channelChosen = true
         lastFailed = null
+        val modeChanged = entry.mode != state.value.mode
         mutableState.update {
             it
+                .withProfile(entry.mode, profile(entry.mode))
                 .copy(
                     input = entry.input,
                     output = entry.output,
@@ -134,6 +181,7 @@ class ComposerSession(
                     error = null,
                 )
         }
+        if (modeChanged) launchReporting { settings.setMode(entry.mode) }
     }
 
     private fun refreshApiKey() {
@@ -145,8 +193,9 @@ class ComposerSession(
 
     private fun selectChannel(channel: Channel) {
         channelChosen = true
+        val mode = state.value.mode
         mutableState.update { it.copy(channel = channel) }
-        launchReporting { settings.setLastChannel(channel) }
+        launchReporting { settings.setLastChannel(mode, channel) }
     }
 
     /** Runs [body] in [scope], showing any failure in the error banner instead of crashing. */
@@ -168,9 +217,9 @@ class ComposerSession(
         if (!current.canPolish) return
         saveOutput()
         start(ComposerEvent.Polish, null) {
-            val result =
-                polisher.polish(current.input, current.channel, current.showLearningSummary)
-            val (entryId, historyError) = record(result, current.input, current.channel)
+            val result = polisher.polish(current.input, current.channel, current.polishOptions)
+            val (entryId, historyError) =
+                record(result, current.input, current.channel, current.mode)
             return@start { state: ComposerState ->
                 currentHistoryId = entryId
                 state.copy(result = result, output = result.polishedText, error = historyError)
@@ -186,9 +235,10 @@ class ComposerSession(
         result: PolishResult,
         input: String,
         channel: Channel,
+        mode: Mode,
     ): Pair<String, PolishError?> {
         val id = UUID.randomUUID().toString()
-        val error = historyFailure { history.record(result, input, channel, id) }
+        val error = historyFailure { history.record(result, input, channel, id, mode) }
         return id to error
     }
 

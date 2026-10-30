@@ -6,20 +6,26 @@ import Foundation
 /// file is only read when its placeholder is in the template, so a `polish.txt` edited before a
 /// section existed keeps working unchanged: it simply has nothing to fill.
 extension PromptStoring {
-    /// The polish prompt for `channel`.
+    /// The polish prompt for `channel` under `options`.
     ///
-    /// `polish.txt` with the shared rules, the channel guidelines and, only when
-    /// `learningSummary` is true, the learning summary section. When it is false the
-    /// placeholder is removed, so the prompt carries no summary instructions at all.
+    /// `polish.txt` with the shared rules, the language policy for `options.outputLanguage`, the
+    /// tone of `options.mode`, the channel guidelines and, only when
+    /// `options.includesLearningSummary` is true, the learning summary section. When it is false
+    /// the placeholder is removed, so the prompt carries no summary instructions at all.
     ///
     /// - Throws: `PromptStoreError` when a needed prompt file couldn't be read.
-    public func assemble(for channel: Channel, learningSummary: Bool) throws -> String {
+    public func assemble(for channel: Channel, options: PolishOptions) throws -> String {
         try fill(
             .global,
             [
                 (PromptFile.alwaysPlaceholder, .always),
+                (PromptFile.languagePolicyPlaceholder, .languagePolicy(options.outputLanguage)),
+                (PromptFile.modePlaceholder, .mode(options.mode)),
                 (PromptFile.channelPlaceholder, .channel(channel)),
-                (PromptFile.learningSummaryPlaceholder, learningSummary ? .learningSummary : nil),
+                (
+                    PromptFile.learningSummaryPlaceholder,
+                    options.includesLearningSummary ? .learningSummary : nil
+                ),
             ])
     }
 

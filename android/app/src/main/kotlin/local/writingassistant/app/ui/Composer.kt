@@ -1,6 +1,7 @@
 package local.writingassistant.app.ui
 
 import androidx.annotation.StringRes
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,6 +23,9 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,12 +48,14 @@ import androidx.compose.ui.unit.dp
 import local.writingassistant.app.R
 import local.writingassistant.core.Channel
 import local.writingassistant.core.LearningSummary
+import local.writingassistant.core.Mode
 import local.writingassistant.core.PolishError
 import local.writingassistant.core.Refinement
 import kotlin.math.roundToInt
 
 /**
- * The composer shared by the full-screen app and the bottom sheet: channel chips, input,
+ * The composer shared by the full-screen app and the bottom sheet: the Work/Personal toggle,
+ * the current mode's channel chips (crossfading on a mode switch), input,
  * Polish with progress and Cancel, then the editable result, the learning summary,
  * refinements, Copy and (when the host supports it) Replace. Copy and Replace send
  * [ComposerEvent.SaveOutput] before calling the host, so the history keeps the text as shown.
@@ -72,8 +78,17 @@ fun Composer(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ChannelChips(state.chipChannels, state.channel) {
-            onEvent(ComposerEvent.ChannelSelected(it))
+        ModeToggle(state.mode, enabled = state.canSwitchMode) {
+            onEvent(ComposerEvent.ModeSelected(it))
+        }
+        Crossfade(targetState = state.mode, label = "mode chips") { mode ->
+            // Only the shown mode draws chips, so its chips fade in and no tap reaches a copy
+            // that is fading out.
+            if (mode == state.mode) {
+                ChannelChips(state.chipChannels, state.channel) {
+                    onEvent(ComposerEvent.ChannelSelected(it))
+                }
+            }
         }
         OutlinedTextField(
             value = state.input,
@@ -93,6 +108,27 @@ fun Composer(
         PolishRow(state, onEvent)
         if (state.result != null || state.output.isNotEmpty()) {
             ResultSection(state, onEvent, onCopy, onReplace)
+        }
+    }
+}
+
+/** The `Work | Personal` toggle; switching is instant and disabled while a request runs. */
+@Composable
+private fun ModeToggle(
+    selected: Mode,
+    enabled: Boolean,
+    onSelect: (Mode) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        Mode.entries.forEachIndexed { index, mode ->
+            SegmentedButton(
+                selected = mode == selected,
+                onClick = { onSelect(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index, Mode.entries.size),
+                enabled = enabled,
+            ) {
+                Text(mode.displayName)
+            }
         }
     }
 }

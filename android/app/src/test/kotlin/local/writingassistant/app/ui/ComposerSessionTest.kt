@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -18,6 +19,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
+import local.writingassistant.app.data.ModeProfile
+import local.writingassistant.app.data.ModeSettings
 import local.writingassistant.app.ui.ComposerEvent.Cancel
 import local.writingassistant.app.ui.ComposerEvent.ChannelSelected
 import local.writingassistant.app.ui.ComposerEvent.DismissError
@@ -32,7 +35,10 @@ import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStoreException
 import local.writingassistant.core.LearningSummary
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.PolishOptions
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Provider
 import local.writingassistant.core.Refinement
@@ -227,10 +233,12 @@ class ComposerSessionTest {
         runTest(dispatcher) {
             val settings =
                 object : AppSettings by FakeAppSettings() {
-                    override suspend fun lastChannel(): Channel? = throw IOException("disk")
+                    override val modes = flow<ModeSettings> { throw IOException("disk") }
 
-                    override suspend fun setLastChannel(channel: Channel) =
-                        throw IOException("disk")
+                    override suspend fun setLastChannel(
+                        mode: Mode,
+                        channel: Channel,
+                    ) = throw IOException("disk")
                 }
             val session =
                 ComposerSession(polisher, settings, FakeApiKeyStore(), testHistory(), sessionScope)
@@ -262,37 +270,46 @@ class ComposerSessionTest {
         }
 
     @Test
-    fun `disabled channels are hidden and a hidden selection moves to the first shown`() =
+    fun `the chips are the current mode's visible channels and start on its last channel`() =
         runTest(dispatcher) {
             val settings = FakeAppSettings()
+            settings.setMode(Mode.PERSONAL)
+            settings.setLastChannel(Mode.PERSONAL, Channel.PROOFREAD)
             val session = session(settings)
-            session.onEvent(ChannelSelected(Channel.FORMAL))
-            settings.disabledChannels.value = setOf(Channel.SLACK, Channel.FORMAL)
             advanceUntilIdle()
 
             val state = session.state.value
-            assertEquals(Channel.entries - Channel.SLACK - Channel.FORMAL, state.enabledChannels)
-            assertEquals(Channel.SLACK_INFORMAL, state.channel)
+            assertEquals(Mode.PERSONAL, state.mode)
+            assertEquals(ModeProfile.defaults(Mode.PERSONAL).visibleChannels, state.chipChannels)
+            assertEquals(Channel.PROOFREAD, state.channel)
+            assertFalse(state.showLearningSummary)
+            assertEquals(OutputLanguage.SAME_AS_INPUT, state.outputLanguage)
+        }
+
+    @Test
+    fun `hiding the selected channel moves to the first visible one`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val session = session(settings)
+            advanceUntilIdle()
+            session.onEvent(ChannelSelected(Channel.FORMAL))
+            advanceUntilIdle()
+
+            settings.setChannelVisible(Mode.WORK, Channel.FORMAL, visible = false)
+            settings.setChannelVisible(Mode.WORK, Channel.SLACK, visible = false)
+            advanceUntilIdle()
+
+            assertEquals(Channel.SLACK_INFORMAL, session.state.value.channel)
             assertEquals(Channel.FORMAL, settings.channel)
         }
 
     @Test
-    fun `turning every channel off still shows them all`() =
+    fun `a stored last channel that is now hidden falls back`() =
         runTest(dispatcher) {
             val settings = FakeAppSettings()
-            val session = session(settings)
-            settings.disabledChannels.value = Channel.entries.toSet()
-            advanceUntilIdle()
-
-            assertEquals(Channel.entries, session.state.value.enabledChannels)
-            assertEquals(Channel.SLACK, session.state.value.channel)
-        }
-
-    @Test
-    fun `a restored last channel that is now hidden falls back`() =
-        runTest(dispatcher) {
-            val settings = FakeAppSettings(channel = Channel.EMAIL)
-            settings.disabledChannels.value = setOf(Channel.SLACK, Channel.EMAIL)
+            settings.setLastChannel(Mode.WORK, Channel.EMAIL)
+            settings.setChannelVisible(Mode.WORK, Channel.EMAIL, visible = false)
+            settings.setChannelVisible(Mode.WORK, Channel.SLACK, visible = false)
             val session = session(settings)
             advanceUntilIdle()
 
@@ -301,22 +318,85 @@ class ComposerSessionTest {
         }
 
     @Test
-    fun `the learning summary setting is shown and sent with each polish`() =
+    fun `switching mode is instant, remembers each mode's channel and is stored`() =
         runTest(dispatcher) {
             val settings = FakeAppSettings()
-            settings.learningSummaryEnabled.value = false
+            val session = session(settings)
+            advanceUntilIdle()
+            session.onEvent(ChannelSelected(Channel.EMAIL))
+
+            session.onEvent(ComposerEvent.ModeSelected(Mode.PERSONAL))
+            assertEquals(Mode.PERSONAL, session.state.value.mode)
+            assertEquals(Channel.PERSONAL_MESSAGE, session.state.value.channel)
+            advanceUntilIdle()
+            assertEquals(Mode.PERSONAL, settings.modes.value.current)
+
+            session.onEvent(ComposerEvent.ModeSelected(Mode.WORK))
+            advanceUntilIdle()
+            assertEquals(Channel.EMAIL, session.state.value.channel)
+            assertTrue(polisher.calls.isEmpty())
+        }
+
+    @Test
+    fun `the mode can't switch while a request runs`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val session = session(settings)
+            session.onEvent(Open("hey"))
+            session.onEvent(Polish)
+            advanceUntilIdle()
+            assertFalse(session.state.value.canSwitchMode)
+
+            session.onEvent(ComposerEvent.ModeSelected(Mode.PERSONAL))
+            advanceUntilIdle()
+
+            assertEquals(Mode.WORK, session.state.value.mode)
+            assertEquals(Mode.WORK, settings.modes.value.current)
+        }
+
+    @Test
+    fun `each polish sends the mode's options and records the mode`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val history = testHistory()
+            val session = session(settings, history)
+            advanceUntilIdle()
+
+            polished(session, "hey")
+            session.onEvent(ComposerEvent.ModeSelected(Mode.PERSONAL))
+            session.onEvent(Polish)
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    PolishOptions(Mode.WORK, OutputLanguage.ENGLISH, true),
+                    PolishOptions(Mode.PERSONAL, OutputLanguage.SAME_AS_INPUT, false),
+                ),
+                polisher.requestedOptions,
+            )
+            assertEquals(listOf(Mode.PERSONAL, Mode.WORK), history.entries.value.map { it.mode })
+        }
+
+    @Test
+    fun `a learning summary change applies to the next polish`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            settings.setLearningSummary(Mode.WORK, false)
             val session = session(settings)
             advanceUntilIdle()
             assertFalse(session.state.value.showLearningSummary)
 
             polished(session, "hey")
-            settings.learningSummaryEnabled.value = true
+            settings.setLearningSummary(Mode.WORK, true)
             advanceUntilIdle()
             session.onEvent(Polish)
             advanceUntilIdle()
 
             assertTrue(session.state.value.showLearningSummary)
-            assertEquals(listOf(false, true), polisher.learningSummaryRequests)
+            assertEquals(
+                listOf(false, true),
+                polisher.requestedOptions.map { it.includesLearningSummary },
+            )
         }
 
     @Test
@@ -386,7 +466,7 @@ class ComposerSessionTest {
     fun `a restored entry keeps its channel even when that channel is turned off`() =
         runTest(dispatcher) {
             val settings = FakeAppSettings()
-            settings.disabledChannels.value = setOf(Channel.EMAIL)
+            settings.setChannelVisible(Mode.WORK, Channel.EMAIL, visible = false)
             val session = session(settings, testHistory(saved = listOf(savedEntry)))
             advanceUntilIdle()
 
@@ -396,10 +476,28 @@ class ComposerSessionTest {
             val state = session.state.value
             assertEquals(Channel.EMAIL, state.channel)
             assertTrue(Channel.EMAIL !in state.enabledChannels)
-            assertTrue(Channel.EMAIL in state.chipChannels)
+            assertEquals(Channel.EMAIL, state.chipChannels.last())
             session.onEvent(Refine(Refinement.SHORTER))
             advanceUntilIdle()
             assertEquals(Channel.EMAIL, polisher.calls.last().channel)
+        }
+
+    @Test
+    fun `restoring a personal entry switches to personal mode`() =
+        runTest(dispatcher) {
+            val settings = FakeAppSettings()
+            val personal = savedEntry.copy(mode = Mode.PERSONAL, channel = Channel.PERSONAL_MESSAGE)
+            val session = session(settings, testHistory(saved = listOf(personal)))
+            advanceUntilIdle()
+
+            session.onEvent(RestoreHistory("saved"))
+            advanceUntilIdle()
+
+            val state = session.state.value
+            assertEquals(Mode.PERSONAL, state.mode)
+            assertEquals(Channel.PERSONAL_MESSAGE, state.channel)
+            assertEquals(ModeProfile.defaults(Mode.PERSONAL).visibleChannels, state.enabledChannels)
+            assertEquals(Mode.PERSONAL, settings.modes.value.current)
         }
 
     @Test

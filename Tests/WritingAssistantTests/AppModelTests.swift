@@ -18,8 +18,10 @@ import WritingAssistantCore
         RichText.markdown(from: RichTextBridge.attributedString(from: text))
     }
 
-    @Test func defaultChannelIsFormal() {
-        #expect(makeModel(FakePolisher()).channel == .formal)
+    @Test func defaultChannelIsWorkModesSlack() {
+        let model = makeModel(FakePolisher())
+        #expect(model.mode == .work)
+        #expect(model.channel == .slack)
     }
 
     @Test(arguments: ["", "   ", "\n\t  \n"])

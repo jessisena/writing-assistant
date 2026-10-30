@@ -87,7 +87,8 @@ private struct ComposerFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ChannelChips(selection: $model.channel)
+            ChannelChips(
+                selection: $model.channel, channels: model.visibleChannels, mode: model.mode)
             ActionRow(
                 inputLength: inputLength,
                 isLoading: model.isLoading,
@@ -104,9 +105,12 @@ private struct ComposerFooter: View {
     }
 }
 
-/// The channel chips, in `Channel` order. ⌘1…⌘9 pick the first nine.
+/// The current mode's visible channel chips, in their order. ⌘1…⌘9 pick the first nine.
+/// A mode switch crossfades to the other mode's chips.
 private struct ChannelChips: View {
     @Binding var selection: Channel
+    let channels: [Channel]
+    let mode: Mode
     @Namespace private var selectionNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -116,12 +120,14 @@ private struct ChannelChips: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             FlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                ForEach(Array(Channel.allCases.enumerated()), id: \.element) { index, channel in
+                ForEach(Array(channels.enumerated()), id: \.element) { index, channel in
                     chip(for: channel, number: index + 1)
                 }
             }
+            .id(mode)
+            .transition(.opacity)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Channel")
+            .accessibilityLabel("\(mode.displayName) channels")
         }
     }
 

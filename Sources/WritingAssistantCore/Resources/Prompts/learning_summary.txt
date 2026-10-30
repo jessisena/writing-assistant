@@ -5,7 +5,10 @@ After polished_text, add a fourth and last key, "learning_summary".
 If was_translated is true, set learning_summary to null. The author wrote in another language;
 their English errors aren't visible in a translation, so coaching it wouldn't help them.
 
-If was_translated is false, compare the draft with polished_text and return an object with:
+If the draft isn't in English, set learning_summary to null too. The summary only coaches
+English.
+
+If was_translated is false and the draft is in English, compare the draft with polished_text and return an object with:
 
 - "corrections": up to 5 changes, each {"original", "corrected", "why"}, where "why" is one
   plain-English sentence. Include only grammar, idiom, vocabulary or style changes worth

@@ -13,23 +13,27 @@ class PromptAssembler(
     private val reader: PromptReading,
 ) {
     /**
-     * The polish prompt: `polish.txt` with the shared rules, the channel guidelines and, only
-     * when [learningSummary] is true, the learning summary section. When it is false the
-     * placeholder is removed, so the prompt carries no summary instructions at all.
+     * The polish prompt for [channel] under [options]: `polish.txt` with the shared rules, the
+     * language policy, the mode's tone, the channel guidelines and, only when
+     * [PolishOptions.includesLearningSummary] is true, the learning summary section. When it is
+     * false the placeholder is removed, so the prompt carries no summary instructions at all.
      *
      * @throws java.io.IOException when a needed file can't be read.
      */
     fun assemble(
         channel: Channel,
-        learningSummary: Boolean,
+        options: PolishOptions,
     ): String =
         fill(
             PromptFile.Global,
             listOf(
                 PromptFile.ALWAYS_PLACEHOLDER to PromptFile.Always,
+                PromptFile.LANGUAGE_POLICY_PLACEHOLDER to
+                    PromptFile.ForLanguage(options.outputLanguage),
+                PromptFile.MODE_PLACEHOLDER to PromptFile.ForMode(options.mode),
                 PromptFile.CHANNEL_PLACEHOLDER to PromptFile.ForChannel(channel),
                 PromptFile.LEARNING_SUMMARY_PLACEHOLDER to
-                    PromptFile.LearningSummary.takeIf { learningSummary },
+                    PromptFile.LearningSummary.takeIf { options.includesLearningSummary },
             ),
         )
 

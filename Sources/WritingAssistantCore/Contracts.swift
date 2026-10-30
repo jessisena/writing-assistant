@@ -114,7 +114,8 @@ public struct LearningSummary: Codable, Sendable, Equatable {
 
 public struct PolishResult: Sendable, Equatable {
     public var polishedText: String
-    /// Always nil when `wasTranslated` is true (enforced by `PolishService`).
+    /// Nil unless the request's `PolishOptions` allow one for this language (enforced by
+    /// `PolishService`): always nil for a translation or non-English input.
     public var learningSummary: LearningSummary?
     public var detectedLanguage: String
     public var wasTranslated: Bool
@@ -270,15 +271,22 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
     case refine
     case channel(Channel)
     case refinement(Refinement)
+    /// `modes/<mode>.txt`: the tone baseline inserted into the polish prompt for that mode.
+    case mode(Mode)
+    /// `languages/<policy>.txt`: the language rules inserted into the polish prompt.
+    case languagePolicy(OutputLanguage)
 
     public static let channelPlaceholder = "{{CHANNEL_GUIDELINES}}"
     public static let alwaysPlaceholder = "{{ALWAYS_RULES}}"
     public static let learningSummaryPlaceholder = "{{LEARNING_SUMMARY}}"
     public static let instructionPlaceholder = "{{REFINEMENT_INSTRUCTION}}"
+    public static let modePlaceholder = "{{MODE_GUIDELINES}}"
+    public static let languagePolicyPlaceholder = "{{LANGUAGE_POLICY}}"
 
     public static var allCases: [PromptFile] {
         [.global, .always, .learningSummary, .refine] + Channel.allCases.map { .channel($0) }
-            + Refinement.allCases.map { .refinement($0) }
+            + Refinement.allCases.map { .refinement($0) } + Mode.allCases.map { .mode($0) }
+            + OutputLanguage.allCases.map { .languagePolicy($0) }
     }
 
     public var id: String { relativePath }
@@ -293,6 +301,8 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
         case .refine: "refine.txt"
         case .channel(let channel): "channels/\(channel.rawValue).txt"
         case .refinement(let refinement): "refinements/\(refinement.rawValue).txt"
+        case .mode(let mode): "modes/\(mode.rawValue).txt"
+        case .languagePolicy(let language): "languages/\(language.fileName).txt"
         }
     }
 
@@ -304,6 +314,8 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
         case .refine: "Refine prompt"
         case .channel(let channel): channel.displayName
         case .refinement(let refinement): refinement.displayName
+        case .mode(let mode): "\(mode.displayName) mode tone"
+        case .languagePolicy(let language): "Language: \(language.displayName)"
         }
     }
 
@@ -388,13 +400,15 @@ public protocol Polishing: Sendable {
     /// Polishes `text` for `channel`.
     ///
     /// - Parameters:
-    ///   - includeLearningSummary: False asks for no learning summary, and the result has none.
+    ///   - options: The mode's tone, the output language and whether to ask for a learning
+    ///     summary. The result only has a summary when
+    ///     `options.allowsLearningSummary(detectedLanguage:wasTranslated:)` holds for it.
     ///   - onPreview: Called, one call at a time and in order, with what the reply has said so
     ///     far, each time a streamed piece changes it, and never after the method returns. The
     ///     polished text grows until `isTextComplete`; the language fields can still change after
     ///     that, while the rest of the reply (the learning summary) is coming.
     func polish(
-        text: String, channel: Channel, includeLearningSummary: Bool,
+        text: String, channel: Channel, options: PolishOptions,
         onPreview: @escaping @Sendable (PolishPreview) -> Void
     ) async throws(PolishError) -> PolishResult
     /// Rewrites already-polished `text` for `channel` with one extra instruction, a preset or

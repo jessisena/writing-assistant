@@ -6,8 +6,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.flow.StateFlow
 import local.writingassistant.app.AppGraph
+import local.writingassistant.app.data.ModeProfile
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
 import local.writingassistant.core.PolishError
+import local.writingassistant.core.PolishOptions
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Refinement
 
@@ -22,24 +26,34 @@ data class ComposerState(
     val error: PolishError? = null,
     /** True once the key store was read and holds no API key; Polish is disabled meanwhile. */
     val needsApiKey: Boolean = false,
-    /** The channels offered as chips, in [Channel] order; never empty. */
-    val enabledChannels: List<Channel> = Channel.entries,
-    /** False when the user turned the learning summary off in Settings. */
+    /** The mode requests run in. */
+    val mode: Mode = Mode.WORK,
+    /** The current mode's visible channels, in chip order; never empty. */
+    val enabledChannels: List<Channel> = ModeProfile.defaults(Mode.WORK).visibleChannels,
+    /** False when the current mode has the learning summary off. */
     val showLearningSummary: Boolean = true,
+    /** The current mode's output language. */
+    val outputLanguage: OutputLanguage = OutputLanguage.ENGLISH,
 ) {
     /**
-     * The chips to show: [enabledChannels], plus [channel] when it is turned off (a restored
-     * history entry keeps its channel), in [Channel] order.
+     * The chips to show: [enabledChannels], plus [channel] at the end when it is hidden (a
+     * restored history entry keeps its channel).
      */
     val chipChannels: List<Channel>
-        get() =
-            if (channel in enabledChannels) {
-                enabledChannels
-            } else {
-                Channel.entries.filter { it in enabledChannels || it == channel }
-            }
+        get() = if (channel in enabledChannels) enabledChannels else enabledChannels + channel
 
     val isWorking: Boolean get() = phase is Phase.Working
+
+    /** The mode can't change while a request runs, so the result always matches the mode shown. */
+    val canSwitchMode: Boolean get() = !isWorking
+
+    /** What a polish started now asks for. */
+    val polishOptions: PolishOptions get() =
+        PolishOptions(
+            mode,
+            outputLanguage,
+            showLearningSummary,
+        )
 
     /** Whether the Polish action is available. */
     val canPolish: Boolean get() = !isWorking && !needsApiKey && input.isNotBlank()
@@ -79,6 +93,11 @@ sealed interface ComposerEvent {
         val channel: Channel,
     ) : ComposerEvent
 
+    /** Switches to [mode] instantly, with its last channel; ignored while working. */
+    data class ModeSelected(
+        val mode: Mode,
+    ) : ComposerEvent
+
     data object Polish : ComposerEvent
 
     data class Refine(
@@ -98,7 +117,7 @@ sealed interface ComposerEvent {
     /** Writes the output on screen into its history entry; sent before Copy and Replace. */
     data object SaveOutput : ComposerEvent
 
-    /** Loads history entry [id] (input, output, channel and result); ignored while working. */
+    /** Loads history entry [id] (input, output, mode, channel and result); ignored while working. */
     data class RestoreHistory(
         val id: String,
     ) : ComposerEvent

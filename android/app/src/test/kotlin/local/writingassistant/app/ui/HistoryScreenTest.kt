@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
+import local.writingassistant.core.Mode
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -34,6 +35,7 @@ class HistoryScreenTest {
         id: String,
         output: String,
         channel: Channel = Channel.SLACK,
+        mode: Mode = Mode.WORK,
     ) = HistoryEntry(
         id = id,
         epochSeconds = 1_700_000_000,
@@ -44,6 +46,7 @@ class HistoryScreenTest {
         detectedLanguage = "en",
         wasTranslated = false,
         modelUsed = "fake",
+        mode = mode,
     )
 
     private fun show(
@@ -75,6 +78,34 @@ class HistoryScreenTest {
         compose.onNodeWithText("second line", substring = true).assertDoesNotExist()
         compose.onNodeWithText("a bullet").assertIsDisplayed()
         compose.onNodeWithText(Channel.EMAIL.shortName, substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun rowsShowTheModeAndTheFilterKeepsOneMode() {
+        show(listOf(entry("a", "at work"), entry("b", "at home", mode = Mode.PERSONAL)))
+        compose.onNodeWithText("· Personal", substring = true).assertIsDisplayed()
+
+        compose.onNodeWithText("Personal").performClick()
+        compose.onNodeWithText("at home").assertIsDisplayed()
+        compose.onNodeWithText("at work").assertDoesNotExist()
+
+        compose.onNodeWithText("All").performClick()
+        compose.onNodeWithText("at work").assertIsDisplayed()
+    }
+
+    @Test
+    fun aFilterWithNoEntriesSaysSo() {
+        show(listOf(entry("a", "at work")))
+        compose.onNodeWithText("Personal").performClick()
+        compose.onNodeWithText("No Personal entries yet.").assertIsDisplayed()
+    }
+
+    @Test
+    fun entriesInKeepsOnlyThatModeInOrder() {
+        val entries =
+            listOf(entry("a", "1"), entry("b", "2", mode = Mode.PERSONAL), entry("c", "3"))
+        assertEquals(listOf("a", "c"), entriesIn(entries, Mode.WORK).map { it.id })
+        assertEquals(entries, entriesIn(entries, null))
     }
 
     @Test

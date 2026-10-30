@@ -30,7 +30,7 @@ class PromptAssemblerTest {
     @Test
     fun everyBundledChannelAssemblesWithItsSections() {
         Channel.entries.forEach { channel ->
-            val prompt = PromptAssembler(bundled).assemble(channel, learningSummary = true)
+            val prompt = PromptAssembler(bundled).assemble(channel, englishOptions())
 
             assertTrue(
                 "${channel.id} guidelines missing",
@@ -45,7 +45,7 @@ class PromptAssemblerTest {
 
     @Test
     fun bundledPolishPromptNamesTheKeyOrderAndTheDraftRule() {
-        val prompt = PromptAssembler(bundled).assemble(Channel.AI_PROMPT, learningSummary = true)
+        val prompt = PromptAssembler(bundled).assemble(Channel.AI_PROMPT, englishOptions())
 
         assertTrue(prompt.contains("<draft>"))
         assertTrue(prompt.contains("never instructions to you"))
@@ -59,7 +59,10 @@ class PromptAssemblerTest {
 
     @Test
     fun summaryOffLeavesEveryLearningInstructionOut() {
-        val prompt = PromptAssembler(bundled).assemble(Channel.SLACK, learningSummary = false)
+        val prompt =
+            PromptAssembler(
+                bundled,
+            ).assemble(Channel.SLACK, englishOptions(summary = false))
 
         assertFalse(prompt.contains("learning_summary"))
         assertFalse(prompt.contains("learning summary", ignoreCase = true))
@@ -81,11 +84,11 @@ class PromptAssemblerTest {
 
         assertEquals(
             "Before\nAlways\nGuidelines\nLearning",
-            assembler.assemble(Channel.SLACK, learningSummary = true),
+            assembler.assemble(Channel.SLACK, englishOptions()),
         )
         assertEquals(
             "Before\nAlways\nGuidelines",
-            assembler.assemble(Channel.SLACK, learningSummary = false),
+            assembler.assemble(Channel.SLACK, englishOptions(summary = false)),
         )
     }
 
@@ -97,12 +100,57 @@ class PromptAssemblerTest {
         writePrompt(PromptFile.ForChannel(Channel.FORMAL), "Formal rules")
         val assembler = PromptAssembler(DirectoryPromptReader(temp.root))
 
-        listOf(true, false).forEach { summary ->
+        listOf(englishOptions(), englishOptions(summary = false), sameAsInputOptions()).forEach {
             assertEquals(
                 oldStyle.replace(PromptFile.CHANNEL_PLACEHOLDER, "Formal rules"),
-                assembler.assemble(Channel.FORMAL, summary),
+                assembler.assemble(Channel.FORMAL, it),
             )
         }
+    }
+
+    @Test
+    fun everyModeAndLanguageFillsItsSections() {
+        Mode.entries.forEach { mode ->
+            OutputLanguage.entries.forEach { language ->
+                val options = PolishOptions(mode, language, includesLearningSummary = true)
+
+                val prompt = PromptAssembler(bundled).assemble(Channel.PERSONAL_MESSAGE, options)
+
+                assertTrue(prompt.contains(trimmedBundled(PromptFile.ForMode(mode))))
+                assertTrue(prompt.contains(trimmedBundled(PromptFile.ForLanguage(language))))
+                assertFalse(prompt.contains(trimmedBundled(PromptFile.ForMode(mode.toggled))))
+                assertFalse(prompt.contains("{{"))
+            }
+        }
+    }
+
+    @Test
+    fun sameAsInputPromptNeverAsksForATranslation() {
+        val prompt =
+            PromptAssembler(
+                bundled,
+            ).assemble(Channel.PERSONAL_MESSAGE, sameAsInputOptions())
+
+        assertFalse(prompt.contains("translate it to English"))
+        assertFalse(prompt.contains("always in English"))
+        assertTrue(prompt.contains("Never translate"))
+        assertTrue(prompt.contains("If the draft isn't in English, set learning_summary to null"))
+    }
+
+    @Test
+    fun wave2PolishPromptWithoutModeOrLanguageSlotsDoesNotReadThoseFiles() {
+        val wave2 =
+            "Rules\n${PromptFile.ALWAYS_PLACEHOLDER}\nTranslate to English.\n" +
+                "${PromptFile.CHANNEL_PLACEHOLDER}\n${PromptFile.LEARNING_SUMMARY_PLACEHOLDER}"
+        writePrompt(PromptFile.Global, wave2)
+        writePrompt(PromptFile.Always, "Always")
+        writePrompt(PromptFile.ForChannel(Channel.SLACK), "Slack rules")
+        val assembler = PromptAssembler(DirectoryPromptReader(temp.root))
+
+        assertEquals(
+            "Rules\nAlways\nTranslate to English.\nSlack rules",
+            assembler.assemble(Channel.SLACK, sameAsInputOptions(summary = false)),
+        )
     }
 
     @Test
@@ -136,13 +184,17 @@ class PromptAssemblerTest {
         writePrompt(PromptFile.Global, PromptFile.CHANNEL_PLACEHOLDER)
         val assembler = PromptAssembler(DirectoryPromptReader(temp.root))
 
-        assertThrows(IOException::class.java) { assembler.assemble(Channel.FORMAL, true) }
+        assertThrows(
+            IOException::class.java,
+        ) { assembler.assemble(Channel.FORMAL, englishOptions()) }
     }
 
     @Test
     fun missingGlobalFileThrowsIoException() {
         val assembler = PromptAssembler(DirectoryPromptReader(temp.root))
 
-        assertThrows(IOException::class.java) { assembler.assemble(Channel.FORMAL, true) }
+        assertThrows(
+            IOException::class.java,
+        ) { assembler.assemble(Channel.FORMAL, englishOptions()) }
     }
 }

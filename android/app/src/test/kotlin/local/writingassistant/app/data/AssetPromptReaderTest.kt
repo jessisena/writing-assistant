@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
+import local.writingassistant.core.PolishOptions
 import local.writingassistant.core.PromptAssembler
 import local.writingassistant.core.PromptFile
 import local.writingassistant.core.Refinement
@@ -28,7 +31,10 @@ class AssetPromptReaderTest {
     fun assembledPromptsHaveNoPlaceholderLeft() {
         val assembler = PromptAssembler(reader)
 
-        assertFalse(assembler.assemble(Channel.FORMAL, learningSummary = true).contains("{{"))
+        for (mode in Mode.entries) {
+            val options = PolishOptions(mode, OutputLanguage.SAME_AS_INPUT, true)
+            assertFalse(assembler.assemble(Channel.FORMAL, options).contains("{{"))
+        }
         assertFalse(assembler.assembleRefinement(Refinement.SHORTER, Channel.FORMAL).contains("{{"))
     }
 }

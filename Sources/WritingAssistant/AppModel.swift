@@ -12,8 +12,6 @@ struct ClipboardContent: Equatable, Sendable {
 /// State and actions for the main window.
 @Observable @MainActor final class AppModel {
     static let copiedDuration: Duration = .seconds(2)
-    static let channelDefaultsKey = "selectedChannel"
-    static let learningSummaryDefaultsKey = "learningSummaryEnabled"
     /// The shortest time between two streamed text updates on screen (about 30 per second).
     /// Each update parses the Markdown so far and replaces the editor's text, so following
     /// every streamed piece (often 50–100 a second) would redo that work several times per frame
@@ -27,15 +25,6 @@ struct ClipboardContent: Equatable, Sendable {
 
     var input = NSAttributedString()
     var output = NSAttributedString()
-    /// The channel to write for. Each change is saved, so the next launch starts with it.
-    var channel: Channel {
-        didSet { defaults.set(channel.rawValue, forKey: Self.channelDefaultsKey) }
-    }
-    /// Whether a polish asks for the English learning summary. Turning it off saves time and
-    /// tokens. Each change is saved, so the next launch keeps it.
-    var includesLearningSummary: Bool {
-        didSet { defaults.set(includesLearningSummary, forKey: Self.learningSummaryDefaultsKey) }
-    }
     var isLoading: Bool { requests.isRunning }
     private(set) var result: PolishResult? {
         didSet { showsChanges = false }
@@ -76,7 +65,9 @@ struct ClipboardContent: Equatable, Sendable {
     }
 
     @ObservationIgnored let polisher: any Polishing
-    @ObservationIgnored private let defaults: UserDefaults
+    /// The current mode and each mode's channels, language and summary setting. It is
+    /// observable itself; see `AppModel+Mode` for what requests take from it.
+    @ObservationIgnored let modes: ModeSettings
     /// Where `process()` writes each learning summary. Append only from the main actor.
     @ObservationIgnored let learningLog: LearningLog
     @ObservationIgnored let historyStore: HistoryStore
@@ -110,9 +101,7 @@ struct ClipboardContent: Equatable, Sendable {
     ///   - writeToPasteboard: Puts the copied text on the clipboard. Defaults to the general
     ///     pasteboard.
     ///   - sleep: Waits before the "Copied" label resets. Defaults to `Task.sleep`.
-    ///   - defaults: Where the selected channel and the learning summary setting are kept
-    ///     between launches. A missing or unknown saved channel gives Formal document; a missing
-    ///     summary setting turns the summary on.
+    ///   - defaults: Where the mode settings are kept between launches (see `ModeSettings`).
     init(
         polisher: any Polishing,
         learningLog: LearningLog = .standard(),
@@ -124,12 +113,7 @@ struct ClipboardContent: Equatable, Sendable {
         defaults: UserDefaults = .standard
     ) {
         self.polisher = polisher
-        self.defaults = defaults
-        channel =
-            defaults.string(forKey: Self.channelDefaultsKey).flatMap(Channel.init(rawValue:))
-            ?? .formal
-        includesLearningSummary =
-            defaults.object(forKey: Self.learningSummaryDefaultsKey) as? Bool ?? true
+        modes = ModeSettings(defaults: defaults)
         self.learningLog = learningLog
         self.historyStore = historyStore
         self.usageStore = usageStore
@@ -251,8 +235,19 @@ struct ClipboardContent: Equatable, Sendable {
     private struct PolishRequest {
         let text: String
         let channel: Channel
-        let includesLearningSummary: Bool
+        let options: PolishOptions
         let generation: Int
+
+        /// Whether a learning summary can still follow a reply that shows `result`'s language.
+        func expectsSummary(for result: PolishResult) -> Bool {
+            options.allowsLearningSummary(
+                detectedLanguage: result.detectedLanguage, wasTranslated: result.wasTranslated)
+        }
+    }
+
+    private func recordHistory(_ result: PolishResult, for request: PolishRequest) {
+        recordHistory(
+            result, input: request.text, channel: request.channel, mode: request.options.mode)
     }
 
     /// A polish request's preview on screen and the result made from it.
@@ -277,8 +272,7 @@ struct ClipboardContent: Equatable, Sendable {
         polishStage = .detectingLanguage
         nextPreviewAt = nil
         return PolishRequest(
-            text: text, channel: channel, includesLearningSummary: includesLearningSummary,
-            generation: generation)
+            text: text, channel: channel, options: polishOptions, generation: generation)
     }
 
     /// Runs `request` and shows its result. Streamed previews show its stage and its polished
@@ -295,8 +289,8 @@ struct ClipboardContent: Equatable, Sendable {
         }
         let polished = await finishRequest(request.generation) { () async throws(PolishError) in
             try await polisher.polish(
-                text: request.text, channel: request.channel,
-                includeLearningSummary: request.includesLearningSummary, onPreview: onPreview)
+                text: request.text, channel: request.channel, options: request.options,
+                onPreview: onPreview)
         }
         if !requests.isRunning {
             polishStage = nil
@@ -310,12 +304,12 @@ struct ClipboardContent: Equatable, Sendable {
             let keepsChanges = showsChanges
             result = polished
             showsChanges = keepsChanges
-            recordHistory(polished, input: request.text, channel: request.channel)
+            recordHistory(polished, for: request)
             saveOutputToHistory()
         } else {
             result = polished
             output = Self.editorText(fromMarkdown: polished.polishedText)
-            recordHistory(polished, input: request.text, channel: request.channel)
+            recordHistory(polished, for: request)
         }
         appendToLearningLog(polished, channel: request.channel)
     }
@@ -339,7 +333,7 @@ struct ClipboardContent: Equatable, Sendable {
     /// request is no longer running (it finished, failed or was cancelled).
     private func showPreview(_ preview: PolishPreview, for request: PolishRequest) {
         guard requests.isCurrent(request.generation) else { return }
-        polishStage = PolishStage(preview, includesLearningSummary: request.includesLearningSummary)
+        polishStage = PolishStage(preview, options: request.options)
         if shownPreview?.isTextComplete == true {
             updateLanguage(from: preview)
             return
@@ -362,7 +356,7 @@ struct ClipboardContent: Equatable, Sendable {
         result = shown.result
         output = Self.editorText(fromMarkdown: text)
         isStreamingText = !shown.isTextComplete
-        isAwaitingSummary = request.includesLearningSummary && !shown.result.wasTranslated
+        isAwaitingSummary = request.expectsSummary(for: shown.result)
     }
 
     /// Takes the language of a preview that came after the complete text into the result on
@@ -376,7 +370,7 @@ struct ClipboardContent: Equatable, Sendable {
         let keepsChanges = showsChanges
         result = shown.result
         showsChanges = keepsChanges && !shown.result.wasTranslated
-        isAwaitingSummary = shown.request.includesLearningSummary && !shown.result.wasTranslated
+        isAwaitingSummary = shown.request.expectsSummary(for: shown.result)
     }
 
     /// Forgets the shown preview, which stays on screen, and stops waiting for its summary.
@@ -392,7 +386,7 @@ struct ClipboardContent: Equatable, Sendable {
     /// saved to history, with the output as edited; text that was still streaming in is removed.
     private func endWithoutResult(_ shown: ShownPreview) {
         if shown.isTextComplete {
-            recordHistory(shown.result, input: shown.request.text, channel: shown.request.channel)
+            recordHistory(shown.result, for: shown.request)
             saveOutputToHistory()
         } else {
             result = nil

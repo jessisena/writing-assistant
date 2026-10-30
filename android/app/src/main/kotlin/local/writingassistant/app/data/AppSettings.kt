@@ -2,6 +2,8 @@ package local.writingassistant.app.data
 
 import kotlinx.coroutines.flow.Flow
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
 import local.writingassistant.core.Provider
 
 /** The colour palettes offered in Settings; the colours themselves live in `ui/Theme.kt`. */
@@ -25,28 +27,47 @@ enum class PalettePreset(
 
 /** Small user preferences that aren't secret. */
 interface AppSettings {
-    /** The channel used last, preselected in the composer. Null on first run. */
-    suspend fun lastChannel(): Channel?
-
-    suspend fun setLastChannel(channel: Channel)
-
     /** The provider that handles requests. [Provider.ANTHROPIC] until the user picks another. */
     suspend fun provider(): Provider
 
     suspend fun setProvider(provider: Provider)
 
-    /** Channels hidden from the composer; empty until the user turns one off. */
-    val disabledChannels: Flow<Set<Channel>>
+    /**
+     * The current mode and each mode's channels, language and learning summary setting; each
+     * mode starts with [ModeProfile.defaults].
+     */
+    val modes: Flow<ModeSettings>
 
-    suspend fun setChannelEnabled(
+    suspend fun setMode(mode: Mode)
+
+    /** Remembers [channel] as [mode]'s last channel. */
+    suspend fun setLastChannel(
+        mode: Mode,
         channel: Channel,
-        enabled: Boolean,
     )
 
-    /** Whether English texts get a learning summary. True until the user turns it off. */
-    val learningSummaryEnabled: Flow<Boolean>
+    /**
+     * Shows [channel] (at the end of the chips) or hides it in [mode]. Hiding the mode's only
+     * visible channel is refused and changes nothing.
+     *
+     * @return False when the change was refused.
+     */
+    suspend fun setChannelVisible(
+        mode: Mode,
+        channel: Channel,
+        visible: Boolean,
+    ): Boolean
 
-    suspend fun setLearningSummaryEnabled(enabled: Boolean)
+    suspend fun setOutputLanguage(
+        mode: Mode,
+        language: OutputLanguage,
+    )
+
+    /** Whether [mode]'s English texts get a learning summary. */
+    suspend fun setLearningSummary(
+        mode: Mode,
+        enabled: Boolean,
+    )
 
     /** The app's colours. [PalettePreset.WRITING_DESK] until the user picks another. */
     val palette: Flow<PalettePreset>

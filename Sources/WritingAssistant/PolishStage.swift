@@ -18,15 +18,18 @@ enum PolishStage: Equatable {
     ///
     /// - Parameters:
     ///   - preview: What the reply has said so far; nil before it said anything.
-    ///   - includesLearningSummary: Whether the request asked for a summary. A translation never
-    ///     gets one.
-    init(_ preview: PolishPreview?, includesLearningSummary: Bool) {
+    ///   - options: The request's options. A summary only comes when they allow one for the
+    ///     preview's language (never for a translation or, under `.sameAsInput`, for a language
+    ///     that isn't English or isn't named yet).
+    init(_ preview: PolishPreview?, options: PolishOptions) {
         guard let preview, preview.wasTranslated != nil || preview.polishedText != nil else {
             self = .detectingLanguage
             return
         }
         if preview.isTextComplete {
-            let expectsSummary = includesLearningSummary && preview.wasTranslated != true
+            let expectsSummary = options.allowsLearningSummary(
+                detectedLanguage: preview.detectedLanguage,
+                wasTranslated: preview.wasTranslated == true)
             self = expectsSummary ? .writingTips : .finishing
         } else if preview.wasTranslated == true {
             self = .translating(from: preview.detectedLanguage)

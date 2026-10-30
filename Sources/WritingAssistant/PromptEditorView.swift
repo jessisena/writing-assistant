@@ -26,7 +26,11 @@ private struct PromptFileSidebar: View {
     @Bindable var model: PromptEditorModel
 
     private var promptFiles: [PromptFile] {
-        PromptFile.allCases.filter { !$0.isRefinement }
+        PromptFile.allCases.filter { !$0.isRefinement && !$0.isModeFile }
+    }
+
+    private var modeFiles: [PromptFile] {
+        PromptFile.allCases.filter(\.isModeFile)
     }
 
     private var refinementFiles: [PromptFile] {
@@ -37,6 +41,9 @@ private struct PromptFileSidebar: View {
         List(selection: $model.selection) {
             Section("Prompts") {
                 ForEach(promptFiles) { PromptFileRow(model: model, file: $0) }
+            }
+            Section("Modes and languages") {
+                ForEach(modeFiles) { PromptFileRow(model: model, file: $0) }
             }
             Section("Refinements") {
                 ForEach(refinementFiles) { PromptFileRow(model: model, file: $0) }
@@ -76,6 +83,14 @@ extension PromptFile {
     fileprivate var isRefinement: Bool {
         if case .refinement = self { return true }
         return false
+    }
+
+    /// A mode's tone or a language policy.
+    fileprivate var isModeFile: Bool {
+        switch self {
+        case .mode, .languagePolicy: true
+        default: false
+        }
     }
 }
 

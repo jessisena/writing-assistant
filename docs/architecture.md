@@ -46,10 +46,25 @@ offers a way to disable thinking for 5.x models.
 
 ### `learning_summary` gate — enforced in code
 
-When input was not in English (`was_translated: true`), the learning summary is always nil. This is
-enforced in **two** places: the prompt instructs it, and `PolishService` drops any summary that
-comes back anyway. The prompt instruction alone is not a guarantee; the code is the actual
-invariant. A non-nil `learningSummary` implies `wasTranslated == false`.
+The learning summary only ever describes English input. It is always nil when the input was
+translated (`was_translated: true`), when the mode's summary is off, and, under the
+`sameAsInput` language policy, when `detected_language` isn't English (a missing language counts
+as not English). Under the `english` policy an untranslated draft is English by definition. This
+is enforced in **two** places: the prompt instructs it, and `PolishService` ignores any summary
+that comes back anyway, without decoding it, so a malformed one can't fail the request. The rule
+is `PolishOptions.allowsLearningSummary(detectedLanguage:wasTranslated:)`; `PolishStage` and
+`AppModel.isAwaitingSummary` use the same rule on the streamed preview, so a Spanish reply under
+`sameAsInput` never shows "Writing tips…". The prompt instruction alone is not a guarantee; the
+code is the actual invariant.
+
+### Two fixed modes
+
+Work and Personal are the only modes; there is no "add profile". A mode bundles what differs
+between the two contexts: the visible channels, the last channel, the output language (`english`
+translates, `sameAsInput` never does), the learning summary switch and a tone file
+(`modes/<mode>.txt`). Switching is instant and sends nothing. The switch is disabled while a
+request runs, so the result on screen (its summary card, its chips) always belongs to the mode
+shown; the request itself captured its options when it started. Refinements are mode-agnostic.
 
 ### CLI subprocess auth
 
@@ -191,16 +206,22 @@ the trimmed section file, then trims the result:
 | Template | Placeholder | Section |
 |---|---|---|
 | `polish.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
+| | `{{LANGUAGE_POLICY}}` | `languages/english.txt` or `languages/same_as_input.txt` |
+| | `{{MODE_GUIDELINES}}` | `modes/work.txt` or `modes/personal.txt` |
 | | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
 | | `{{LEARNING_SUMMARY}}` | `learning_summary.txt` when the summary is on, else nothing |
 | `refine.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
 | | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
 | | `{{REFINEMENT_INSTRUCTION}}` | `refinements/<name>.txt`, or the user's own instruction |
 
-`assemble(for:learningSummary:)` builds the polish prompt and `assembleRefinement(_:for:)` the
-refine prompt. A section file is only read when its placeholder is in the template, so an old
-edited `polish.txt` (four steps, only `{{CHANNEL_GUIDELINES}}`) assembles as before and never
-needs the new files; `syncDefaults()` reports it as having a newer default like any edited file.
+`assemble(for:options:)` builds the polish prompt from a `PolishOptions` (mode, output
+language, summary on or off) and `assembleRefinement(_:for:)` the refine prompt. A section file is
+only read when its placeholder is in the template, so an old edited `polish.txt` (four steps, only
+`{{CHANNEL_GUIDELINES}}`, or the sectioned one without `{{LANGUAGE_POLICY}}` and
+`{{MODE_GUIDELINES}}`, which keeps its own "translate to English" text) assembles as before and
+never needs the new files; `syncDefaults()` reports it as having a newer default like any edited
+file. The channel rules win over the mode tone where they conflict; the default "professional
+but approachable" tone lives in `modes/work.txt`, not `always.txt`.
 `write` validates first: no file may be empty, `polish.txt` must keep `{{CHANNEL_GUIDELINES}}`
 and `refine.txt` must keep `{{REFINEMENT_INSTRUCTION}}`. The other placeholders are optional:
 removing `{{LEARNING_SUMMARY}}` from `polish.txt` simply means no summary instructions.
@@ -262,7 +283,8 @@ responder.
 
 ### Theme
 
-Views draw with six tokens (`ink`, `paper`, `desk`, `rule`, `redPencil`, `marginGreen`) read
+Views draw with seven tokens (`ink`, `personalInk`, `paper`, `desk`, `rule`, `redPencil`,
+`marginGreen`) read
 from `@Environment(\.theme)`, a `ThemePalette`. Each token is a light and a dark `0xRRGGBB`
 value, turned into a dynamic `NSColor` that follows the appearance of the view it is drawn in;
 one `Color` is cached per value, so equal palettes give equal colours. `ThemeSettings` (owned by
@@ -272,7 +294,35 @@ overrides. Every change is saved as a JSON string under the `theme` UserDefaults
 (`{"preset":"lagoon","overrides":{"ink":{"light":"#025F67","dark":"#6FCFC6"}}}`); a value that
 doesn't parse is logged and loads as Writing Desk. System colours (error banner, prompt editor
 notices) are not themed. `EnvironmentValues.theme` uses a plain `EnvironmentKey`, since `@Entry`
-needs a macro plugin that ships only with Xcode.
+needs a macro plugin that ships only with Xcode. The main window gets
+`palette.forMode(model.mode)`, which puts `personalInk` in place of `ink` in Personal mode, so the
+tint shows the mode. A switch (toolbar control or View › Switch to … Mode, ⌘⇧M) runs in a 0.3 s
+ease-in-out animation that crossfades the chip set (it is keyed by mode) and shifts the tint; under
+Reduce Motion it applies without animation.
+
+### Modes
+
+`ModeSettings` (app) holds the current mode and a `ModeProfile` per mode, saved as a JSON string
+under the `modes` UserDefaults key:
+
+```json
+{"current":"work",
+ "personal":{"learningSummary":false,"lastChannel":"personal_message","outputLanguage":"sameAsInput",
+             "visibleChannels":["personal_message","email","proofread","other"]},
+ "work":{"learningSummary":true,"lastChannel":"slack","outputLanguage":"english",
+         "visibleChannels":["slack","slack_informal","email","talking_points","ai_prompt","formal",
+                            "proofread"]}}
+```
+
+Every key is optional on read and takes that mode's default; unknown channel names are dropped,
+an empty list takes the default list, and a value that doesn't parse is logged and loads as the
+defaults. `visibleChannels` is the chip order (⌘1–9 follow it); a channel shown again goes last.
+Hiding a mode's only visible channel is refused, and Settings › General disables its checkbox.
+`AppModel.channel` is the mode's last channel while it is visible, else the first visible one, so
+hiding the selected channel or restoring a history entry whose channel is now hidden falls back
+without losing the stored choice. The old `selectedChannel` and `learningSummaryEnabled` keys are
+gone and no longer read. `AppModel+Mode` turns the current profile into the `PolishOptions` each
+polish captures.
 
 ### Diff, learning log and history
 
@@ -281,7 +331,10 @@ the standard library's `difference(from:)`. `DiffView` colors the segments and g
 text version ("removed: …, added: …").
 
 After a successful Process, `AppModel` appends the learning summary to `LearningLog` (skipped when
-it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`. The
+it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`,
+with the mode it ran in. Entries saved before modes existed have no `mode` key and decode as
+`work`. History rows show the mode, the popover filters by All, Work or Personal
+(`AppModel.historyEntries(in:)`), and restoring an entry switches to its mode. The
 edited output is saved into the current entry on copy, refine, clear and before the next request,
 not on every keystroke. A history file that doesn't decode is renamed to `history.corrupt.json`,
 the store starts empty, and the app shows a banner. A file that can't be read, or a damaged one
@@ -304,7 +357,8 @@ delegate when they appear. The activation step is injected, so tests run without
 
 ```
 ~/Library/Application Support/Writing Assistant/
-  prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
+  prompts/                 live prompts: polish.txt, channels/, modes/, languages/,
+                           refinements/, .defaults.json
   history.json             the newest 50 requests
   history.corrupt.json     a history file that couldn't be read, moved aside
   usage.json               token and cost totals per month
@@ -396,7 +450,8 @@ took: each update converts the Markdown so far (about 3.5 ms for 2,000 character
 - The Polish button's progress text follows `PolishStage`: "Detecting language…" until the reply
   says `was_translated` or starts the text, then "Translating from Spanish…" (or "Translating…"
   without a language) or "Polishing…", then "Writing tips…" once the text is complete and a
-  summary is coming, or "Finishing…" when none is (summary off, or a translation). A reply that
+  summary is coming, or "Finishing…" when none is (summary off, a translation, or non-English
+  text under Same as input). A reply that
   writes `polished_text` first reads "Polishing…", and its card shows only the model until the
   language arrives; a late `was_translated: true` removes the summary placeholder.
 - A cancel or failure after the text is complete keeps it and saves it to history without a
@@ -405,9 +460,10 @@ took: each update converts the Markdown so far (about 3.5 ms for 2,000 character
 - A preview for a request that is no longer current is ignored. If the final result arrives
   before the complete text was shown, it replaces the streamed text.
 
-Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
-When off, the polish prompt is assembled without `learning_summary.txt`, so it has no summary
-instructions at all, and `PolishService` drops any summary that comes back anyway.
+Settings › General has a per-mode "Show English learning summary" switch (on for Work, off for
+Personal), next to the mode's output language and channel checkboxes. When off, the polish
+prompt is assembled without `learning_summary.txt`, so it has no summary instructions at all, and
+`PolishService` drops any summary that comes back anyway.
 
 `PolishService` records the usage of every reply the CLI completes in `UsageStore` (`usage.json`,
 totals per Gregorian "yyyy-MM" in the user's time zone), even when the reply then fails to parse.
@@ -535,8 +591,10 @@ subprocess, which Android can't do.
 
 ### Change logic in both apps
 
-The model routing heuristic, JSON extraction, the polish and refine pipeline and the
-`learning_summary` invariant (always null when `was_translated` is truthy) exist twice: in Swift
+The model routing heuristic, JSON extraction, the polish and refine pipeline, the modes and
+language policy (`Mode`, `OutputLanguage`, `PolishOptions`) and the `learning_summary` invariant
+(null unless `PolishOptions.allowsLearningSummary` holds: never for a translation or non-English
+input) exist twice: in Swift
 under `Sources/WritingAssistantCore/` and in Kotlin under `android/core/`. The Kotlin tests are
 ports of the Swift tests. A change to any of these, or to the Anthropic model IDs, has to be made
 in both languages together with its tests in both. Each Kotlin file names the Swift file it
@@ -589,8 +647,9 @@ android/
       data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
       data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
-      data/DataStoreAppSettings.kt     last-used channel, provider, disabled channels, learning
-                                       summary switch and palette, in Preferences DataStore
+      data/DataStoreAppSettings.kt     current mode, per-mode channels, last channel, output
+                                       language and learning summary (ModeProfile.kt), provider
+                                       and palette, in Preferences DataStore
       data/HistoryRepository.kt        in-memory history shared by composer and History screen,
                                        saved to filesDir/history.json
       data/AssetPromptReader.kt        PromptReading from the bundled assets
@@ -625,7 +684,8 @@ built; tests construct view models with fakes instead.
 
 `app/build.gradle.kts` adds `Sources/WritingAssistantCore/Resources/Prompts/` as an assets
 directory, so the APK bundles the same `polish.txt`, `always.txt`, `learning_summary.txt`,
-`refine.txt`, `channels/*.txt` and `refinements/*.txt` as the Mac app, and a change to those bundled defaults reaches both apps with their next build.
+`refine.txt`, `channels/*.txt`, `modes/*.txt`, `languages/*.txt` and `refinements/*.txt` as the
+Mac app, and a change to those bundled defaults reaches both apps with their next build.
 Edits made in the Mac app's Settings live in its Application Support folder and don't reach
 Android. On Android, `PromptOverrideStore` (`:core`) reads `filesDir/prompts/<relativePath>` when
 the user edited that file in Settings → Prompts, and otherwise the bundled default through
@@ -736,8 +796,13 @@ Debug builds get `BuildConfig.DEBUG_API_KEY` from `ANTHROPIC_API_KEY` and
 stored; a key is stored once the user saves or tests it. Release builds set both to an empty
 string.
 
-`DataStoreAppSettings` keeps the last-used channel, which the composer preselects, and the
-selected provider (Anthropic until the user picks another). `AppGraph` builds both clients once
+`DataStoreAppSettings` keeps the current `mode` and, per mode (keys prefixed `work_` or
+`personal_`), `visible_channels` (channel ids in chip order, comma-separated, since a string set
+loses order), `last_channel`, `output_language` (`english` or `sameAsInput`) and
+`learning_summary`, with the same defaults and fallbacks as the Mac's `ModeSettings`; hiding a
+mode's last visible channel is refused. The old global `last_channel`, `disabled_channels` and
+`learning_summary` keys are no longer read. It also keeps the selected provider (Anthropic until
+the user picks another). `AppGraph` builds both clients once
 and gives `PolishService` a backend lambda that reads `settings.provider()` on every request. The
 Settings screen's Anthropic | Groq segmented buttons save the choice right away and load that
 provider's key; Save, Test and Clear act on the selected provider.
@@ -752,7 +817,11 @@ cancels the job, and a generation number keeps a cancelled or replaced request f
 newer state, as `RequestRunner.swift` does. Opening a sheet with different text cancels any
 request and starts over, so Replace never returns a result for other text. A failed request can
 be retried from the error banner. Polish is disabled while the key store holds no key for the
-selected provider, and `MainActivity` opens Settings once in that case.
+selected provider, and `MainActivity` opens Settings once in that case. A Work | Personal toggle
+above the chips switches the mode instantly and is disabled while a request runs; the chips show
+the mode's visible channels. Restoring a history entry switches to its mode and keeps its
+channel, adding it as an extra chip when that mode now hides it (the Mac selects the first
+visible chip instead). Android has no streaming, so there is no pending-summary state.
 
 ### System integration
 

@@ -1,11 +1,15 @@
 import AppKit
 import SwiftUI
+import WritingAssistantCore
 import os
 
-/// One of the app's six colour roles.
+/// One of the app's seven colour roles.
 enum ThemeToken: String, Codable, CaseIterable, Sendable {
-    /// App tint: the Polish button, selected chips, the focus edge, links and vocabulary terms.
+    /// App tint in Work mode: the Polish button, selected chips, the focus edge, links and
+    /// vocabulary terms.
     case ink
+    /// App tint in Personal mode, in place of `ink`, so the window shows which mode it is in.
+    case personalInk
     /// Background of the writing sheet and the result cards.
     case paper
     /// Window background behind the sheet.
@@ -20,7 +24,8 @@ enum ThemeToken: String, Codable, CaseIterable, Sendable {
     /// Name shown in Settings.
     var label: String {
         switch self {
-        case .ink: "Accent"
+        case .ink: "Work accent"
+        case .personalInk: "Personal accent"
         case .paper: "Sheet"
         case .desk: "Background"
         case .rule: "Dividers"
@@ -87,6 +92,14 @@ struct ThemePalette: Equatable, Sendable {
     private static let cacheLimit = 256
     private static let cache = OSAllocatedUnfairLock(initialState: [ThemeColor: Color]())
 
+    /// This palette with `mode`'s accent as `ink`, which every view tints with.
+    func forMode(_ mode: Mode) -> ThemePalette {
+        guard mode == .personal else { return self }
+        var palette = self
+        palette.colors[.ink] = self[.personalInk]
+        return palette
+    }
+
     var ink: Color { color(.ink) }
     var paper: Color { color(.paper) }
     var desk: Color { color(.desk) }
@@ -117,6 +130,7 @@ enum ThemePreset: String, Codable, CaseIterable, Sendable {
         case .writingDesk:
             ThemePalette(colors: [
                 .ink: ThemeColor(light: 0x33_378A, dark: 0xA9_ADF2),
+                .personalInk: ThemeColor(light: 0x8A_3A6E, dark: 0xF0_A6D2),
                 .paper: ThemeColor(light: 0xFD_FDFC, dark: 0x1F_2024),
                 .desk: ThemeColor(light: 0xED_EFF3, dark: 0x14_1519),
                 .rule: ThemeColor(light: 0xD9_DCE3, dark: 0x34_363D),
@@ -126,6 +140,7 @@ enum ThemePreset: String, Codable, CaseIterable, Sendable {
         case .lagoon:
             ThemePalette(colors: [
                 .ink: ThemeColor(light: 0x02_5F67, dark: 0x6F_CFC6),
+                .personalInk: ThemeColor(light: 0xA3_4A1F, dark: 0xF5_B183),
                 .paper: ThemeColor(light: 0xF7_F6F2, dark: 0x0B_2A45),
                 .desk: ThemeColor(light: 0xE4_E8EA, dark: 0x04_1F35),
                 .rule: ThemeColor(light: 0xBC_C5CC, dark: 0x24_435C),
@@ -135,6 +150,7 @@ enum ThemePreset: String, Codable, CaseIterable, Sendable {
         case .sepia:
             ThemePalette(colors: [
                 .ink: ThemeColor(light: 0x8A_4B1F, dark: 0xE8_B07F),
+                .personalInk: ThemeColor(light: 0x2F_6B4F, dark: 0x8F_D4AE),
                 .paper: ThemeColor(light: 0xFB_F6EC, dark: 0x2A_241D),
                 .desk: ThemeColor(light: 0xEF_E6D6, dark: 0x1C_1813),
                 .rule: ThemeColor(light: 0xDC_CFB8, dark: 0x43_3A2E),
