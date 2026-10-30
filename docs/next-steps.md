@@ -45,7 +45,9 @@ Watch the logs while testing:
 
 ## 1. All nine channels — Spanish input
 
-Paste a Spanish paragraph and run it through all nine channels. Verify:
+Paste a Spanish paragraph and run it through all nine channels, in Work mode (show the two
+Personal-only channels in Settings › General first, or run them in Personal mode with its output
+language set to English). Verify:
 
 - Each channel produces visibly different output (Slack: short and scannable; informal Slack:
   casual; talking points: spoken bullet list; formal: full paragraphs with headers; AI prompt:
@@ -223,12 +225,44 @@ added that were not in the original.
 - Summary off: "Polishing…", then "Finishing…", never "Writing tips…".
 - Cancel while the text is still streaming: the card goes away and History has no entry.
 - Cancel after the text is complete: the text stays and History has the entry, without a summary.
-- Settings › General: turn off **Show English learning summary**. English text gets no summary
-  card, nothing is added to the learning log, and the reply is faster. Turn it back on.
+- Settings › General, Work: turn off **Show English learning summary**. English text gets no
+  summary card, nothing is added to the learning log, and the reply is faster. Turn it back on.
 - The toolbar token count rises after a polish and after a refinement, and matches Settings ›
   General. `~/Library/Application Support/Writing Assistant/usage.json` has the current month.
 - **More diplomatic** and **More assertive** visibly change the tone, both prompts are listed in
   Settings › Prompts, and the Refine row wraps at the minimum window width.
+
+## 18. Modes
+
+- First launch after upgrading: the toolbar shows **Work** selected, the Work chips (Slack, Casual
+  Slack, Email, Talking points, AI prompt, Formal doc, Proofread) and Slack selected. The old
+  channel and summary settings are not carried over.
+- Switch with the toolbar control and with **⌘⇧M** (also View › Switch to Personal Mode): the
+  chips crossfade to Personal, Email, Proofread, General, the accent colour shifts (Polish button,
+  selected chip, focus edge) and nothing is sent. With Reduce Motion on, the switch is immediate.
+  Check each Appearance preset: the Personal accent is distinct and readable on the button.
+- Each mode remembers its channel: pick Talking points in Work, General in Personal, switch back
+  and forth, then relaunch.
+- **⌘1…⌘9** pick the current mode's chips in order (⌘5 in Personal does nothing).
+- A Spanish WhatsApp-style message ("oye, mañana no puedo ir a la cena, lo siento mucho 😅") on
+  Personal in Personal mode stays Spanish: the card says Spanish, not "Translated from Spanish",
+  the status goes "Polishing…" then "Finishing…", and no summary card or placeholder appears. With
+  Personal's learning summary turned on, the same message still gets no summary and nothing is
+  added to the learning log; an English message does get one.
+- The same message in Work mode is translated to English, as before.
+- While a request runs, the mode control and the menu item are disabled.
+- Settings › General: pick a mode, uncheck channels until one is left; its checkbox is disabled.
+  Hide the selected channel: the first visible chip becomes selected. Change Personal's output
+  language to English: the next Spanish personal message is translated.
+- History rows show the mode; the All / Work / Personal filter lists only that mode's requests.
+  Restoring a Personal entry from Work switches the toolbar to Personal. Entries from before this
+  version show Work.
+- Settings › Prompts has a Modes and languages section with the two tone files and two language
+  files; editing `modes/personal.txt` changes the next Personal request. Upgrading with an edited
+  `polish.txt`: it shows the newer-default badge and keeps translating to English in both modes
+  until restored.
+- `defaults read local.writing-assistant modes` shows the JSON described
+  in docs/architecture.md.
 
 ---
 
