@@ -24,19 +24,28 @@ extension PromptStoring {
     }
 
     /// The refine prompt: `refine.txt` with the shared rules, the channel guidelines and the
-    /// refinement instruction.
+    /// instruction, which is a preset's refinement file or the user's own text.
+    ///
+    /// Custom text is inserted last and without the prompt placeholders it contains (see
+    /// `RefinementInstruction.validated()`), so it can't pull another section in.
     ///
     /// - Throws: `PromptStoreError` when a needed prompt file couldn't be read.
     public func assembleRefinement(
-        _ refinement: Refinement, for channel: Channel
+        _ instruction: RefinementInstruction, for channel: Channel
     ) throws -> String {
-        try fill(
-            .refine,
-            [
-                (PromptFile.alwaysPlaceholder, .always),
-                (PromptFile.channelPlaceholder, .channel(channel)),
-                (PromptFile.instructionPlaceholder, .refinement(refinement)),
-            ])
+        let shared: [(placeholder: String, file: PromptFile?)] = [
+            (PromptFile.alwaysPlaceholder, .always),
+            (PromptFile.channelPlaceholder, .channel(channel)),
+        ]
+        switch instruction {
+        case .preset(let refinement):
+            return try fill(
+                .refine, shared + [(PromptFile.instructionPlaceholder, .refinement(refinement))])
+        case .custom(let text):
+            return try fill(.refine, shared).replacingOccurrences(
+                of: PromptFile.instructionPlaceholder,
+                with: RefinementInstruction.withoutPlaceholders(text))
+        }
     }
 
     /// Replaces each placeholder in `template` with its trimmed file, in order; a nil file

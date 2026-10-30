@@ -59,7 +59,9 @@ struct ClipboardContent: Equatable, Sendable {
     /// When the running polish or refinement started. Nil when no request is running.
     private(set) var requestStartedAt: Date?
     /// The refinement that is running, or nil when none is (a polish request leaves it nil).
-    private(set) var runningRefinement: Refinement?
+    private(set) var runningRefinement: RefinementInstruction?
+    /// What the user typed in the Refine field, which `refineWithCustomInstruction()` sends.
+    var customInstruction = ""
     /// Past requests, newest first. Change it only through the methods in `AppModel+History`.
     var history: [HistoryEntry] = []
     /// The history entry the output on screen belongs to, which `saveOutputToHistory()` updates.
@@ -213,7 +215,7 @@ struct ClipboardContent: Equatable, Sendable {
     /// - Parameter refinement: The refinement this request applies, if it is one.
     /// - Returns: The request's generation for `finishRequest(_:_:)`, or nil when a request is
     ///   already running.
-    func beginRequest(refinement: Refinement? = nil) -> Int? {
+    func beginRequest(refinement: RefinementInstruction? = nil) -> Int? {
         guard let generation = requests.begin() else { return nil }
         runningRefinement = refinement
         errorMessage = nil

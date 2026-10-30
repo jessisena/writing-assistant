@@ -19,6 +19,7 @@ import WritingAssistantCore
     @Test func fakePromptStoreAssemblesTheRefinePrompt() throws {
         let store = FakePromptStore()
         #expect(
-            try store.assembleRefinement(.shorter, for: .slack) == "Refine\nshorter instruction")
+            try store.assembleRefinement(.preset(.shorter), for: .slack)
+                == "Refine\nshorter instruction")
     }
 }

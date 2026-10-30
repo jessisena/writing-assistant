@@ -32,7 +32,7 @@ import WritingAssistantCore
 
         model.refine(.shorter)
         await waitUntil(polisher, hasCalls: 2)
-        #expect(model.runningRefinement == .shorter)
+        #expect(model.runningRefinement == .preset(.shorter))
 
         polisher.resume(1, with: .success(.sample))
         await model.requests.task?.value
