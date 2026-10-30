@@ -17,6 +17,18 @@ extension ClaudeRunning {
 extension Polishing {
     func polish(text: String, channel: Channel) async throws(PolishError) -> PolishResult {
         try await polish(
-            text: text, channel: channel, includeLearningSummary: true, onPreview: { _ in })
+            text: text, channel: channel, options: .english(summary: true), onPreview: { _ in })
+    }
+}
+
+extension PolishOptions {
+    /// Work mode with the given language policy and summary setting.
+    static func english(summary: Bool) -> PolishOptions {
+        PolishOptions(mode: .work, outputLanguage: .english, includesLearningSummary: summary)
+    }
+
+    static func sameAsInput(summary: Bool) -> PolishOptions {
+        PolishOptions(
+            mode: .personal, outputLanguage: .sameAsInput, includesLearningSummary: summary)
     }
 }

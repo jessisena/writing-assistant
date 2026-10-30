@@ -128,6 +128,33 @@ import Testing
         #expect(loaded.first?.outputMarkdown == entry().outputMarkdown)
     }
 
+    @Test func modeIsStoredAsItsRawValueAndRoundTrips() throws {
+        var personal = entry()
+        personal.mode = .personal
+
+        try store.save([personal])
+
+        let text = try String(contentsOf: store.fileURL, encoding: .utf8)
+        #expect(text.contains("\"mode\" : \"personal\""))
+        #expect(try store.load() == [personal])
+    }
+
+    /// "" removes the key, as in a file saved before modes existed.
+    @Test(arguments: ["", #""mode" : "family","#])
+    func entryWithoutAKnownModeDecodesAsWork(replacement: String) throws {
+        var personal = entry()
+        personal.mode = .personal
+        try store.save([personal])
+        let text = try String(contentsOf: store.fileURL, encoding: .utf8)
+        try writeRaw(
+            text.replacingOccurrences(of: #""mode" : "personal","#, with: replacement))
+
+        let loaded = try store.load()
+
+        #expect(loaded.map(\.mode) == [.work])
+        #expect(loaded.first?.outputMarkdown == personal.outputMarkdown)
+    }
+
     @Test(arguments: ["{not json", "{\"entries\": []}", "[{\"id\": \"nope\"}]", ""])
     func corruptFileIsMovedAsideAndTheNextLoadIsEmpty(contents: String) throws {
         try writeRaw(contents)

@@ -74,6 +74,10 @@ private struct StubPromptStore: PromptStoring {
             return "\(channel.rawValue.uppercased()) RULES"
         case .global:
             return try assembled.get()
+        case .mode(let mode):
+            return "\(mode.rawValue.uppercased()) TONE"
+        case .languagePolicy(let language):
+            return "\(language.rawValue.uppercased()) LANGUAGE"
         }
     }
     func write(_ text: String, to file: PromptFile) throws {}
@@ -558,7 +562,7 @@ private func expectBadFormat(_ output: String) async {
         let service = PolishService(runner: runner, prompts: prompts)
 
         let result = try await service.polish(
-            text: "Hello there", channel: .slack, includeLearningSummary: false,
+            text: "Hello there", channel: .slack, options: .english(summary: false),
             onPreview: { _ in })
 
         #expect(result.learningSummary == nil)
@@ -571,13 +575,104 @@ private func expectBadFormat(_ output: String) async {
         let service = PolishService(runner: runner, prompts: prompts)
 
         let result = try await service.polish(
-            text: "Hello there", channel: .slack, includeLearningSummary: true,
+            text: "Hello there", channel: .slack, options: .english(summary: true),
             onPreview: { _ in })
 
         #expect(result.learningSummary != nil)
         #expect(
             await runner.calls.first?.systemPrompt
                 == "SYSTEM PROMPT\nSLACK RULES\n\nLEARNING SUMMARY RULES")
+    }
+}
+
+/// A reply in `language` that wasn't translated and carries `summary` (a valid one by default).
+private func untranslatedResponse(_ language: String?, summary: Any = summaryObject()) -> String {
+    var object: [String: Any] = [
+        "was_translated": false, "polished_text": "Hola, ¿quedamos mañana?",
+        "learning_summary": summary,
+    ]
+    object["detected_language"] = language
+    return json(object)
+}
+
+@Suite struct LanguagePolicyTests {
+    private let prompts = StubPromptStore(
+        assembled: .success(
+            "\(PromptFile.languagePolicyPlaceholder)\n\(PromptFile.modePlaceholder)\n"
+                + PromptFile.channelPlaceholder))
+
+    private func polish(
+        responding output: String, options: PolishOptions
+    ) async throws(PolishError) -> (PolishResult, String?) {
+        let runner = FakeRunner(output: .success(output))
+        let service = PolishService(runner: runner, prompts: prompts)
+        let result = try await service.polish(
+            text: "hola, quedamos mañana?", channel: .personalMessage, options: options,
+            onPreview: { _ in })
+        return (result, await runner.calls.first?.systemPrompt)
+    }
+
+    @Test func promptCarriesTheModeToneAndLanguagePolicy() async throws {
+        let (_, personal) = try await polish(
+            responding: untranslatedResponse("Spanish"), options: .sameAsInput(summary: false))
+        let (_, work) = try await polish(
+            responding: englishResponse, options: .english(summary: false))
+
+        #expect(personal == "SAMEASINPUT LANGUAGE\nPERSONAL TONE\nPERSONAL_MESSAGE RULES")
+        #expect(work == "ENGLISH LANGUAGE\nWORK TONE\nPERSONAL_MESSAGE RULES")
+    }
+
+    @Test(arguments: ["Spanish", "Català", "Inglés", "", nil] as [String?])
+    func sameAsInputDropsTheSummaryOfNonEnglishInput(language: String?) async throws {
+        let (result, _) = try await polish(
+            responding: untranslatedResponse(language), options: .sameAsInput(summary: true))
+
+        #expect(result.learningSummary == nil)
+        #expect(!result.wasTranslated)
+        #expect(result.polishedText == "Hola, ¿quedamos mañana?")
+    }
+
+    @Test(arguments: ["English", "english", " English (US) "])
+    func sameAsInputKeepsTheSummaryOfEnglishInput(language: String) async throws {
+        let (result, _) = try await polish(
+            responding: untranslatedResponse(language), options: .sameAsInput(summary: true))
+
+        #expect(result.learningSummary != nil)
+    }
+
+    @Test func englishPolicyKeepsTheSummaryOfUntranslatedInputWithoutALanguage() async throws {
+        let (result, _) = try await polish(
+            responding: untranslatedResponse(nil), options: .english(summary: true))
+
+        #expect(result.detectedLanguage == "Unknown")
+        #expect(result.learningSummary != nil)
+    }
+
+    @Test(arguments: [PolishOptions.sameAsInput(summary: true), .english(summary: false)])
+    func aMalformedSummaryThatIsDroppedAnywayDoesNotFailTheRequest(
+        options: PolishOptions
+    ) async throws {
+        let (result, _) = try await polish(
+            responding: untranslatedResponse("Spanish", summary: "not an object"),
+            options: options)
+
+        #expect(result.learningSummary == nil)
+    }
+}
+
+@Suite struct PolishOptionsTests {
+    @Test func translationNeverAllowsASummary() {
+        for options in [PolishOptions.english(summary: true), .sameAsInput(summary: true)] {
+            #expect(
+                !options.allowsLearningSummary(detectedLanguage: "English", wasTranslated: true))
+        }
+    }
+
+    @Test func summaryOffNeverAllowsASummary() {
+        for options in [PolishOptions.english(summary: false), .sameAsInput(summary: false)] {
+            #expect(
+                !options.allowsLearningSummary(detectedLanguage: "English", wasTranslated: false))
+        }
     }
 }
 
@@ -614,7 +709,7 @@ private final class PreviewLog: @unchecked Sendable {
         let runner = FakeRunner(output: .success(reply), streamed: streamed)
         let service = PolishService(runner: runner, prompts: StubPromptStore())
         let result = try await service.polish(
-            text: "Hello", channel: .slack, includeLearningSummary: true,
+            text: "Hello", channel: .slack, options: .english(summary: true),
             onPreview: { log.record(.preview($0)) })
         log.record(.returned)
         return result

@@ -1,0 +1,3 @@
+Detect the language of the draft and write the result in that same language. Never translate,
+even when the draft mixes in words from another language: keep those as the author wrote them.
+Set was_translated to false.

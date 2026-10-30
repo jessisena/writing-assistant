@@ -34,13 +34,16 @@ public struct PolishService: Polishing {
 
     /// Polishes (or translates, then polishes) `text` for `channel`.
     ///
-    /// When the model reports `was_translated: true`, or `includeLearningSummary` is false, the
-    /// result never carries a learning summary, whatever the model returned.
+    /// The result only carries a learning summary when
+    /// `options.allowsLearningSummary(detectedLanguage:wasTranslated:)` holds for the reply:
+    /// never for a translation, for non-English input or with the summary off, whatever the
+    /// model returned.
     ///
     /// - Parameters:
     ///   - text: The user's input. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - includeLearningSummary: False leaves the learning summary section out of the prompt.
+    ///   - options: Select the mode tone and language policy inserted into the prompt; a false
+    ///     `includesLearningSummary` leaves the learning summary section out.
     ///   - onPreview: Gets what the reply has said so far after every streamed piece that
     ///     changes it (see `PolishedTextScanner`), in order, on whichever thread the runner
     ///     streams on. The returned result is parsed from the full reply on its own, so it can
@@ -49,12 +52,12 @@ public struct PolishService: Polishing {
     /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
     ///   error thrown by the runner, unchanged.
     public func polish(
-        text: String, channel: Channel, includeLearningSummary: Bool,
+        text: String, channel: Channel, options: PolishOptions,
         onPreview: @escaping @Sendable (PolishPreview) -> Void
     ) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
         let systemPrompt = try loadPrompt(named: channel.rawValue) {
-            try prompts.assemble(for: channel, learningSummary: includeLearningSummary)
+            try prompts.assemble(for: channel, options: options)
         }
         let scanner = OSAllocatedUnfairLock(initialState: PolishedTextScanner())
         let (raw, model) = try await send(systemPrompt, input: input) { chunk in
@@ -62,11 +65,7 @@ public struct PolishService: Polishing {
                 onPreview(preview)
             }
         }
-        var result = try Self.parse(raw, model: model)
-        if !includeLearningSummary {
-            result.learningSummary = nil
-        }
-        return result
+        return try Self.parse(raw, model: model, options: options)
     }
 
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
@@ -156,15 +155,22 @@ public struct PolishService: Polishing {
         }
     }
 
-    private static func parse(_ raw: String, model: String) throws(PolishError) -> PolishResult {
+    /// Reads the reply. `learning_summary` is only decoded when `options` allow a summary for the
+    /// reply's language fields; otherwise it is ignored, even when malformed.
+    private static func parse(
+        _ raw: String, model: String, options: PolishOptions
+    ) throws(PolishError) -> PolishResult {
         let object = try decodeObject(raw)
         let polishedText = try polishedText(in: object)
         let wasTranslated = isTruthy(object["was_translated"])
-        let summary = wasTranslated ? nil : try decodeSummary(object["learning_summary"])
+        let language = object["detected_language"] as? String ?? "Unknown"
+        let allowsSummary = options.allowsLearningSummary(
+            detectedLanguage: language, wasTranslated: wasTranslated)
+        let summary = allowsSummary ? try decodeSummary(object["learning_summary"]) : nil
         return PolishResult(
             polishedText: polishedText,
             learningSummary: summary,
-            detectedLanguage: object["detected_language"] as? String ?? "Unknown",
+            detectedLanguage: language,
             wasTranslated: wasTranslated,
             modelUsed: model
         )

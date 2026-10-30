@@ -8,6 +8,10 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
     /// Stored as `Channel.rawValue`. A value this version doesn't know (a channel that was
     /// renamed or removed) decodes as `.other`, so the entry's texts are never lost to it.
     public var channel: Channel
+    /// The mode the request ran in, stored as `Mode.rawValue`. Entries saved before modes
+    /// existed have none; they, and a value this version doesn't know, decode as `.work`, the
+    /// mode whose defaults match how the app behaved before modes.
+    public var mode: Mode
     public var inputMarkdown: String
     public var outputMarkdown: String
     public var learningSummary: LearningSummary?
@@ -16,7 +20,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
     public var modelUsed: String
 
     enum CodingKeys: String, CodingKey {
-        case id, date, channel, inputMarkdown, outputMarkdown, learningSummary
+        case id, date, channel, mode, inputMarkdown, outputMarkdown, learningSummary
         case detectedLanguage, wasTranslated, modelUsed
     }
 
@@ -24,6 +28,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
         id: UUID = UUID(),
         date: Date,
         channel: Channel,
+        mode: Mode = .work,
         inputMarkdown: String,
         outputMarkdown: String,
         learningSummary: LearningSummary?,
@@ -34,6 +39,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
         self.id = id
         self.date = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
         self.channel = channel
+        self.mode = mode
         self.inputMarkdown = inputMarkdown
         self.outputMarkdown = outputMarkdown
         self.learningSummary = learningSummary
@@ -49,6 +55,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
             id: try container.decode(UUID.self, forKey: .id),
             date: try container.decode(Date.self, forKey: .date),
             channel: Channel(rawValue: rawChannel) ?? .other,
+            mode: try container.decodeIfPresent(String.self, forKey: .mode)
+                .flatMap(Mode.init(rawValue:)) ?? .work,
             inputMarkdown: try container.decode(String.self, forKey: .inputMarkdown),
             outputMarkdown: try container.decode(String.self, forKey: .outputMarkdown),
             learningSummary: try container.decodeIfPresent(
@@ -64,6 +72,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable, Identifiable {
         try container.encode(id, forKey: .id)
         try container.encode(date, forKey: .date)
         try container.encode(channel.rawValue, forKey: .channel)
+        try container.encode(mode.rawValue, forKey: .mode)
         try container.encode(inputMarkdown, forKey: .inputMarkdown)
         try container.encode(outputMarkdown, forKey: .outputMarkdown)
         try container.encodeIfPresent(learningSummary, forKey: .learningSummary)

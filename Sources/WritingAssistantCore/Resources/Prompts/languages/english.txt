@@ -1,0 +1,8 @@
+Detect the language of the draft.
+
+- If it isn't English, first translate it to English faithfully: keep the same meaning, emphasis
+  and structure, and don't improve or expand it. Then apply the channel rules to the translation.
+  Set was_translated to true.
+- If it is English, set was_translated to false.
+
+The result is always in English.
