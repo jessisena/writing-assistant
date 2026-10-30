@@ -590,29 +590,42 @@ private final class PreviewLog: @unchecked Sendable {
     }
 
     @Test(arguments: [1, 7, 1_000])
-    func previewIsSentOnceBeforeTheResult(pieceSize: Int) async throws {
+    func previewsGrowInOrderBeforeTheResult(pieceSize: Int) async throws {
         let reply = "```json\n\(englishResponse)\n```"
         let log = PreviewLog()
 
         let result = try await polish(
             streaming: pieces(of: reply, size: pieceSize), reply: reply, log: log)
 
-        let preview = PolishPreview(
-            polishedText: "Please send me the report by end of day.", detectedLanguage: "English",
-            wasTranslated: nil)
-        #expect(log.events == [.preview(preview), .returned])
-        #expect(result.polishedText == preview.polishedText)
+        let text = "Please send me the report by end of day."
+        let complete = PolishPreview(
+            polishedText: text, isTextComplete: true, detectedLanguage: "English",
+            wasTranslated: false)
+        #expect(log.events.last == .returned)
+        let previews = log.events.compactMap { event -> PolishPreview? in
+            guard case .preview(let preview) = event else { return nil }
+            return preview
+        }
+        #expect(previews.last == complete)
+        #expect(previews.allSatisfy { text.hasPrefix($0.polishedText ?? "") })
+        #expect(pieceSize < reply.count || previews == [complete])
+        #expect(result.polishedText == text)
         #expect(result.learningSummary != nil)
     }
 
-    @Test func replyThatNeverClosesThePolishedTextSendsNoPreview() async throws {
+    @Test func replyThatNeverClosesThePolishedTextSendsOnlyPartialText() async throws {
         let log = PreviewLog()
 
         let result = try await polish(
             streaming: [#"{"polished_text": "Please send"#, " me the report"],
             reply: englishResponse, log: log)
 
-        #expect(log.events == [.returned])
+        #expect(
+            log.events == [
+                .preview(PolishPreview(polishedText: "Please send")),
+                .preview(PolishPreview(polishedText: "Please send me the report")),
+                .returned,
+            ])
         #expect(result.polishedText == "Please send me the report by end of day.")
     }
 
@@ -627,10 +640,7 @@ private final class PreviewLog: @unchecked Sendable {
             return true
         }
         #expect(
-            log.events == [
-                .preview(
-                    PolishPreview(polishedText: "Hi", detectedLanguage: nil, wasTranslated: nil))
-            ])
+            log.events == [.preview(PolishPreview(polishedText: "Hi", isTextComplete: true))])
     }
 }
 

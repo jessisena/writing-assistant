@@ -48,9 +48,10 @@ public struct PolishService: Polishing {
     ///   - text: The user's input. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
     ///   - includeLearningSummary: False tells the model to skip the summary.
-    ///   - onPreview: Gets the polished text once it is complete, before the summary, at most
-    ///     once and on whichever thread the runner streams on. The returned result is parsed
-    ///     from the full reply on its own, so it can still fail after a preview was sent.
+    ///   - onPreview: Gets what the reply has said so far after every streamed piece that
+    ///     changes it (see `PolishedTextScanner`), in order, on whichever thread the runner
+    ///     streams on. The returned result is parsed from the full reply on its own, so it can
+    ///     still fail after a complete text was previewed.
     /// - Returns: The parsed result, including the model that produced it.
     /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
     ///   error thrown by the runner, unchanged.

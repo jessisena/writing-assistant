@@ -2,13 +2,13 @@
     import Foundation
     import WritingAssistantCore
 
-    /// In-memory `Polishing` for previews and tests. Sends `preview`, if set, then returns
+    /// In-memory `Polishing` for previews and tests. Sends `previews` in order, then returns
     /// `outcome` after `delay`; `refine` returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
-        private var _preview: PolishPreview?
+        private var _previews: [PolishPreview]
         private var _calls: [(text: String, channel: Channel)] = []
         private var _summaryRequests: [Bool] = []
         private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
@@ -17,18 +17,18 @@
         init(
             outcome: Result<PolishResult, PolishError> = .success(.sample),
             readiness: PolishError? = nil,
-            preview: PolishPreview? = nil,
+            previews: [PolishPreview] = [],
             delay: Duration = .zero
         ) {
             _outcome = outcome
             _readiness = readiness
-            _preview = preview
+            _previews = previews
             self.delay = delay
         }
 
-        var preview: PolishPreview? {
-            get { lock.withLock { _preview } }
-            set { lock.withLock { _preview = newValue } }
+        var previews: [PolishPreview] {
+            get { lock.withLock { _previews } }
+            set { lock.withLock { _previews = newValue } }
         }
 
         /// The `includeLearningSummary` value of each `polish` call, in call order.
@@ -54,12 +54,12 @@
             text: String, channel: Channel, includeLearningSummary: Bool,
             onPreview: @escaping @Sendable (PolishPreview) -> Void
         ) async throws(PolishError) -> PolishResult {
-            let preview = lock.withLock {
+            let previews = lock.withLock {
                 _calls.append((text, channel))
                 _summaryRequests.append(includeLearningSummary)
-                return _preview
+                return _previews
             }
-            if let preview {
+            for preview in previews {
                 onPreview(preview)
             }
             if delay > .zero {
@@ -107,7 +107,8 @@
             gate.resume(returning: outcome)
         }
 
-        /// Sends `preview` to the `onPreview` of the call at `index`, which keeps waiting.
+        /// Sends `preview` to the `onPreview` of the call at `index`, which keeps waiting. Call
+        /// it from one task at a time, as a runner streams.
         func sendPreview(_ index: Int, _ preview: PolishPreview) {
             let sink = lock.withLock { previewSinks[index] }
             sink(preview)

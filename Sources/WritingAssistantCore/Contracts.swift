@@ -194,15 +194,23 @@ public struct ClaudeReply: Sendable, Equatable {
     }
 }
 
-/// The polished text of a polish request that is still running, sent as soon as the reply's
-/// `polished_text` is complete. The language fields are nil when the reply hadn't stated them yet.
+/// What the reply of a polish request that is still running has said so far. Each field is nil
+/// until the reply states it.
 public struct PolishPreview: Sendable, Equatable {
-    public var polishedText: String
+    /// The top-level `polished_text`, unescaped, as far as it has arrived: "" once its string
+    /// opens, then longer with every update. Never ends in half an escape.
+    public var polishedText: String?
+    /// True once the `polished_text` string has closed, so `polishedText` is the whole text.
+    public var isTextComplete: Bool
     public var detectedLanguage: String?
     public var wasTranslated: Bool?
 
-    public init(polishedText: String, detectedLanguage: String?, wasTranslated: Bool?) {
+    public init(
+        polishedText: String? = nil, isTextComplete: Bool = false,
+        detectedLanguage: String? = nil, wasTranslated: Bool? = nil
+    ) {
         self.polishedText = polishedText
+        self.isTextComplete = isTextComplete
         self.detectedLanguage = detectedLanguage
         self.wasTranslated = wasTranslated
     }
@@ -344,8 +352,10 @@ public protocol Polishing: Sendable {
     ///
     /// - Parameters:
     ///   - includeLearningSummary: False asks for no learning summary, and the result has none.
-    ///   - onPreview: Called at most once, before the method returns, as soon as the polished
-    ///     text is complete, while the rest of the reply (the learning summary) is still coming.
+    ///   - onPreview: Called, one call at a time and in order, with what the reply has said so
+    ///     far, each time a streamed piece changes it, and never after the method returns. The
+    ///     polished text grows until `isTextComplete`; the language fields can still change after
+    ///     that, while the rest of the reply (the learning summary) is coming.
     func polish(
         text: String, channel: Channel, includeLearningSummary: Bool,
         onPreview: @escaping @Sendable (PolishPreview) -> Void

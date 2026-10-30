@@ -199,11 +199,17 @@ added that were not in the original.
 
 ## 17. Progressive display, summary setting, tokens
 
-- A long English paragraph: the polished text appears while the summary card is still a
-  placeholder. Copy works then. Edit the text before the summary arrives: the edit survives and the
-  view doesn't scroll again.
-- Spanish text: no summary placeholder after the text appears.
-- Cancel after the text appears: the text stays and History has the entry, without a summary.
+- A long English paragraph: the Polish button reads "Detecting language…", then "Polishing…"
+  while the polished text streams into the card word by word, then "Writing tips…" while the
+  summary card is still a placeholder. While the text streams, the editor can't be typed in and
+  Copy, Edit / Changes and the formatting buttons are disabled; the window scrolls once, when the
+  text first appears, and not again. Once the text is complete, Copy works. Edit the text before
+  the summary arrives: the edit survives and the view doesn't scroll again.
+- Spanish text: "Translating from Spanish…" while the text streams, then "Finishing…"; no summary
+  placeholder at any point.
+- Summary off: "Polishing…", then "Finishing…", never "Writing tips…".
+- Cancel while the text is still streaming: the card goes away and History has no entry.
+- Cancel after the text is complete: the text stays and History has the entry, without a summary.
 - Settings › General: turn off **Show English learning summary**. English text gets no summary
   card, nothing is added to the learning log, and the reply is faster. Turn it back on.
 - The toolbar token count rises after a polish and after a refinement, and matches Settings ›
@@ -223,7 +229,8 @@ added that were not in the original.
 - Option-Return doesn't continue a bullet list.
 - Image titles aren't kept.
 - If the model writes `polished_text` before `detected_language`/`was_translated` (the prompt asks
-  for the opposite order), the preview shows "Unknown" until the final result, and a cancel at
-  that point saves "Unknown" to history.
+  for the opposite order), the status line reads "Polishing…" even for a translation, and a
+  cancel before the language arrives saves "Unknown" to history.
+- Streamed Markdown shows its markers until they close (`**bol` before `**bold**`).
 - The preview's model name is routed again in `AppModel` rather than passed from `PolishService`.
 - Tokens of cancelled, timed-out and retried runs aren't counted (see architecture.md).
