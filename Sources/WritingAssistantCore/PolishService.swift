@@ -72,22 +72,24 @@ public struct PolishService: Polishing {
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
     ///
     /// The prompt is `refine.txt` with the shared rules, the channel guidelines and the
-    /// refinement file. Only `polished_text` is read from the reply; any other key the model
-    /// adds is ignored, even when malformed.
+    /// instruction: a preset's refinement file or the user's own text. Only `polished_text` is
+    /// read from the reply; any other key the model adds is ignored, even when malformed.
     ///
     /// - Parameters:
     ///   - text: The current polished text. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - refinement: Selects the instruction file inserted into the prompt.
+    ///   - refinement: The instruction inserted into the prompt. A custom one is checked with
+    ///     `RefinementInstruction.validated()` before anything else.
     /// - Returns: The refined text.
-    /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
-    ///   error thrown by the runner, unchanged.
+    /// - Throws: `.emptyInstruction`, `.instructionTooLong`, `.emptyInput`, `.inputTooLong`,
+    ///   `.promptUnavailable`, `.badFormat`, or any error thrown by the runner, unchanged.
     public func refine(
-        text: String, channel: Channel, refinement: Refinement
+        text: String, channel: Channel, refinement: RefinementInstruction
     ) async throws(PolishError) -> String {
+        let instruction = try refinement.validated()
         let input = try Self.validatedInput(text)
-        let systemPrompt = try loadPrompt(named: refinement.rawValue) {
-            try prompts.assembleRefinement(refinement, for: channel)
+        let systemPrompt = try loadPrompt(named: instruction.logName) {
+            try prompts.assembleRefinement(instruction, for: channel)
         }
         let (raw, _) = try await send(systemPrompt, input: input)
         return try Self.polishedText(in: Self.decodeObject(raw))

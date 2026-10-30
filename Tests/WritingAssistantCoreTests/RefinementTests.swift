@@ -61,7 +61,7 @@ import WritingAssistantCore
         let service = PolishService(runner: runner, prompts: store)
 
         let refined = try await service.refine(
-            text: "Hello there", channel: .slack, refinement: .shorter)
+            text: "Hello there", channel: .slack, refinement: .preset(.shorter))
 
         #expect(refined == "Hi")
         let prompt = try #require(await runner.prompts.first)

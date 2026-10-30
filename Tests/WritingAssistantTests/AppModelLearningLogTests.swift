@@ -32,6 +32,18 @@ import WritingAssistantCore
         #expect(logText() == before)
     }
 
+    @Test func customRefineDoesNotAppend() async throws {
+        let model = await process(.success(.sample))
+        let before = try #require(logText())
+        model.customInstruction = "less emoji"
+
+        model.refineWithCustomInstruction()
+        await model.requests.task?.value
+
+        #expect(model.customInstruction.isEmpty)
+        #expect(logText() == before)
+    }
+
     @Test func successWithSummaryAppendsOneEntry() async throws {
         let model = await process(.success(.sample))
 

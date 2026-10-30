@@ -117,6 +117,15 @@ added that were not in the original.
 - "Shorter" shortens the edited output (not the original result) and keeps the learning summary.
 - "More casual" and "More formal" change the tone. Esc cancels a running refinement.
 - A refinement doesn't add a learning log entry.
+- The Refine row ends with a field. Type "mention the deadline is Friday" and press Return:
+  the edited output gets the change, the summary stays, a spinner shows in the field and Esc
+  cancels it like the buttons. On success the field empties and keeps focus; History has the
+  refined text. On failure (or Esc) the text stays so you can retry.
+- Return in an empty or spaces-only field does nothing. Paste more than 400 characters: a
+  count appears, red past 500, and Return shows "The limit is 500 characters" in the banner.
+- At the minimum window width (600 pt) the field wraps to its own line under the buttons.
+- Android has no custom field yet (follow-up: add it to `ui/Composer.kt` and mirror
+  `RefinementInstruction` in `PromptAssembler.kt`).
 
 ## 9. Diff
 

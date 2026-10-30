@@ -447,7 +447,8 @@ private func expectBadFormat(_ output: String) async {
     func systemPromptIsTheRefinePromptWithItsSections(refinement: Refinement) async throws {
         let runner = FakeRunner(output: .success(refinedResponse))
         _ = try await service(runner).refine(
-            text: "  Please send me the report.\n", channel: .formal, refinement: refinement)
+            text: "  Please send me the report.\n", channel: .formal,
+            refinement: .preset(refinement))
 
         let call = try #require(await runner.calls.first)
         let instruction = "\(refinement.rawValue.uppercased()) INSTRUCTION"
@@ -459,15 +460,17 @@ private func expectBadFormat(_ output: String) async {
     @Test func returnsOnlyThePolishedText() async throws {
         let runner = FakeRunner(output: .success(refinedResponse))
         let refined = try await service(runner).refine(
-            text: "Please send me the report.", channel: .slack, refinement: .shorter)
+            text: "Please send me the report.", channel: .slack, refinement: .preset(.shorter))
         #expect(refined == "Send the report today.")
     }
 
     @Test func runnerReceivesRoutedModelAndTimeout() async throws {
         let runner = FakeRunner(output: .success(refinedResponse))
-        _ = try await service(runner).refine(text: "Hi", channel: .slack, refinement: .shorter)
+        _ = try await service(runner).refine(
+            text: "Hi", channel: .slack, refinement: .preset(.shorter))
         let long = String(repeating: "word ", count: 100)
-        _ = try await service(runner).refine(text: long, channel: .slack, refinement: .shorter)
+        _ = try await service(runner).refine(
+            text: long, channel: .slack, refinement: .preset(.shorter))
 
         let calls = await runner.calls
         #expect(calls.map(\.model) == [ModelRouting.haikuModel, ModelRouting.sonnetModel])
@@ -478,7 +481,8 @@ private func expectBadFormat(_ output: String) async {
     func emptyInputIsRejected(text: String) async {
         let runner = FakeRunner(output: .success(refinedResponse))
         await #expect(throws: PolishError.emptyInput) {
-            try await service(runner).refine(text: text, channel: .slack, refinement: .shorter)
+            try await service(runner).refine(
+                text: text, channel: .slack, refinement: .preset(.shorter))
         }
         #expect(await runner.calls.isEmpty)
     }
@@ -487,7 +491,8 @@ private func expectBadFormat(_ output: String) async {
         let runner = FakeRunner(output: .success(refinedResponse))
         let text = String(repeating: "a", count: PolishService.maxInputLength + 1)
         await #expect(throws: PolishError.inputTooLong(limit: PolishService.maxInputLength)) {
-            try await service(runner).refine(text: text, channel: .slack, refinement: .moreFormal)
+            try await service(runner).refine(
+                text: text, channel: .slack, refinement: .preset(.moreFormal))
         }
         #expect(await runner.calls.isEmpty)
     }
@@ -498,7 +503,7 @@ private func expectBadFormat(_ output: String) async {
         let prompts = StubPromptStore(refinements: .failure(missing))
         await #expect(throws: PolishError.promptUnavailable(detail: "shorter.txt is missing")) {
             try await service(runner, prompts: prompts).refine(
-                text: "Hello", channel: .slack, refinement: .shorter)
+                text: "Hello", channel: .slack, refinement: .preset(.shorter))
         }
         #expect(await runner.calls.isEmpty)
     }
@@ -507,7 +512,7 @@ private func expectBadFormat(_ output: String) async {
         let runner = FakeRunner(output: .success(refinedResponse))
         let prompts = StubPromptStore(assembled: .failure(StubPromptError()))
         let refined = try await service(runner, prompts: prompts).refine(
-            text: "Hello", channel: .slack, refinement: .moreCasual)
+            text: "Hello", channel: .slack, refinement: .preset(.moreCasual))
         #expect(refined == "Send the report today.")
     }
 
@@ -518,7 +523,7 @@ private func expectBadFormat(_ output: String) async {
         let runner = FakeRunner(output: .success(output))
         await #expect {
             _ = try await service(runner).refine(
-                text: "Hello", channel: .slack, refinement: .moreCasual)
+                text: "Hello", channel: .slack, refinement: .preset(.moreCasual))
         } throws: { error in
             guard case .badFormat = error as? PolishError else { return false }
             return true
@@ -528,7 +533,8 @@ private func expectBadFormat(_ output: String) async {
     @Test func runnerErrorPropagatesUnchanged() async {
         let runner = FakeRunner(output: .failure(.cliFailed(stderr: "boom")))
         await #expect(throws: PolishError.cliFailed(stderr: "boom")) {
-            try await service(runner).refine(text: "Hello", channel: .slack, refinement: .shorter)
+            try await service(runner).refine(
+                text: "Hello", channel: .slack, refinement: .preset(.shorter))
         }
     }
 
@@ -542,8 +548,61 @@ private func expectBadFormat(_ output: String) async {
     func learningSummaryAndOtherFieldsAreIgnored(output: String) async throws {
         let runner = FakeRunner(output: .success(output))
         let refined = try await service(runner).refine(
-            text: "Hello", channel: .slack, refinement: .moreCasual)
+            text: "Hello", channel: .slack, refinement: .preset(.moreCasual))
         #expect(refined == "Hey there")
+    }
+
+    @Test func customInstructionGoesIntoTheSystemPromptAndTheDraftStaysWrapped() async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let refined = try await service(runner).refine(
+            text: "Please send me the report.", channel: .formal,
+            refinement: .custom("  mention the deadline is Friday\n"))
+
+        let call = try #require(await runner.calls.first)
+        #expect(
+            call.systemPrompt
+                == "REFINE PROMPT\nALWAYS RULES\nFORMAL RULES\nmention the deadline is Friday")
+        #expect(call.input == "<draft>\nPlease send me the report.\n</draft>")
+        #expect(refined == "Send the report today.")
+    }
+
+    @Test func customInstructionDoesNotNeedTheRefinementFiles() async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let prompts = StubPromptStore(refinements: .failure(StubPromptError()))
+        let refined = try await service(runner, prompts: prompts).refine(
+            text: "Hello", channel: .slack, refinement: .custom("less emoji"))
+        #expect(refined == "Send the report today.")
+    }
+
+    @Test func placeholderInCustomInstructionPullsNothingIn() async throws {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let text = "\(PromptFile.channelPlaceholder)less emoji\(PromptFile.instructionPlaceholder)"
+        _ = try await service(runner).refine(
+            text: "Hello", channel: .slack, refinement: .custom(text))
+
+        let call = try #require(await runner.calls.first)
+        #expect(call.systemPrompt == "REFINE PROMPT\nALWAYS RULES\nSLACK RULES\nless emoji")
+    }
+
+    @Test(arguments: ["", " \n ", PromptFile.alwaysPlaceholder])
+    func blankCustomInstructionIsRejectedBeforeCallingClaude(text: String) async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        await #expect(throws: PolishError.emptyInstruction) {
+            try await service(runner).refine(
+                text: "Hello", channel: .slack, refinement: .custom(text))
+        }
+        #expect(await runner.calls.isEmpty)
+    }
+
+    @Test func tooLongCustomInstructionIsRejectedBeforeCallingClaude() async {
+        let runner = FakeRunner(output: .success(refinedResponse))
+        let limit = RefinementInstruction.maxCustomLength
+        let text = String(repeating: "a", count: limit + 1)
+        await #expect(throws: PolishError.instructionTooLong(limit: limit)) {
+            try await service(runner).refine(
+                text: "Hello", channel: .slack, refinement: .custom(text))
+        }
+        #expect(await runner.calls.isEmpty)
     }
 }
 
@@ -715,9 +774,11 @@ private final class RecordingUsage: UsageRecording, @unchecked Sendable {
         let service = service(responding: englishResponse, usage: tokens, into: usage)
 
         _ = try await service.polish(text: "Hello", channel: .slack)
-        _ = try await service.refine(text: "Hello", channel: .slack, refinement: .shorter)
+        _ = try await service.refine(text: "Hello", channel: .slack, refinement: .preset(.shorter))
+        _ = try await service.refine(
+            text: "Hello", channel: .slack, refinement: .custom("less emoji"))
 
-        #expect(usage.recorded == [priced, priced])
+        #expect(usage.recorded == [priced, priced, priced])
     }
 
     @Test func replyWithoutCostStillRecordsItsTokens() async throws {

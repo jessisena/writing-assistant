@@ -226,6 +226,10 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
     case cliOutdated(detail: String)
     case badFormat(detail: String)
     case promptUnavailable(detail: String)
+    /// A custom refinement instruction was blank.
+    case emptyInstruction
+    /// A custom refinement instruction had more than `limit` characters.
+    case instructionTooLong(limit: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -233,6 +237,10 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
             "Please paste some text before processing."
         case .inputTooLong(let limit):
             "Text is too long. The limit is \(limit.formatted()) characters."
+        case .emptyInstruction:
+            "Type what to change before refining."
+        case .instructionTooLong(let limit):
+            "That refine instruction is too long. The limit is \(limit.formatted()) characters."
         case .claudeNotFound:
             "claude CLI not found. Install it from https://claude.ai/download and make sure "
                 + "`claude --version` works in a terminal, then try again."
@@ -389,10 +397,11 @@ public protocol Polishing: Sendable {
         text: String, channel: Channel, includeLearningSummary: Bool,
         onPreview: @escaping @Sendable (PolishPreview) -> Void
     ) async throws(PolishError) -> PolishResult
-    /// Rewrites already-polished `text` for `channel` with one extra instruction and returns
-    /// only the new polished text.
-    func refine(text: String, channel: Channel, refinement: Refinement) async throws(PolishError)
-        -> String
+    /// Rewrites already-polished `text` for `channel` with one extra instruction, a preset or
+    /// the user's own, and returns only the new polished text.
+    func refine(
+        text: String, channel: Channel, refinement: RefinementInstruction
+    ) async throws(PolishError) -> String
     /// Throws `PolishError.claudeNotFound` when the CLI can't be located.
     func checkReady() async throws(PolishError)
 }

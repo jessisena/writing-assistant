@@ -173,7 +173,7 @@ import Testing
 
         #expect(!(try store.assemble(for: channel, learningSummary: true)).contains("\u{2014}"))
         for refinement in Refinement.allCases {
-            let prompt = try store.assembleRefinement(refinement, for: channel)
+            let prompt = try store.assembleRefinement(.preset(refinement), for: channel)
             #expect(!prompt.contains("\u{2014}"))
         }
     }
@@ -258,7 +258,7 @@ import Testing
     func refinePromptHoldsTheSharedRulesChannelAndInstruction(refinement: Refinement) throws {
         try store.seedMissingDefaults()
 
-        let prompt = try store.assembleRefinement(refinement, for: .slack)
+        let prompt = try store.assembleRefinement(.preset(refinement), for: .slack)
 
         #expect(prompt.contains(try trimmedBundled(.always)))
         #expect(prompt.contains(try trimmedBundled(.channel(.slack))))

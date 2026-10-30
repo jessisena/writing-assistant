@@ -275,7 +275,8 @@ private struct CopyButton: View {
     }
 }
 
-/// "Refine:" and a button per refinement, wrapping to more rows when the window is narrow.
+/// "Refine:", a button per refinement and a field for the user's own instruction, wrapping to
+/// more rows when the window is narrow.
 private struct RefinementRow: View {
     let model: AppModel
 
@@ -292,8 +293,8 @@ private struct RefinementRow: View {
                     } label: {
                         ZStack {
                             Text(refinement.displayName)
-                                .opacity(model.runningRefinement == refinement ? 0 : 1)
-                            if model.runningRefinement == refinement {
+                                .opacity(model.runningRefinement == .preset(refinement) ? 0 : 1)
+                            if model.runningRefinement == .preset(refinement) {
                                 ProgressView().controlSize(.small)
                             }
                         }
@@ -302,11 +303,72 @@ private struct RefinementRow: View {
                     .accessibilityLabel("Refine: \(refinement.displayName)")
                     .help("Rewrites the polished text, including your edits")
                 }
+                CustomRefinementField(model: model)
             }
         }
         .disabled(!model.canRefine)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Refine polished text")
+    }
+}
+
+/// A capsule field after the refine buttons for the user's own instruction ("mention the
+/// deadline is Friday"). Return sends it and a spinner shows while it runs; the field gives up
+/// focus meanwhile, so Esc reaches Cancel, and takes it back when the run ends. Close to the
+/// length limit a count appears, in red pencil once over it.
+private struct CustomRefinementField: View {
+    @Bindable var model: AppModel
+    @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isFocused: Bool
+
+    private static let limit = RefinementInstruction.maxCustomLength
+    private static let countThreshold = limit - 100
+
+    private var isRunning: Bool {
+        if case .custom = model.runningRefinement { return true }
+        return false
+    }
+
+    private var length: Int {
+        model.customInstruction.trimmingCharacters(in: .whitespacesAndNewlines).count
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Or type your own, e.g. less emoji", text: $model.customInstruction)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit { model.refineWithCustomInstruction() }
+                .accessibilityLabel("Refine with your own instruction")
+            trailing
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .frame(width: 260)
+        .background {
+            Capsule().strokeBorder(isFocused ? theme.ink : theme.rule, lineWidth: 1)
+        }
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
+        .onChange(of: isRunning) { _, running in
+            isFocused = !running
+        }
+        .help("Type your own instruction, such as \"less emoji\", and press Return")
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if isRunning {
+            ProgressView().controlSize(.small)
+        } else if length > Self.countThreshold {
+            Text("\(length)/\(Self.limit)")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(length > Self.limit ? theme.redPencil : Color.secondary)
+                .accessibilityLabel("\(length) of \(Self.limit) characters")
+        }
     }
 }
 

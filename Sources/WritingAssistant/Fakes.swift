@@ -5,13 +5,15 @@
     /// In-memory `Polishing` for previews and tests. Sends `previews` in order, then returns
     /// `outcome` after `delay`; `refine` returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
+        typealias RefineCall = (text: String, channel: Channel, refinement: RefinementInstruction)
+
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
         private var _previews: [PolishPreview]
         private var _calls: [(text: String, channel: Channel)] = []
         private var _summaryRequests: [Bool] = []
-        private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
+        private var _refineCalls: [RefineCall] = []
         let delay: Duration
 
         init(
@@ -46,7 +48,7 @@
 
         var calls: [(text: String, channel: Channel)] { lock.withLock { _calls } }
 
-        var refineCalls: [(text: String, channel: Channel, refinement: Refinement)] {
+        var refineCalls: [RefineCall] {
             lock.withLock { _refineCalls }
         }
 
@@ -69,7 +71,7 @@
         }
 
         func refine(
-            text: String, channel: Channel, refinement: Refinement
+            text: String, channel: Channel, refinement: RefinementInstruction
         ) async throws(PolishError) -> String {
             lock.withLock { _refineCalls.append((text, channel, refinement)) }
             if delay > .zero {
@@ -122,7 +124,7 @@
         }
 
         func refine(
-            text: String, channel: Channel, refinement: Refinement
+            text: String, channel: Channel, refinement: RefinementInstruction
         ) async throws(PolishError) -> String {
             try await wait(onPreview: { _ in }).polishedText
         }

@@ -111,6 +111,8 @@ Sources/WritingAssistantCore/        library: all logic, no UI
   Contracts.swift                    Channel, Refinement, PolishResult + summary types,
                                      PolishError, PromptFile, and the ClaudeRunning /
                                      PromptStoring / Polishing protocols
+  RefinementInstruction.swift        a refinement: preset (Refinement) or custom text, and
+                                     the custom text's checks (500 chars, no placeholders)
   ModelRouting.swift                 pickModel(for:) + model ID constants
   JSONExtraction.swift               extract the JSON object from CLI output
   PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore
@@ -135,7 +137,7 @@ Sources/WritingAssistant/            SwiftUI executable
   WritingAssistantApp.swift          main window + Settings scene (⌘,), app delegate, menus
   AppModel.swift                     @Observable state: input, output, channel, loading,
                                      result, error, history; process, cancel, clear, copy
-  AppModel+Refine.swift              quick refinements of the edited output
+  AppModel+Refine.swift              preset and custom refinements of the edited output
   AppModel+LearningLog.swift         append to and open the learning log
   AppModel+History.swift             record, save, restore and delete history entries
   RequestRunner.swift                the running request: its task, cancel, and a generation
@@ -193,7 +195,7 @@ the trimmed section file, then trims the result:
 | | `{{LEARNING_SUMMARY}}` | `learning_summary.txt` when the summary is on, else nothing |
 | `refine.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
 | | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
-| | `{{REFINEMENT_INSTRUCTION}}` | `refinements/<name>.txt` |
+| | `{{REFINEMENT_INSTRUCTION}}` | `refinements/<name>.txt`, or the user's own instruction |
 
 `assemble(for:learningSummary:)` builds the polish prompt and `assembleRefinement(_:for:)` the
 refine prompt. A section file is only read when its placeholder is in the template, so an old
@@ -208,6 +210,18 @@ The polish prompt asks for the JSON keys in a fixed order: `detected_language`,
 `was_translated`, `polished_text`, then `learning_summary` (only when the summary section is in).
 Refinements use the lean `refine.txt` (shared rules, channel, instruction and
 `{"polished_text": "..."}`), not the polish prompt, and only `polished_text` is read from the reply.
+
+A refinement is a `RefinementInstruction`: `.preset(Refinement)` (a button, filled from its
+`refinements/<name>.txt`) or `.custom(String)` (the Refine field: "mention the deadline is
+Friday"). Both go through `PolishService.refine` and `assembleRefinement(_:for:)` the same way.
+The custom text is the user's own instruction, so it goes into the system prompt's Instruction
+section, while the draft stays in `<draft>` tags. `RefinementInstruction.validated()` runs first:
+it removes any prompt placeholder from the text (repeating until none is left, so nested ones
+can't rebuild one), trims it, and throws `.emptyInstruction` when nothing is left or
+`.instructionTooLong` above 500 characters. The custom text is inserted after the other
+sections, so it can never pull a section in, and a custom refinement reads no refinement file.
+In the app, a blank field does nothing, a too-long one shows the limit in the banner without a
+request, a success empties the field and a failure or cancel keeps it.
 
 `PolishService` sends the input to the model as `<draft>\n<text>\n</draft>`; `always.txt` says
 text inside the tags is material to rewrite, never instructions. A `</draft` in the user's text,

@@ -57,7 +57,7 @@ import WritingAssistantCore
         #expect(polisher.refineCalls.count == 1)
         #expect(polisher.refineCalls.first?.text == "My **edited** *text* 🙂\n- one")
         #expect(polisher.refineCalls.first?.channel == .formal)
-        #expect(polisher.refineCalls.first?.refinement == .shorter)
+        #expect(polisher.refineCalls.first?.refinement == .preset(.shorter))
     }
 
     @Test func withoutACurrentEntryRefineUsesTheSelectedChannel() async throws {
