@@ -7,13 +7,6 @@ public struct PolishService: Polishing {
     public static let defaultTimeout: Duration = .seconds(120)
 
     private static let logger = Logger(subsystem: "local.writing-assistant", category: "pipeline")
-    private static let refinementNote =
-        "The input is already-polished English: apply the additional instruction on top of the "
-        + "rules above. Where it conflicts with them (for example a minimal-edit, length or "
-        + "formatting rule), the additional instruction wins. Set was_translated to false and set "
-        + "learning_summary to null."
-    public static let summaryOffNote =
-        "The learning summary is turned off: skip Step 4 and set learning_summary to null."
 
     private let runner: any ClaudeRunning
     private let prompts: any PromptStoring
@@ -47,7 +40,7 @@ public struct PolishService: Polishing {
     /// - Parameters:
     ///   - text: The user's input. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - includeLearningSummary: False tells the model to skip the summary.
+    ///   - includeLearningSummary: False leaves the learning summary section out of the prompt.
     ///   - onPreview: Gets the polished text once it is complete, before the summary, at most
     ///     once and on whichever thread the runner streams on. The returned result is parsed
     ///     from the full reply on its own, so it can still fail after a preview was sent.
@@ -59,9 +52,8 @@ public struct PolishService: Polishing {
         onPreview: @escaping @Sendable (PolishPreview) -> Void
     ) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
-        var systemPrompt = try assemblePrompt(for: channel)
-        if !includeLearningSummary {
-            systemPrompt += "\n\n\(Self.summaryOffNote)"
+        let systemPrompt = try loadPrompt(named: channel.rawValue) {
+            try prompts.assemble(for: channel, learningSummary: includeLearningSummary)
         }
         let scanner = OSAllocatedUnfairLock(initialState: PolishedTextScanner())
         let (raw, model) = try await send(systemPrompt, input: input) { chunk in
@@ -78,15 +70,14 @@ public struct PolishService: Polishing {
 
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
     ///
-    /// The prompt is the channel's assembled system prompt plus an "Additional instruction"
-    /// section holding the refinement file. Only `polished_text` is read from the reply: the
-    /// model's language and learning summary describe its own output, so they are ignored, even
-    /// when malformed.
+    /// The prompt is `refine.txt` with the shared rules, the channel guidelines and the
+    /// refinement file. Only `polished_text` is read from the reply; any other key the model
+    /// adds is ignored, even when malformed.
     ///
     /// - Parameters:
     ///   - text: The current polished text. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - refinement: Selects the instruction file appended to the prompt.
+    ///   - refinement: Selects the instruction file inserted into the prompt.
     /// - Returns: The refined text.
     /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
     ///   error thrown by the runner, unchanged.
@@ -94,22 +85,21 @@ public struct PolishService: Polishing {
         text: String, channel: Channel, refinement: Refinement
     ) async throws(PolishError) -> String {
         let input = try Self.validatedInput(text)
-        let systemPrompt = try assemblePrompt(for: channel)
-        let instruction = try loadPrompt(named: refinement.rawValue) {
-            try prompts.read(.refinement(refinement))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        let systemPrompt = try loadPrompt(named: refinement.rawValue) {
+            try prompts.assembleRefinement(refinement, for: channel)
         }
-        let refinementPrompt = """
-            \(systemPrompt)
-
-            ## Additional instruction
-
-            \(instruction)
-
-            \(Self.refinementNote)
-            """
-        let (raw, _) = try await send(refinementPrompt, input: input)
+        let (raw, _) = try await send(systemPrompt, input: input)
         return try Self.polishedText(in: Self.decodeObject(raw))
+    }
+
+    /// Wraps `text` in `<draft>` tags so the model treats it as material, not instructions.
+    ///
+    /// A closing `</draft` inside the text gets a backslash (`<\/draft`), in any letter case, so
+    /// the author's text can't end the draft early.
+    static func wrapDraft(_ text: String) -> String {
+        let neutralized = text.replacingOccurrences(
+            of: "</(draft)", with: #"<\\/$1"#, options: [.regularExpression, .caseInsensitive])
+        return "<draft>\n\(neutralized)\n</draft>"
     }
 
     public func checkReady() async throws(PolishError) {
@@ -127,17 +117,17 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
-    /// Runs `input` under `systemPrompt` on the routed model, returning the raw reply and the
-    /// model used. The reply's tokens are recorded; a recording failure is logged and doesn't
-    /// fail the request.
+    /// Runs `input`, wrapped in `<draft>` tags, under `systemPrompt` on the model routed for the
+    /// unwrapped input, returning the raw reply and the model used. The reply's tokens are
+    /// recorded; a recording failure is logged and doesn't fail the request.
     private func send(
         _ systemPrompt: String, input: String,
         onText: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws(PolishError) -> (raw: String, model: String) {
         let model = ModelRouting.pickModel(for: input)
         let reply = try await runner.run(
-            systemPrompt: systemPrompt, input: input, model: model, timeout: timeout,
-            onText: onText)
+            systemPrompt: systemPrompt, input: Self.wrapDraft(input), model: model,
+            timeout: timeout, onText: onText)
         record(reply.usage, costUSD: reply.costUSD)
         return (reply.text, model)
     }
@@ -150,10 +140,6 @@ public struct PolishService: Polishing {
             Self.logger.error(
                 "Couldn't record usage: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    private func assemblePrompt(for channel: Channel) throws(PolishError) -> String {
-        try loadPrompt(named: channel.rawValue) { try prompts.assemble(for: channel) }
     }
 
     private func loadPrompt(

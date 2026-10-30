@@ -244,14 +244,24 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
 }
 
 public enum PromptFile: Hashable, Sendable, Identifiable {
+    /// `polish.txt`: the polish prompt, with slots for the other sections.
     case global
+    /// `always.txt`: the rules shared by the polish and refine prompts.
+    case always
+    /// `learning_summary.txt`: inserted into the polish prompt only while the summary is on.
+    case learningSummary
+    /// `refine.txt`: the refine prompt, with slots for the shared rules, channel and instruction.
+    case refine
     case channel(Channel)
     case refinement(Refinement)
 
     public static let channelPlaceholder = "{{CHANNEL_GUIDELINES}}"
+    public static let alwaysPlaceholder = "{{ALWAYS_RULES}}"
+    public static let learningSummaryPlaceholder = "{{LEARNING_SUMMARY}}"
+    public static let instructionPlaceholder = "{{REFINEMENT_INSTRUCTION}}"
 
     public static var allCases: [PromptFile] {
-        [.global] + Channel.allCases.map { .channel($0) }
+        [.global, .always, .learningSummary, .refine] + Channel.allCases.map { .channel($0) }
             + Refinement.allCases.map { .refinement($0) }
     }
 
@@ -262,6 +272,9 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
     public var relativePath: String {
         switch self {
         case .global: "polish.txt"
+        case .always: "always.txt"
+        case .learningSummary: "learning_summary.txt"
+        case .refine: "refine.txt"
         case .channel(let channel): "channels/\(channel.rawValue).txt"
         case .refinement(let refinement): "refinements/\(refinement.rawValue).txt"
         }
@@ -269,9 +282,21 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
 
     public var displayName: String {
         switch self {
-        case .global: "Global rules"
+        case .global: "Polish prompt"
+        case .always: "Always rules"
+        case .learningSummary: "Learning summary"
+        case .refine: "Refine prompt"
         case .channel(let channel): channel.displayName
         case .refinement(let refinement): refinement.displayName
+        }
+    }
+
+    /// The placeholder a saved copy must keep, because the request is pointless without it.
+    public var requiredPlaceholder: String? {
+        switch self {
+        case .global: Self.channelPlaceholder
+        case .refine: Self.instructionPlaceholder
+        default: nil
         }
     }
 
@@ -280,24 +305,30 @@ public enum PromptFile: Hashable, Sendable, Identifiable {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw .empty
         }
-        if self == .global && !text.contains(Self.channelPlaceholder) {
-            throw .missingPlaceholder
+        if let placeholder = requiredPlaceholder, !text.contains(placeholder) {
+            throw .missingPlaceholder(placeholder)
         }
     }
 }
 
 public enum PromptValidationError: LocalizedError, Equatable, Sendable {
     case empty
-    case missingPlaceholder
+    /// The text lacks this placeholder, which the file must keep.
+    case missingPlaceholder(String)
 
     public var errorDescription: String? {
         switch self {
         case .empty:
             "A prompt can't be empty."
-        case .missingPlaceholder:
-            "Global rules must contain \(PromptFile.channelPlaceholder) "
-                + "so the channel guidelines can be inserted."
+        case .missingPlaceholder(let placeholder):
+            "This prompt must contain \(placeholder) so the "
+                + "\(Self.insertedPart(placeholder)) can be inserted."
         }
+    }
+
+    private static func insertedPart(_ placeholder: String) -> String {
+        placeholder == PromptFile.instructionPlaceholder
+            ? "refinement instruction" : "channel guidelines"
     }
 }
 
@@ -335,8 +366,6 @@ public protocol PromptStoring: Sendable {
     func syncDefaults() throws -> Set<PromptFile>
     /// Marks the current bundled default as seen without changing the file ("Keep mine").
     func acknowledgeDefault(_ file: PromptFile) throws
-    /// `polish.txt` with the placeholder replaced by the channel file (both trimmed).
-    func assemble(for channel: Channel) throws -> String
 }
 
 public protocol Polishing: Sendable {

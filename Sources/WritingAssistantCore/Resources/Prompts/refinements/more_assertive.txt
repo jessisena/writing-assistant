@@ -2,6 +2,4 @@ Make the tone more assertive and confident.
 Lead with the main request, decision, or recommendation, and state it directly. Remove hedges
 ("just", "I think", "maybe", "sort of", "if possible") and unnecessary apologies, and prefer
 active voice and clear next steps. Stay professional and respectful, never rude or aggressive.
-Keep the same structure and meaning. Do not add facts that are not in the text.
-Never use em dashes.
-Keep any emoji and Markdown formatting (bold, italic, lists, links).
+Keep the same structure and meaning.

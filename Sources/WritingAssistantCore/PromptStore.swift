@@ -195,19 +195,6 @@ public struct PromptStore: PromptStoring {
         try saveManifest(manifest)
     }
 
-    /// Builds the system prompt for `channel`.
-    ///
-    /// Returns the trimmed global rules with `PromptFile.channelPlaceholder` replaced by the
-    /// trimmed channel guidelines.
-    ///
-    /// - Throws: `PromptStoreError` when either prompt file couldn't be read.
-    public func assemble(for channel: Channel) throws -> String {
-        let global = try read(.global).trimmingCharacters(in: .whitespacesAndNewlines)
-        let guidelines = try read(.channel(channel))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return global.replacingOccurrences(of: PromptFile.channelPlaceholder, with: guidelines)
-    }
-
     private func defaultURL(_ file: PromptFile) -> URL {
         defaultsURL.appending(path: file.relativePath, directoryHint: .notDirectory)
     }

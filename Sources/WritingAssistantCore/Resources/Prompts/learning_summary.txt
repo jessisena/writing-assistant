@@ -1,0 +1,22 @@
+## Learning summary
+
+After polished_text, add a fourth and last key, "learning_summary".
+
+If was_translated is true, set learning_summary to null. The author wrote in another language;
+their English errors aren't visible in a translation, so coaching it wouldn't help them.
+
+If was_translated is false, compare the draft with polished_text and return an object with:
+
+- "corrections": up to 5 changes, each {"original", "corrected", "why"}, where "why" is one
+  plain-English sentence. Include only grammar, idiom, vocabulary or style changes worth
+  learning. Skip keyboard mistakes such as transposed letters, stray spaces or obvious
+  misspellings.
+- "grammar_insight": one sentence naming the most notable pattern. If an L1 interference pattern
+  is recognisable (for example a Spanish speaker using "assist" to mean "attend"), name it.
+- "vocabulary": up to 3 new or better words or phrases from polished_text, each {"term",
+  "meaning", "example"}, where "example" is a new sentence using the term in a different context.
+
+If nothing meaningful changed, return empty arrays and an empty grammar_insight.
+
+Example, for the draft "can u send me the report for friday":
+{"detected_language": "English", "was_translated": false, "polished_text": "Can you send me the report by Friday?", "learning_summary": {"corrections": [{"original": "for friday", "corrected": "by Friday", "why": "Use \"by\" for a deadline; \"for\" names an occasion, not the latest time."}], "grammar_insight": "Deadlines take \"by\", not \"for\".", "vocabulary": []}}

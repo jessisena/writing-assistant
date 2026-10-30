@@ -75,7 +75,8 @@ import WritingAssistantCore
 
         model.save()
 
-        #expect(model.errorMessage == PromptValidationError.missingPlaceholder.errorDescription)
+        let expected = PromptValidationError.missingPlaceholder(PromptFile.channelPlaceholder)
+        #expect(model.errorMessage == expected.errorDescription)
         #expect(model.draft == "Rules without the placeholder")
         #expect(model.isDirty(.global))
         #expect(try store.read(.global) == defaultGlobal)
@@ -331,5 +332,4 @@ private struct FailingRestoreStore: PromptStoring {
     func restoreDefault(_ file: PromptFile) throws { throw CocoaError(.fileWriteNoPermission) }
     func syncDefaults() throws -> Set<PromptFile> { try base.syncDefaults() }
     func acknowledgeDefault(_ file: PromptFile) throws { try base.acknowledgeDefault(file) }
-    func assemble(for channel: Channel) throws -> String { try base.assemble(for: channel) }
 }
