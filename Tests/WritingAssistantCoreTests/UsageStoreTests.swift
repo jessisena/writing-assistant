@@ -43,20 +43,38 @@ private final class TestClock: @unchecked Sendable {
     }
 
     @Test func recordsAddUpWithinAMonth() throws {
-        try store.record(small)
-        try store.record(large)
+        try store.record(small, costUSD: 0.25)
+        try store.record(large, costUSD: 0.5)
 
-        #expect(try store.currentMonth() == MonthlyUsage(tokens: small + large, requests: 2))
+        #expect(
+            try store.currentMonth()
+                == MonthlyUsage(tokens: small + large, requests: 2, costUSD: 0.75))
         #expect(try store.currentMonth().tokens.total == 2_143 + 24_510)
     }
 
+    @Test func unpricedRequestCountsItsTokensButAddsNoCost() throws {
+        try store.record(small, costUSD: 0.25)
+        try store.record(large, costUSD: nil)
+
+        #expect(
+            try store.currentMonth()
+                == MonthlyUsage(tokens: small + large, requests: 2, costUSD: 0.25))
+    }
+
+    @Test func costIsSavedWithTheMonth() throws {
+        try store.record(small, costUSD: 0.25)
+
+        let saved = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(saved.contains("\"costUSD\" : 0.25"))
+    }
+
     @Test func aNewMonthStartsAtZeroAndKeepsTheOldOne() throws {
-        try store.record(small)
+        try store.record(small, costUSD: 0.25)
         clock.date = Self.date("2026-11-01T00:30:00+01:00")
 
         #expect(try store.currentMonth() == .zero)
-        try store.record(large)
-        #expect(try store.currentMonth() == MonthlyUsage(tokens: large, requests: 1))
+        try store.record(large, costUSD: 0.5)
+        #expect(try store.currentMonth() == MonthlyUsage(tokens: large, requests: 1, costUSD: 0.5))
 
         let saved = try String(contentsOf: fileURL, encoding: .utf8)
         #expect(saved.contains("\"2026-10\""))
@@ -66,7 +84,7 @@ private final class TestClock: @unchecked Sendable {
     @Test func monthFollowsTheCalendarTimeZone() throws {
         clock.date = Self.date("2026-10-31T23:30:00Z")
 
-        try store.record(small)
+        try store.record(small, costUSD: 0.25)
 
         let saved = try String(contentsOf: fileURL, encoding: .utf8)
         #expect(saved.contains("\"2026-11\""))
@@ -95,10 +113,22 @@ private final class TestClock: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("{\"months\": 3}".utf8).write(to: fileURL)
 
-        try store.record(small)
+        try store.record(small, costUSD: 0.25)
 
-        #expect(try store.currentMonth() == MonthlyUsage(tokens: small, requests: 1))
+        #expect(try store.currentMonth() == MonthlyUsage(tokens: small, requests: 1, costUSD: 0.25))
         #expect(FileManager.default.fileExists(atPath: store.backupURL.path))
+    }
+
+    @Test func fileWithoutCostsIsDamaged() throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let tokens = #"{"cacheCreation": 0, "cacheRead": 0, "input": 1, "output": 2}"#
+        let withoutCost = #"{"months": {"2026-10": {"requests": 1, "tokens": \#(tokens)}}}"#
+        try Data(withoutCost.utf8).write(to: fileURL)
+
+        #expect(throws: UsageStoreError.corrupted(backup: store.backupURL)) {
+            try store.currentMonth()
+        }
     }
 
     @Test func unwritableFolderFailsWithThePath() throws {
@@ -106,7 +136,7 @@ private final class TestClock: @unchecked Sendable {
         try Data().write(to: directory.appending(path: "nested"))
 
         #expect {
-            try store.record(small)
+            try store.record(small, costUSD: 0.25)
         } throws: { error in
             guard case .writeFailed(let path, _) = error as? UsageStoreError else { return false }
             return path == fileURL.path
@@ -118,12 +148,13 @@ private final class TestClock: @unchecked Sendable {
         let small = small
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<20 {
-                group.addTask { try? store.record(small) }
+                group.addTask { try? store.record(small, costUSD: 0.25) }
             }
         }
 
         #expect(try store.currentMonth().requests == 20)
         #expect(try store.currentMonth().tokens.output == 800)
+        #expect(try store.currentMonth().costUSD == 5)
     }
 
     @Test(arguments: [

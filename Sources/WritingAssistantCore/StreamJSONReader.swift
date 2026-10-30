@@ -7,6 +7,8 @@ struct StreamResult: Sendable, Equatable {
     let text: String
     let isError: Bool
     let usage: TokenUsage?
+    /// `total_cost_usd`: the run's cost at API list prices.
+    let costUSD: Double?
 }
 
 /// Reads the newline-delimited JSON events that `claude --output-format stream-json` prints.
@@ -85,7 +87,8 @@ final class StreamJSONReader: Sendable {
         StreamResult(
             text: event["result"] as? String ?? "",
             isError: event["is_error"] as? Bool ?? false,
-            usage: (event["usage"] as? [String: Any]).map(usage)
+            usage: (event["usage"] as? [String: Any]).map(usage),
+            costUSD: event["total_cost_usd"] as? Double
         )
     }
 

@@ -155,27 +155,33 @@ public struct TokenUsage: Codable, Sendable, Equatable {
     }
 }
 
-/// The tokens used in one calendar month and how many requests used them.
+/// The tokens used in one calendar month, what they cost and how many requests used them.
 public struct MonthlyUsage: Codable, Sendable, Equatable {
     public var tokens: TokenUsage
     public var requests: Int
+    /// What the tokens cost at API list prices, in US dollars, as the claude CLI priced them.
+    public var costUSD: Double
 
-    public static let zero = MonthlyUsage(tokens: .zero, requests: 0)
+    public static let zero = MonthlyUsage(tokens: .zero, requests: 0, costUSD: 0)
 
-    public init(tokens: TokenUsage, requests: Int) {
+    public init(tokens: TokenUsage, requests: Int, costUSD: Double) {
         self.tokens = tokens
         self.requests = requests
+        self.costUSD = costUSD
     }
 }
 
-/// What the claude CLI answered: the reply text and, when reported, the tokens it used.
+/// What the claude CLI answered: the reply text and, when reported, the tokens it used and their
+/// cost at API list prices in US dollars.
 public struct ClaudeReply: Sendable, Equatable {
     public var text: String
     public var usage: TokenUsage?
+    public var costUSD: Double?
 
-    public init(text: String, usage: TokenUsage?) {
+    public init(text: String, usage: TokenUsage?, costUSD: Double? = nil) {
         self.text = text
         self.usage = usage
+        self.costUSD = costUSD
     }
 }
 
@@ -293,9 +299,10 @@ public protocol ClaudeRunning: Sendable {
     func checkAvailable() async throws(PolishError)
 }
 
-/// Keeps count of the tokens Claude requests use.
+/// Keeps count of the tokens Claude requests use and what they cost.
 public protocol UsageRecording: Sendable {
-    func record(_ usage: TokenUsage) throws
+    /// Adds one request. A nil `costUSD` (the CLI didn't price the run) adds nothing to the cost.
+    func record(_ usage: TokenUsage, costUSD: Double?) throws
 }
 
 /// Prompt files on disk. Every read goes to disk, so external edits apply immediately.
