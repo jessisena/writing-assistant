@@ -11,19 +11,19 @@ public enum UsageStoreError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .corrupted(let backup):
-            "The token usage file was damaged, so this month's count starts again. The old file "
-                + "was moved to \(backup.path)."
+            "The usage file was damaged, so this month's tokens and cost start again. The old "
+                + "file was moved to \(backup.path)."
         case .readFailed(let path, let reason):
-            "Couldn't read the token usage at \(path): \(reason.withoutTrailingPeriod). "
+            "Couldn't read the usage at \(path): \(reason.withoutTrailingPeriod). "
                 + "Check that the file is readable, or move it away to start counting again."
         case .writeFailed(let path, let reason):
-            "Couldn't save the token usage to \(path): \(reason.withoutTrailingPeriod). "
+            "Couldn't save the usage to \(path): \(reason.withoutTrailingPeriod). "
                 + "Check that the folder exists and is writable."
         }
     }
 }
 
-/// Token totals per calendar month, stored as JSON keyed by "yyyy-MM".
+/// Token and cost totals per calendar month, stored as JSON keyed by "yyyy-MM".
 public struct UsageStore: UsageRecording {
     /// `~/Library/Application Support/Writing Assistant/usage.json`.
     public static func standard() -> UsageStore {
@@ -72,12 +72,12 @@ public struct UsageStore: UsageRecording {
         self.now = now
     }
 
-    /// Adds `usage`, as one request, to the current month.
+    /// Adds `usage` and `costUSD`, as one request, to the current month.
     ///
     /// A damaged file is moved to `backupURL` and counting starts again from `usage`.
     ///
     /// - Throws: `UsageStoreError.readFailed` or `.writeFailed` naming the file.
-    public func record(_ usage: TokenUsage) throws {
+    public func record(_ usage: TokenUsage, costUSD: Double?) throws {
         try Self.lock.withLock {
             var file: File
             do {
@@ -89,6 +89,7 @@ public struct UsageStore: UsageRecording {
             var month = file.months[key] ?? .zero
             month.tokens = month.tokens + usage
             month.requests += 1
+            month.costUSD += costUSD ?? 0
             file.months[key] = month
             try write(file)
         }

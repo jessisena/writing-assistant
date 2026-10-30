@@ -137,17 +137,17 @@ public struct PolishService: Polishing {
         let reply = try await runner.run(
             prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout,
             onText: onText)
-        record(reply.usage)
+        record(reply.usage, costUSD: reply.costUSD)
         return (reply.text, model)
     }
 
-    private func record(_ tokens: TokenUsage?) {
+    private func record(_ tokens: TokenUsage?, costUSD: Double?) {
         guard let usage, let tokens else { return }
         do {
-            try usage.record(tokens)
+            try usage.record(tokens, costUSD: costUSD)
         } catch {
             Self.logger.error(
-                "Couldn't record token usage: \(error.localizedDescription, privacy: .public)")
+                "Couldn't record usage: \(error.localizedDescription, privacy: .public)")
         }
     }
 
