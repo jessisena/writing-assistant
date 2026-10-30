@@ -103,8 +103,11 @@ private struct ComposerFooter: View {
     }
 }
 
+/// The channel chips, in `Channel` order. ⌘1…⌘9 pick the first nine.
 private struct ChannelChips: View {
     @Binding var selection: Channel
+    @Namespace private var selectionNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -112,55 +115,38 @@ private struct ChannelChips: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             FlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                ForEach(Channel.allCases) { channel in
-                    Button(channel.shortName) { selection = channel }
-                        .buttonStyle(ChipStyle(isSelected: selection == channel))
-                        .help(channel.displayName)
-                        .accessibilityLabel(channel.displayName)
-                        .accessibilityAddTraits(selection == channel ? .isSelected : [])
+                ForEach(Array(Channel.allCases.enumerated()), id: \.element) { index, channel in
+                    chip(for: channel, number: index + 1)
                 }
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Channel")
         }
     }
-}
 
-private struct ChipStyle: ButtonStyle {
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        ChipBody(isSelected: isSelected, isPressed: configuration.isPressed) {
-            configuration.label
+    @ViewBuilder private func chip(for channel: Channel, number: Int) -> some View {
+        let button = Button(channel.shortName) { select(channel) }
+            .buttonStyle(
+                ChipStyle(
+                    isSelected: selection == channel, selectionNamespace: selectionNamespace)
+            )
+            .accessibilityLabel(channel.displayName)
+            .accessibilityAddTraits(selection == channel ? .isSelected : [])
+        if number <= 9 {
+            button
+                .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+                .help("\(channel.displayName) (⌘\(number))")
+        } else {
+            button.help(channel.displayName)
         }
     }
-}
 
-private struct ChipBody<Label: View>: View {
-    let isSelected: Bool
-    let isPressed: Bool
-    @ViewBuilder let label: Label
-    @Environment(\.theme) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovered = false
-
-    var body: some View {
-        label
-            .font(.callout)
-            .foregroundStyle(isSelected ? theme.ink : Color.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(fill, in: Capsule())
-            .overlay(Capsule().strokeBorder(isSelected ? theme.ink : theme.rule, lineWidth: 1))
-            .contentShape(Capsule())
-            .onHover { isHovered = $0 }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: isSelected)
-    }
-
-    private var fill: Color {
-        if isSelected { return theme.ink.opacity(0.15) }
-        if isPressed { return Color.primary.opacity(0.10) }
-        return isHovered ? Color.primary.opacity(0.06) : .clear
+    private func select(_ channel: Channel) {
+        if reduceMotion {
+            selection = channel
+        } else {
+            withAnimation(.snappy(duration: 0.25)) { selection = channel }
+        }
     }
 }
 
@@ -275,6 +261,7 @@ private struct PolishButton: View {
 /// "Polishing…", with the seconds elapsed once the request has run for a while.
 private struct ProgressText: View {
     let startedAt: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let showsElapsedAfter = 5
 
@@ -282,7 +269,10 @@ private struct ProgressText: View {
         if let startedAt {
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(startedAt))
-                Text(Self.text(elapsedSeconds: elapsed)).monospacedDigit()
+                Text(Self.text(elapsedSeconds: elapsed))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: Double(elapsed)))
+                    .animation(reduceMotion ? nil : .snappy, value: elapsed)
             }
         } else {
             Text(Self.text(elapsedSeconds: 0))
