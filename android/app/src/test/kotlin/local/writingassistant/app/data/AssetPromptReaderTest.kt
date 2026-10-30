@@ -21,18 +21,14 @@ class AssetPromptReaderTest {
 
     @Test
     fun everyBundledPromptIsPackagedAsAnAsset() {
-        val files =
-            listOf(PromptFile.Global) +
-                Channel.entries.map { PromptFile.ForChannel(it) } +
-                Refinement.entries.map { PromptFile.ForRefinement(it) }
-
-        files.forEach { assertTrue(it.relativePath, reader.read(it).isNotBlank()) }
+        PromptFile.all.forEach { assertTrue(it.relativePath, reader.read(it).isNotBlank()) }
     }
 
     @Test
-    fun assembledPromptHasNoPlaceholderLeft() {
-        val prompt = PromptAssembler(reader).assemble(Channel.FORMAL)
+    fun assembledPromptsHaveNoPlaceholderLeft() {
+        val assembler = PromptAssembler(reader)
 
-        assertFalse(prompt.contains(PromptFile.CHANNEL_PLACEHOLDER))
+        assertFalse(assembler.assemble(Channel.FORMAL, learningSummary = true).contains("{{"))
+        assertFalse(assembler.assembleRefinement(Refinement.SHORTER, Channel.FORMAL).contains("{{"))
     }
 }

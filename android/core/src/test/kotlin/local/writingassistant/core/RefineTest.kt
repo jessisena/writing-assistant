@@ -3,6 +3,7 @@ package local.writingassistant.core
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,7 +28,7 @@ class RefineTest {
         refine("Hello", Channel.SLACK, Refinement.SHORTER)
 
     @Test
-    fun promptAppendsTheRefinementInstructionBeforeTheInput() =
+    fun promptIsTheRefinePromptFollowedByTheWrappedDraft() =
         runTest {
             Refinement.entries.forEach { refinement ->
                 val client = replying(refinedResponse)
@@ -36,12 +37,8 @@ class RefineTest {
 
                 val instruction = "${refinement.id.uppercase()} INSTRUCTION"
                 val expected =
-                    "SYSTEM FORMAL RULES\n\n## Additional instruction\n\n$instruction\n\n" +
-                        "The input is already-polished English: apply the additional instruction " +
-                        "on top of the rules above. Where it conflicts with them (for example a " +
-                        "minimal-edit, length or formatting rule), the additional instruction " +
-                        "wins. Set was_translated to false and set learning_summary to null." +
-                        "\n\n---\n\nPlease send me the report."
+                    "REFINE ALWAYS FORMAL RULES $instruction" +
+                        "\n\n<draft>\nPlease send me the report.\n</draft>"
                 assertEquals(expected, client.calls.single().prompt)
             }
         }
@@ -106,7 +103,8 @@ class RefineTest {
                 listOf(
                     PromptFile.ForRefinement(Refinement.SHORTER),
                     PromptFile.ForChannel(Channel.SLACK),
-                    PromptFile.Global,
+                    PromptFile.Always,
+                    PromptFile.Refine,
                 )
             files.forEach { file ->
                 val client = replying(refinedResponse)
@@ -179,8 +177,21 @@ class RefineTest {
             val prompt = client.calls.single().prompt
             val instruction = bundled.read(PromptFile.ForRefinement(Refinement.SHORTER)).trim()
             val guidelines = bundled.read(PromptFile.ForChannel(Channel.SLACK)).trim()
-            assertTrue(prompt.contains("## Additional instruction\n\n$instruction\n\n"))
+            assertTrue(prompt.contains("## Instruction\n\n$instruction\n\n"))
             assertTrue(prompt.contains(guidelines))
-            assertTrue(prompt.endsWith("\n\n---\n\nHello there"))
+            assertTrue(prompt.contains(bundled.read(PromptFile.Always).trim()))
+            assertFalse(prompt.contains("learning_summary"))
+            assertTrue(prompt.endsWith("\n\n<draft>\nHello there\n</draft>"))
+        }
+
+    @Test
+    fun refiningDoesNotNeedThePolishPrompt() =
+        runTest {
+            val prompts = StubPromptReader(missing = setOf(PromptFile.Global))
+
+            assertEquals(
+                "Send the report today.",
+                service(replying(refinedResponse), prompts).refineHello(),
+            )
         }
 }

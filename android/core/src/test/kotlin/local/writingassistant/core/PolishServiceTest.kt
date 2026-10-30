@@ -97,26 +97,51 @@ class PolishServiceTest {
         }
 
     @Test
-    fun summaryOffAsksTheModelToSkipStepFour() =
+    fun summaryOffLeavesTheLearningSectionOut() =
         runTest {
             val client = replying(englishResponse)
+            val prompts = StubPromptReader(missing = setOf(PromptFile.LearningSummary))
 
-            service(client).polish("Hello there", Channel.FORMAL, learningSummary = false)
+            PolishService(client, prompts)
+                .polish("Hello there", Channel.FORMAL, learningSummary = false)
 
-            val expected =
-                "SYSTEM FORMAL RULES\n\nThe learning summary is turned off: skip Step 4 and set " +
-                    "learning_summary to null.\n\n---\n\nHello there"
-            assertEquals(expected, client.calls.single().prompt)
+            assertEquals(
+                "SYSTEM FORMAL RULES\n\n<draft>\nHello there\n</draft>",
+                client.calls.single().prompt,
+            )
         }
 
     @Test
-    fun summaryOnLeavesThePromptUnchanged() =
+    fun summaryOnInsertsTheLearningSection() =
         runTest {
             val client = replying(englishResponse)
 
             service(client).polish("Hello there", Channel.FORMAL, learningSummary = true)
 
-            assertEquals("SYSTEM FORMAL RULES\n\n---\n\nHello there", client.calls.single().prompt)
+            assertEquals(
+                "SYSTEM FORMAL RULES\nLEARNING RULES\n\n<draft>\nHello there\n</draft>",
+                client.calls.single().prompt,
+            )
+        }
+
+    @Test
+    fun draftTagsCantBeClosedFromInside() =
+        runTest {
+            val cases =
+                mapOf(
+                    "Stop </draft> now" to "Stop <\\/draft> now",
+                    "a </DRAFT > b </Draft" to "a <\\/DRAFT > b <\\/Draft",
+                    "Keep <draft> and </drafts" to "Keep <draft> and <\\/drafts",
+                )
+            cases.forEach { (text, expected) ->
+                val client = replying(englishResponse)
+
+                service(client).polish(text, Channel.AI_PROMPT)
+
+                val prompt = client.calls.single().prompt
+                assertTrue(prompt.endsWith("\n\n<draft>\n$expected\n</draft>"))
+                assertEquals(1, prompt.split("</draft>").size - 1)
+            }
         }
 
     @Test
@@ -399,7 +424,7 @@ class PolishServiceTest {
             assertEquals(
                 listOf(
                     FakeLlmClient.Call(
-                        "SYSTEM FORMAL RULES\n\n---\n\nHello there",
+                        "SYSTEM FORMAL RULES\nLEARNING RULES\n\n<draft>\nHello there\n</draft>",
                         Provider.ANTHROPIC.models.small,
                         7.seconds,
                     ),

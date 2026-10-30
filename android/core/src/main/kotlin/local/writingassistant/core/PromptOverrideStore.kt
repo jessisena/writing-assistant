@@ -11,11 +11,22 @@ sealed class PromptValidationException(
 ) : Exception(message) {
     data object Empty : PromptValidationException("A prompt can't be empty.")
 
-    data object MissingPlaceholder :
-        PromptValidationException(
-            "Global rules must contain ${PromptFile.CHANNEL_PLACEHOLDER} so the channel " +
-                "guidelines can be inserted.",
+    /** The text lacks [placeholder], which the file must keep. */
+    data class MissingPlaceholder(
+        val placeholder: String,
+    ) : PromptValidationException(
+            "This prompt must contain $placeholder so the ${insertedPart(placeholder)} can be " +
+                "inserted.",
         )
+
+    private companion object {
+        fun insertedPart(placeholder: String): String =
+            if (placeholder == PromptFile.INSTRUCTION_PLACEHOLDER) {
+                "refinement instruction"
+            } else {
+                "channel guidelines"
+            }
+    }
 }
 
 /**
@@ -41,8 +52,8 @@ class PromptOverrideStore(
      * Stores [text] as the edited copy of [file]. Text identical to the default removes the edited
      * copy instead, so the file doesn't show as edited.
      *
-     * @throws PromptValidationException when [text] is blank, or is the global file without
-     *   [PromptFile.CHANNEL_PLACEHOLDER].
+     * @throws PromptValidationException when [text] is blank, or lacks the file's
+     *   [PromptFile.requiredPlaceholder].
      * @throws java.io.IOException when the file can't be written.
      */
     fun save(
@@ -85,8 +96,9 @@ class PromptOverrideStore(
             if (text.isBlank()) {
                 throw PromptValidationException.Empty
             }
-            if (file == PromptFile.Global && !text.contains(PromptFile.CHANNEL_PLACEHOLDER)) {
-                throw PromptValidationException.MissingPlaceholder
+            val placeholder = file.requiredPlaceholder
+            if (placeholder != null && !text.contains(placeholder)) {
+                throw PromptValidationException.MissingPlaceholder(placeholder)
             }
         }
     }

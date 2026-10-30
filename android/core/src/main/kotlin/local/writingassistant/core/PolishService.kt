@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.seconds
  */
 class PolishService(
     private val backend: suspend () -> Backend,
-    private val prompts: PromptReading,
+    prompts: PromptReading,
     private val timeout: Duration = DEFAULT_TIMEOUT,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : Polishing {
@@ -55,7 +55,7 @@ class PolishService(
      * When the model reports a truthy `was_translated`, or [learningSummary] is false, the
      * result never carries a learning summary, whatever the model returned.
      *
-     * @param learningSummary False tells the model to skip the summary step, saving tokens.
+     * @param learningSummary False leaves the learning summary section out of the prompt.
      *
      * @throws PolishError EmptyInput, InputTooLong, PromptUnavailable, BadFormat, or any error
      *   thrown by the client, unchanged.
@@ -66,8 +66,7 @@ class PolishService(
         learningSummary: Boolean,
     ): PolishResult {
         val input = validatedInput(text)
-        val assembled = loadPrompt { assembler.assemble(channel) }
-        val systemPrompt = if (learningSummary) assembled else "$assembled\n\n$NO_SUMMARY_NOTE"
+        val systemPrompt = loadPrompt { assembler.assemble(channel, learningSummary) }
         val backend = backend()
         val model = backend.models.forTier(ModelRouting.pickTier(input))
         return parse(send(backend.client, systemPrompt, input, model), model, learningSummary)
@@ -76,8 +75,9 @@ class PolishService(
     /**
      * Rewrites already-polished [text] for [channel], following one [refinement] instruction.
      *
-     * Only `polished_text` is read from the reply: the model's language and learning summary
-     * describe its own output, so they are ignored, even when malformed.
+     * The prompt is `refine.txt` with the shared rules, the channel guidelines and the
+     * refinement file. Only `polished_text` is read from the reply; any other key the model adds
+     * is ignored, even when malformed.
      *
      * @throws PolishError EmptyInput, InputTooLong, PromptUnavailable, BadFormat, or any error
      *   thrown by the client, unchanged.
@@ -88,13 +88,10 @@ class PolishService(
         refinement: Refinement,
     ): String {
         val input = validatedInput(text)
-        val systemPrompt = loadPrompt { assembler.assemble(channel) }
-        val instruction = loadPrompt { prompts.read(PromptFile.ForRefinement(refinement)).trim() }
-        val refinementPrompt =
-            "$systemPrompt\n\n## Additional instruction\n\n$instruction\n\n$REFINEMENT_NOTE"
+        val systemPrompt = loadPrompt { assembler.assembleRefinement(refinement, channel) }
         val backend = backend()
         val model = backend.models.forTier(ModelRouting.pickTier(input))
-        val raw = send(backend.client, refinementPrompt, input, model)
+        val raw = send(backend.client, systemPrompt, input, model)
         return polishedText(decodeObject(raw))
     }
 
@@ -102,25 +99,30 @@ class PolishService(
         backend().client.checkAvailable()
     }
 
+    /** Sends [systemPrompt] followed by [input] wrapped in `<draft>` tags, in one message. */
     private suspend fun send(
         client: LlmClient,
         systemPrompt: String,
         input: String,
         model: String,
-    ): String = client.run("$systemPrompt\n\n---\n\n$input", model, timeout)
+    ): String = client.run("$systemPrompt\n\n${wrapDraft(input)}", model, timeout)
 
     companion object {
         const val MAX_INPUT_LENGTH = 20_000
         val DEFAULT_TIMEOUT: Duration = 120.seconds
 
-        private const val REFINEMENT_NOTE =
-            "The input is already-polished English: apply the additional instruction on top of " +
-                "the rules above. Where it conflicts with them (for example a minimal-edit, " +
-                "length or formatting rule), the additional instruction wins. Set was_translated " +
-                "to false and set learning_summary to null."
-        private const val NO_SUMMARY_NOTE =
-            "The learning summary is turned off: skip Step 4 and set learning_summary to null."
         private val json = Json { ignoreUnknownKeys = true }
+        private val closingDraftTag = Regex("</(draft)", RegexOption.IGNORE_CASE)
+
+        /**
+         * Wraps [text] in `<draft>` tags so the model treats it as material, not instructions.
+         * A closing `</draft` inside the text gets a backslash (`<\/draft`), in any letter case,
+         * so the author's text can't end the draft early. Mirrors `PolishService.wrapDraft`.
+         */
+        internal fun wrapDraft(text: String): String {
+            val neutralized = closingDraftTag.replace(text, "<\\\\/$1")
+            return "<draft>\n$neutralized\n</draft>"
+        }
 
         private fun validatedInput(text: String): String {
             val trimmed = text.trim()
