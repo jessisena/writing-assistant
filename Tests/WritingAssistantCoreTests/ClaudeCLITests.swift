@@ -72,6 +72,27 @@ extension FakeClaude {
 
 private let countInvocation = #"echo x >> "$DIR/count""#
 
+/// Copies the `--system-prompt-file` file to `$DIR/system` and records its path and the
+/// permissions of it and its directory. Ends with `;` so a command can follow.
+private let recordPromptFile = #"""
+    prev=; for arg in "$@"; do
+    if [ "$prev" = --system-prompt-file ]; then
+    cp "$arg" "$DIR/system"; printf '%s' "$arg" > "$DIR/system-path"
+    stat -f %Lp "$arg" > "$DIR/system-mode"
+    stat -f %Lp "$(dirname "$arg")" > "$DIR/system-dir-mode"
+    fi; prev=$arg; done;
+    """#
+
+/// The prompt file a `recordPromptFile` fake received, and its directory, no longer exist.
+private func expectPromptFileIsGone(
+    _ fake: FakeClaude, sourceLocation: SourceLocation = #_sourceLocation
+) throws {
+    let path = try fake.contents(of: "system-path")
+    let directory = URL(filePath: path).deletingLastPathComponent().path
+    #expect(!FileManager.default.fileExists(atPath: path), sourceLocation: sourceLocation)
+    #expect(!FileManager.default.fileExists(atPath: directory), sourceLocation: sourceLocation)
+}
+
 /// One stream-json line, serialized so any text is escaped the way claude escapes it.
 private func jsonLine(_ object: [String: Any]) -> String {
     let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -159,32 +180,110 @@ private func setEnvironment(_ name: String, _ value: String?) {
 }
 
 @Suite(.serialized) struct ClaudeCLITests {
-    @Test func successReturnsTrimmedResultAndReceivesPromptOnStdin() async throws {
-        let script = #"cat > "$DIR/stdin"; "# + printLines(resultEvent("\n  polished text \n\n"))
+    @Test func successReturnsTrimmedResultAndSendsOnlyTheInputOnStdin() async throws {
+        let script =
+            #"cat > "$DIR/stdin"; "# + recordPromptFile
+            + printLines(resultEvent("\n  polished text \n\n"))
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
 
         let reply = try await fake.cli.run(
-            prompt: "system\n\n---\n\nhello", model: "haiku", timeout: .seconds(10))
+            systemPrompt: "system", input: "hello", model: "haiku", timeout: .seconds(10))
 
         #expect(reply == ClaudeReply(text: "polished text", usage: nil))
-        #expect(try fake.contents(of: "stdin") == "system\n\n---\n\nhello")
+        #expect(try fake.contents(of: "stdin") == "hello")
+    }
+
+    @Test func systemPromptIsAPrivateFileThatIsGoneAfterTheCall() async throws {
+        let fake = try FakeClaude(script: recordPromptFile + printOK)
+        defer { fake.remove() }
+        let systemPrompt = "Rules with 'single', \"double\" quotes, $HOME and émoji 👋\n\n---\n"
+
+        _ = try await fake.cli.run(
+            systemPrompt: systemPrompt, input: "hello", model: "haiku", timeout: .seconds(10))
+
+        #expect(try fake.contents(of: "system") == systemPrompt)
+        #expect(try fake.contents(of: "system-mode") == "600\n")
+        #expect(try fake.contents(of: "system-dir-mode") == "700\n")
+        try expectPromptFileIsGone(fake)
     }
 
     @Test func passesExactHeadlessArguments() async throws {
         let fake = try FakeClaude(script: #"printf '%s\n' "$@" > "$DIR/args"; "# + printOK)
         defer { fake.remove() }
 
-        _ = try await fake.cli.run(prompt: "p", model: "claude-sonnet-5-5", timeout: .seconds(10))
+        _ = try await fake.cli.run(input: "p", model: "claude-sonnet-5-5", timeout: .seconds(10))
 
-        let arguments = try fake.contents(of: "args").split(separator: "\n").map(String.init)
+        // Empty arguments (`--tools ""`) are empty lines, so they must not be dropped.
+        let lines = try fake.contents(of: "args")
+            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let arguments = Array(lines.dropLast())
+        let promptFileIndex = try #require(arguments.firstIndex(of: "--system-prompt-file")) + 1
+        #expect(arguments[promptFileIndex].hasSuffix("/system-prompt.txt"))
+        var withoutPath = arguments
+        withoutPath.remove(at: promptFileIndex)
         #expect(
-            arguments == [
+            withoutPath == [
                 "--print", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages", "--model", "claude-sonnet-5-5",
-                "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
-                "--no-session-persistence",
+                "--system-prompt-file", "--tools", "", "--setting-sources", "",
+                "--disable-slash-commands", "--strict-mcp-config", "--mcp-config",
+                #"{"mcpServers":{}}"#, "--no-session-persistence",
             ])
+    }
+
+    @Test func promptFileIsGoneAfterAFailedExit() async throws {
+        let script = "\(countInvocation); \(recordPromptFile) echo boom >&2; exit 1"
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "boom")) {
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
+        }
+        #expect(try fake.invocationCount() == 2)
+        try expectPromptFileIsGone(fake)
+    }
+
+    @Test func promptFileIsGoneAfterATimeout() async throws {
+        let fake = try FakeClaude(script: "\(recordPromptFile) sleep 5")
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.timeout(seconds: 1)) {
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(1))
+        }
+        try expectPromptFileIsGone(fake)
+    }
+
+    @Test(arguments: [
+        "echo \"error: unknown option '--tools'\" >&2",
+        "echo \"error: unknown option '--setting-sources'\"",
+        "echo 'Error: Unknown argument: --disable-slash-commands' >&2",
+    ])
+    func rejectedFlagMeansTheCLIIsOutdatedAndIsNotRetried(rejection: String) async throws {
+        let fake = try FakeClaude(script: "\(countInvocation); \(rejection); exit 1")
+        defer { fake.remove() }
+
+        do {
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
+            Issue.record("expected cliOutdated")
+        } catch {
+            guard case .cliOutdated(let detail) = error else {
+                Issue.record("expected cliOutdated, got \(error)")
+                return
+            }
+            #expect(detail.lowercased().contains("unknown"))
+        }
+        #expect(try fake.invocationCount() == 1)
+    }
+
+    @Test func replyTextMentioningAnUnknownOptionIsNotAnOutdatedCLI() async throws {
+        let script = "\(printLines(deltaEvent("unknown option"))); echo 'boom' >&2; exit 1"
+        let fake = try FakeClaude(script: script)
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.cliFailed(stderr: "boom")) {
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
+        }
     }
 
     @Test func textDeltasReachOnTextInOrderAndUsageIsParsed() async throws {
@@ -208,7 +307,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let log = TextLog()
 
         let reply = try await fake.cli.run(
-            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+            input: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
 
         #expect(log.received == ["Hel", "lo \"wörld\" 👋", "\n!"])
         #expect(reply.text == "Hello \"wörld\" 👋\n!")
@@ -222,7 +321,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: printLines(resultEvent("done", cost: cost)))
         defer { fake.remove() }
 
-        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        let reply = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
 
         #expect(reply.text == "done")
         #expect(reply.costUSD == nil)
@@ -232,7 +331,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: printLines(resultEvent("done", cost: 1)))
         defer { fake.remove() }
 
-        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        let reply = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
 
         #expect(reply.costUSD == 1)
     }
@@ -250,7 +349,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
         let seen = fake.directory.appending(path: "seen")
 
-        let reply = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)) {
+        let reply = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10)) {
             _ in _ = try? Data().write(to: seen)
         }
 
@@ -271,7 +370,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let log = TextLog()
 
         let reply = try await fake.cli.run(
-            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+            input: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
 
         #expect(log.received == ["split"])
         #expect(reply.text == "done")
@@ -285,7 +384,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let log = TextLog()
 
         let reply = try await fake.cli.run(
-            prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+            input: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
 
         let expected =
             "```json\n{\"polished_text\": \"Hi \\\"there\\\"\", \"learning_summary\": null}\n```"
@@ -304,7 +403,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.cliFailed(stderr: "API Error: overloaded")) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
     }
 
@@ -315,7 +414,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.cliFailed(stderr: "Credit balance too low")) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
         #expect(try fake.invocationCount() == 2)
     }
@@ -328,7 +427,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
             throws: PolishError.cliFailed(
                 stderr: "claude CLI printed no result event. Output: stray line")
         ) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
     }
 
@@ -337,7 +436,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         do {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
             Issue.record("expected cliFailed")
         } catch {
             guard case .cliFailed(let detail) = error else {
@@ -359,7 +458,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
 
         await #expect(throws: PolishError.cliFailed(stderr: "connection reset")) {
             try await fake.cli.run(
-                prompt: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
+                input: "p", model: "haiku", timeout: .seconds(10), onText: log.append)
         }
         #expect(try fake.invocationCount() == 1)
         #expect(log.received == ["partial"])
@@ -369,7 +468,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: #"pwd -P > "$DIR/cwd"; "# + printOK)
         defer { fake.remove() }
 
-        _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+        _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
 
         let cwd = try fake.contents(of: "cwd").trimmingCharacters(in: .newlines)
         #expect(cwd == realPath(FileManager.default.temporaryDirectory.path))
@@ -381,13 +480,15 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         try await withEnvironment(["ANTHROPIC_API_KEY": "sk-test-should-not-leak"]) {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
 
         let environment = try fake.recordedEnvironment()
         #expect(environment["ANTHROPIC_API_KEY"] == nil)
         #expect(environment["MAX_THINKING_TOKENS"] == "0")
         #expect(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1")
+        #expect(environment["DISABLE_TELEMETRY"] == "1")
+        #expect(environment["DISABLE_ERROR_REPORTING"] == "1")
         let path = try #require(environment["PATH"])
         #expect(path.hasPrefix("\(fake.directory.path):"))
         #expect(path.contains("/opt/homebrew/bin"))
@@ -398,7 +499,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         try await withEnvironment(["USER": nil, "HOME": nil]) {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
 
         let environment = try fake.recordedEnvironment()
@@ -411,7 +512,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         try await withEnvironment(["USER": "someone-else", "HOME": "/tmp/elsewhere"]) {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
 
         let environment = try fake.recordedEnvironment()
@@ -424,7 +525,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.cliFailed(stderr: "Not logged in · Please run /login")) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
     }
 
@@ -433,7 +534,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.cliFailed(stderr: "real error")) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
     }
 
@@ -442,7 +543,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.cliFailed(stderr: "rate limited")) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
         #expect(try fake.invocationCount() == 2)
     }
@@ -456,7 +557,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let fake = try FakeClaude(script: script)
         defer { fake.remove() }
 
-        let output = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text
+        let output = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10)).text
 
         #expect(output == "recovered")
         #expect(try fake.invocationCount() == 2)
@@ -469,7 +570,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let start = clock.now
 
         await #expect(throws: PolishError.timeout(seconds: 1)) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(1))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(1))
         }
         #expect(clock.now - start < .seconds(4))
         #expect(try fake.invocationCount() == 1)
@@ -482,7 +583,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         let start = clock.now
 
         await #expect(throws: PolishError.timeout(seconds: 1)) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(1))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(1))
         }
         #expect(clock.now - start < .seconds(5))
         #expect(try fake.invocationCount() == 1)
@@ -498,7 +599,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
         let prompt = String(repeating: "p", count: 200_000)
 
-        let output = try await fake.cli.run(prompt: prompt, model: "haiku", timeout: .seconds(10))
+        let output = try await fake.cli.run(input: prompt, model: "haiku", timeout: .seconds(10))
             .text
 
         #expect(output.utf8.count == 1_048_576)
@@ -510,7 +611,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
         let prompt = String(repeating: "p", count: 500_000)
 
-        let output = try await fake.cli.run(prompt: prompt, model: "haiku", timeout: .seconds(10))
+        let output = try await fake.cli.run(input: prompt, model: "haiku", timeout: .seconds(10))
             .text
 
         #expect(output == "early")
@@ -521,7 +622,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         await #expect(throws: PolishError.claudeNotFound) {
-            try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
         await #expect(throws: PolishError.claudeNotFound) {
             try await fake.cli.checkAvailable()
@@ -549,15 +650,15 @@ private func setEnvironment(_ name: String, _ value: String?) {
                 useLoginShell: false))
 
         #expect(
-            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
+            try await cli.run(input: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
         )
         try preferred.install()
         #expect(
-            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
+            try await cli.run(input: "p", model: "haiku", timeout: .seconds(10)).text == "fallback"
         )
         try fallback.uninstall()
         #expect(
-            try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(10)).text
+            try await cli.run(input: "p", model: "haiku", timeout: .seconds(10)).text
                 == "preferred")
     }
 
@@ -572,10 +673,11 @@ private func setEnvironment(_ name: String, _ value: String?) {
     private func expectStopsSleepingFake(
         _ stop: (Task<ClaudeReply, any Error>) -> Void
     ) async throws {
-        let fake = try FakeClaude(script: #"echo $$ > "$DIR/pid"; exec sleep 10"#)
+        let script = recordPromptFile + #"echo $$ > "$DIR/pid"; exec sleep 10"#
+        let fake = try FakeClaude(script: script)
         defer { fake.remove() }
         let cli = fake.cli
-        let task = Task { try await cli.run(prompt: "p", model: "haiku", timeout: .seconds(30)) }
+        let task = Task { try await cli.run(input: "p", model: "haiku", timeout: .seconds(30)) }
         let pid = try await waitForPid(of: fake)
         let clock = ContinuousClock()
         let stoppedAt = clock.now
@@ -586,6 +688,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         #expect(clock.now - stoppedAt < .seconds(3))
         #expect(throws: PolishError.cliFailed(stderr: "Cancelled")) { try result.get() }
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
+        try expectPromptFileIsGone(fake)
     }
 
     private func waitForPid(of fake: FakeClaude) async throws -> pid_t {
@@ -605,7 +708,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         do {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
             Issue.record("expected cliFailed")
         } catch {
             guard case .cliFailed(let detail) = error else {
@@ -622,7 +725,7 @@ private func setEnvironment(_ name: String, _ value: String?) {
         defer { fake.remove() }
 
         do {
-            _ = try await fake.cli.run(prompt: "p", model: "haiku", timeout: .seconds(10))
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
             Issue.record("expected cliFailed")
         } catch {
             guard case .cliFailed(let detail) = error else {

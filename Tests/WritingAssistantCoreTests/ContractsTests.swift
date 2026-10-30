@@ -86,4 +86,11 @@ import WritingAssistantCore
             PolishError.timeout(seconds: 120).errorDescription
                 == "Claude took longer than 120 seconds. Please try again.")
     }
+
+    @Test func outdatedCLIMessageSaysHowToUpdate() throws {
+        let message = try #require(
+            PolishError.cliOutdated(detail: "error: unknown option '--tools'").errorDescription)
+        #expect(message.contains("too old"))
+        #expect(message.contains("`claude update`"))
+    }
 }
