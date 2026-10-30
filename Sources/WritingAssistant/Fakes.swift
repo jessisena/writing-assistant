@@ -159,7 +159,12 @@
         let directoryURL = URL(fileURLWithPath: "/tmp/fake-prompts")
 
         init(files: [PromptFile: String]? = nil, newerDefaults: Set<PromptFile> = []) {
-            var seeded: [PromptFile: String] = [.global: "Rules\n\(PromptFile.channelPlaceholder)"]
+            var seeded: [PromptFile: String] = [
+                .global: "Rules\n\(PromptFile.channelPlaceholder)",
+                .always: "Always rules",
+                .learningSummary: "Learning summary rules",
+                .refine: "Refine\n\(PromptFile.instructionPlaceholder)",
+            ]
             for channel in Channel.allCases {
                 seeded[.channel(channel)] = "\(channel.rawValue) guidelines"
             }
@@ -217,12 +222,6 @@
                 if let _acknowledgeFailure { throw _acknowledgeFailure }
                 _newerDefaults.remove(file)
             }
-        }
-
-        func assemble(for channel: Channel) throws -> String {
-            let global = try read(.global).trimmingCharacters(in: .whitespacesAndNewlines)
-            let rules = try read(.channel(channel)).trimmingCharacters(in: .whitespacesAndNewlines)
-            return global.replacingOccurrences(of: PromptFile.channelPlaceholder, with: rules)
         }
     }
 

@@ -51,7 +51,7 @@ class MainNavigationTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.onNodeWithText("Settings").performClick()
             compose.onNodeWithText("Prompts").performScrollTo().performClick()
-            compose.onNodeWithText("Global rules").assertExists()
+            compose.onNodeWithText("Polish prompt").assertExists()
             back(scenario)
             compose.onNodeWithText("AI provider").assertExists()
             back(scenario)
@@ -64,11 +64,11 @@ class MainNavigationTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.onNodeWithText("Settings").performClick()
             compose.onNodeWithText("Prompts").performScrollTo().performClick()
-            compose.onNodeWithText("Global rules").performClick()
+            compose.onNodeWithText("Polish prompt").performClick()
             compose.waitForIdle()
             compose.onNode(hasSetTextAction()).performTextReplacement("unsaved edit")
             back(scenario)
-            compose.onNodeWithText("Global rules").performClick()
+            compose.onNodeWithText("Polish prompt").performClick()
             compose.waitForIdle()
 
             compose.onNodeWithText("default polish.txt").assertExists()

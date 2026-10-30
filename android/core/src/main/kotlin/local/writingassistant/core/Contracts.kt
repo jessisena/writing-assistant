@@ -160,7 +160,17 @@ sealed class PromptFile(
     /** Name shown in the prompt editor. */
     val displayName: String,
 ) {
-    data object Global : PromptFile("polish.txt", "Global rules")
+    /** The polish prompt, with slots for the other sections. */
+    data object Global : PromptFile("polish.txt", "Polish prompt")
+
+    /** The rules shared by the polish and refine prompts. */
+    data object Always : PromptFile("always.txt", "Always rules")
+
+    /** Inserted into the polish prompt only while the learning summary is on. */
+    data object LearningSummary : PromptFile("learning_summary.txt", "Learning summary")
+
+    /** The refine prompt, with slots for the shared rules, channel and instruction. */
+    data object Refine : PromptFile("refine.txt", "Refine prompt")
 
     data class ForChannel(
         val channel: Channel,
@@ -170,13 +180,26 @@ sealed class PromptFile(
         val refinement: Refinement,
     ) : PromptFile("refinements/${refinement.id}.txt", refinement.displayName)
 
+    /** The placeholder a saved copy must keep, because the request is pointless without it. */
+    val requiredPlaceholder: String?
+        get() =
+            when (this) {
+                Global -> CHANNEL_PLACEHOLDER
+                Refine -> INSTRUCTION_PLACEHOLDER
+                else -> null
+            }
+
     companion object {
         const val CHANNEL_PLACEHOLDER = "{{CHANNEL_GUIDELINES}}"
+        const val ALWAYS_PLACEHOLDER = "{{ALWAYS_RULES}}"
+        const val LEARNING_SUMMARY_PLACEHOLDER = "{{LEARNING_SUMMARY}}"
+        const val INSTRUCTION_PLACEHOLDER = "{{REFINEMENT_INSTRUCTION}}"
 
-        /** Every prompt file: the global rules, then channels, then refinements. */
+        /** Every prompt file: the top-level files, then channels, then refinements. */
         val all: List<PromptFile>
             get() =
-                listOf(Global) + Channel.entries.map(::ForChannel) +
+                listOf(Global, Always, LearningSummary, Refine) +
+                    Channel.entries.map(::ForChannel) +
                     Refinement.entries.map(::ForRefinement)
 
         fun fromRelativePath(path: String): PromptFile? =

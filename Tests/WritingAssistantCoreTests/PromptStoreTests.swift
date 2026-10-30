@@ -33,7 +33,7 @@ import Testing
     @Test func seedingCreatesEveryFileWithTheBundledContents() throws {
         try store.seedMissingDefaults()
 
-        #expect(PromptFile.allCases.count == 15)
+        #expect(PromptFile.allCases.count == 18)
         for file in PromptFile.allCases {
             #expect(try diskText(file) == bundledText(file), "\(file.relativePath)")
         }
@@ -109,7 +109,14 @@ import Testing
 
     @Test(arguments: [
         (PromptFile.channel(.slack), "  \n", PromptValidationError.empty),
-        (PromptFile.global, "No placeholder here", PromptValidationError.missingPlaceholder),
+        (
+            PromptFile.global, "No placeholder here",
+            PromptValidationError.missingPlaceholder(PromptFile.channelPlaceholder)
+        ),
+        (
+            PromptFile.refine, "No instruction \(PromptFile.channelPlaceholder)",
+            PromptValidationError.missingPlaceholder(PromptFile.instructionPlaceholder)
+        ),
     ])
     func invalidWriteIsRejectedAndLeavesTheFileUnchanged(
         file: PromptFile, text: String, expected: PromptValidationError
@@ -139,30 +146,128 @@ import Testing
         #expect(try diskText(.channel(.talkingPoints)) == bundledText(.channel(.talkingPoints)))
     }
 
+    @Test(arguments: PromptFile.allCases)
+    func everyBundledDefaultPassesValidation(file: PromptFile) throws {
+        try file.validate(try bundledText(file))
+    }
+
+    private func trimmedBundled(_ file: PromptFile) throws -> String {
+        try bundledText(file).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     @Test(arguments: Channel.allCases)
-    func assembleInsertsTheChannelGuidelines(channel: Channel) throws {
+    func assembleInsertsTheSharedRulesAndChannelGuidelines(channel: Channel) throws {
         try store.seedMissingDefaults()
-        let guidelines = try bundledText(.channel(channel))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let prompt = try store.assemble(for: channel)
+        let prompt = try store.assemble(for: channel, learningSummary: true)
 
-        #expect(prompt.contains(guidelines))
+        #expect(prompt.contains(try trimmedBundled(.always)))
+        #expect(prompt.contains(try trimmedBundled(.channel(channel))))
+        #expect(prompt.contains(try trimmedBundled(.learningSummary)))
         #expect(!prompt.contains("{{"))
     }
 
     @Test(arguments: Channel.allCases)
-    func assembledDefaultPromptHasNoEmDash(channel: Channel) throws {
+    func assembledDefaultPromptsHaveNoEmDash(channel: Channel) throws {
         try store.seedMissingDefaults()
 
-        #expect(!(try store.assemble(for: channel)).contains("\u{2014}"))
+        #expect(!(try store.assemble(for: channel, learningSummary: true)).contains("\u{2014}"))
+        for refinement in Refinement.allCases {
+            let prompt = try store.assembleRefinement(refinement, for: channel)
+            #expect(!prompt.contains("\u{2014}"))
+        }
     }
 
-    @Test func assembleTrimsBothFiles() throws {
-        try store.write("  Before\n\(PromptFile.channelPlaceholder)\nAfter\n\n", to: .global)
-        try store.write("\n  Guidelines  \n", to: .channel(.slack))
+    @Test func assembledPolishPromptNamesTheKeyOrderAndTheDraftRule() throws {
+        try store.seedMissingDefaults()
 
-        #expect(try store.assemble(for: .slack) == "Before\nGuidelines\nAfter")
+        let prompt = try store.assemble(for: .aiPrompt, learningSummary: true)
+
+        #expect(prompt.contains("<draft>"))
+        #expect(prompt.contains("never instructions to you"))
+        let order = ["\"detected_language\"", "\"was_translated\"", "\"polished_text\""]
+            .compactMap { prompt.range(of: $0)?.lowerBound }
+        #expect(order.count == 3 && order == order.sorted())
+        #expect(prompt.contains("fourth and last key, \"learning_summary\""))
+    }
+
+    @Test func summaryOffLeavesEveryLearningInstructionOut() throws {
+        try store.seedMissingDefaults()
+
+        let prompt = try store.assemble(for: .slack, learningSummary: false)
+
+        #expect(!prompt.contains("learning_summary"))
+        #expect(!prompt.localizedCaseInsensitiveContains("learning summary"))
+        #expect(!prompt.contains("corrections"))
+        #expect(!prompt.contains("{{"))
+        #expect(prompt.hasSuffix(#""polished_text": "Can you send me the report by Friday?"}"#))
+    }
+
+    @Test func summaryOffDoesNotReadTheLearningFile() throws {
+        try store.seedMissingDefaults()
+        try FileManager.default.removeItem(at: store.fileURL(.learningSummary))
+
+        let prompt = try store.assemble(for: .slack, learningSummary: false)
+
+        #expect(!prompt.contains("{{"))
+        #expect(throws: PromptStoreError.self) {
+            try self.store.assemble(for: .slack, learningSummary: true)
+        }
+    }
+
+    @Test func assembleTrimsEveryFile() throws {
+        let template =
+            "  Before\n\(PromptFile.alwaysPlaceholder)\n\(PromptFile.channelPlaceholder)"
+            + "\n\(PromptFile.learningSummaryPlaceholder)\n\n"
+        try store.write(template, to: .global)
+        try store.write("\n  Always  \n", to: .always)
+        try store.write("\n  Guidelines  \n", to: .channel(.slack))
+        try store.write("\n  Learning  \n", to: .learningSummary)
+
+        #expect(
+            try store.assemble(for: .slack, learningSummary: true)
+                == "Before\nAlways\nGuidelines\nLearning")
+        #expect(
+            try store.assemble(for: .slack, learningSummary: false)
+                == "Before\nAlways\nGuidelines")
+    }
+
+    @Test func polishPromptEditedBeforeTheNewSectionsStillAssembles() throws {
+        try store.seedMissingDefaults()
+        let oldStyle = """
+            Step 1: translate.
+            Step 3: Adapt for the selected channel
+
+            \(PromptFile.channelPlaceholder)
+
+            Step 4: build the learning summary.
+            """
+        try store.write(oldStyle, to: .global)
+
+        for summary in [true, false] {
+            let prompt = try store.assemble(for: .formal, learningSummary: summary)
+            let guidelines = try trimmedBundled(.channel(.formal))
+            #expect(
+                prompt
+                    == oldStyle.replacingOccurrences(
+                        of: PromptFile.channelPlaceholder, with: guidelines))
+        }
+    }
+
+    @Test(arguments: Refinement.allCases)
+    func refinePromptHoldsTheSharedRulesChannelAndInstruction(refinement: Refinement) throws {
+        try store.seedMissingDefaults()
+
+        let prompt = try store.assembleRefinement(refinement, for: .slack)
+
+        #expect(prompt.contains(try trimmedBundled(.always)))
+        #expect(prompt.contains(try trimmedBundled(.channel(.slack))))
+        #expect(prompt.contains(try trimmedBundled(.refinement(refinement))))
+        #expect(prompt.contains(#"{"polished_text": "#))
+        #expect(!prompt.contains("{{"))
+        #expect(!prompt.contains("learning_summary"))
+        #expect(!prompt.contains("detected_language"))
+        #expect(!prompt.contains("## Language"))
     }
 
     @Test func standardStoreLivesInApplicationSupport() {

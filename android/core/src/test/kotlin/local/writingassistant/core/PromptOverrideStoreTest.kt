@@ -107,19 +107,45 @@ class PromptOverrideStoreTest {
                 store.save(PromptFile.Global, "Rules with no channel slot")
             }
 
-        assertSame(PromptValidationException.MissingPlaceholder, error)
-        assertTrue(error.message.contains(PromptFile.CHANNEL_PLACEHOLDER))
+        assertEquals(
+            PromptValidationException.MissingPlaceholder(PromptFile.CHANNEL_PLACEHOLDER),
+            error,
+        )
+        assertTrue(error.message.contains("channel guidelines"))
         assertFalse(store.isCustomized(PromptFile.Global))
     }
 
     @Test
-    fun onlyTheGlobalFileNeedsThePlaceholder() {
+    fun refinePromptWithoutTheInstructionPlaceholderIsRejected() {
+        val store = store()
+
+        val error =
+            assertThrows(PromptValidationException::class.java) {
+                store.save(PromptFile.Refine, "Refine ${PromptFile.CHANNEL_PLACEHOLDER}")
+            }
+
+        assertEquals(
+            PromptValidationException.MissingPlaceholder(PromptFile.INSTRUCTION_PLACEHOLDER),
+            error,
+        )
+        assertTrue(error.message.contains("refinement instruction"))
+        assertFalse(store.isCustomized(PromptFile.Refine))
+    }
+
+    @Test
+    fun onlyTheTemplatesNeedTheirPlaceholder() {
         val store = store()
 
         store.save(PromptFile.Global, "NEW ${PromptFile.CHANNEL_PLACEHOLDER}")
+        store.save(PromptFile.Refine, "NEW ${PromptFile.INSTRUCTION_PLACEHOLDER}")
+        store.save(PromptFile.Always, "Be clear.")
+        store.save(PromptFile.LearningSummary, "Explain the changes.")
         store.save(PromptFile.ForRefinement(Refinement.SHORTER), "Cut it in half.")
 
         assertTrue(store.isCustomized(PromptFile.Global))
+        assertTrue(store.isCustomized(PromptFile.Refine))
+        assertTrue(store.isCustomized(PromptFile.Always))
+        assertTrue(store.isCustomized(PromptFile.LearningSummary))
         assertTrue(store.isCustomized(PromptFile.ForRefinement(Refinement.SHORTER)))
     }
 
@@ -141,7 +167,7 @@ class PromptOverrideStoreTest {
             PolishService(client, store).polish("Hello there", Channel.SLACK)
 
             assertEquals(
-                "SYSTEM EDITED SLACK RULES\n\n---\n\nHello there",
+                "SYSTEM EDITED SLACK RULES\nLEARNING RULES\n\n<draft>\nHello there\n</draft>",
                 client.calls.single().prompt,
             )
         }

@@ -60,7 +60,17 @@ fun PromptListScreen(
 ) {
     val edited = customized.orEmpty()
     Column(modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-        PromptGroup(R.string.prompts_group_global, listOf(PromptFile.Global), edited, onOpen)
+        PromptGroup(
+            R.string.prompts_group_global,
+            listOf(
+                PromptFile.Global,
+                PromptFile.Always,
+                PromptFile.LearningSummary,
+                PromptFile.Refine,
+            ),
+            edited,
+            onOpen,
+        )
         PromptGroup(
             R.string.prompts_group_channels,
             PromptFile.all.filterIsInstance<PromptFile.ForChannel>(),

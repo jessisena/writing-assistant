@@ -63,9 +63,14 @@ class ContractsTest {
     }
 
     @Test
-    fun promptFilesListGlobalThenChannelsThenRefinements() {
+    fun promptFilesListTopLevelFilesThenChannelsThenRefinements() {
         val expected =
-            listOf(PromptFile.Global) +
+            listOf(
+                PromptFile.Global,
+                PromptFile.Always,
+                PromptFile.LearningSummary,
+                PromptFile.Refine,
+            ) +
                 Channel.entries.map { PromptFile.ForChannel(it) } +
                 Refinement.entries.map { PromptFile.ForRefinement(it) }
 

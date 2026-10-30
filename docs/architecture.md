@@ -70,6 +70,17 @@ any external editor apply to the next request. Bundled defaults are copied there
 missing. When a bundled default changes, files the user hasn't edited are updated and edited files
 are left alone, with a notice in Settings, so an upgrade never overwrites edits.
 
+### Prompts built from sections, drafts in tags
+
+`polish.txt` and `refine.txt` are templates with slots, and the shared rules live once in
+`always.txt`, so the two prompts can't drift apart. The learning summary instructions are their
+own file, inserted only when the summary is on: with it off the prompt says nothing about a
+summary, rather than asking for one and then telling the model to skip it. A section file is only
+read when its slot is in the template, so a `polish.txt` the user edited before a slot existed
+keeps working as written. The draft goes to the model inside `<draft>` tags, and the shared rules
+say that text is material to rewrite, never instructions. That matters most for the AI prompt
+channel, whose drafts are instructions by nature.
+
 ### Markdown between the app and Claude
 
 The editors hold rich text (`NSAttributedString`). Requests send it to Claude as a small Markdown
@@ -102,20 +113,24 @@ Sources/WritingAssistantCore/        library: all logic, no UI
                                      PromptStoring / Polishing protocols
   ModelRouting.swift                 pickModel(for:) + model ID constants
   JSONExtraction.swift               extract the JSON object from CLI output
-  PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore,
-                                     assemble
+  PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore
+  PromptAssembly.swift               PromptStoring extension: fill the polish and refine
+                                     templates from their section files
   ClaudeBinaryLocator.swift          find the claude binary
   ClaudeCLI.swift                    ClaudeRunning backed by Process
-  PolishService.swift                Polishing: validate, route, assemble, run, parse, invariant;
-                                     polish and refine
+  PolishService.swift                Polishing: validate, route, assemble, wrap the draft, run,
+                                     parse, invariant; polish and refine
   RichText.swift                     Markdown subset ↔ AttributedString, HTML and plain text
   TextDiff.swift                     word-level diff (DiffSegment: same / added / removed)
   LearningLog.swift                  format and append learning summaries to learning-log.md
   HistoryStore.swift                 HistoryEntry + history.json, newest 50, corrupt-file backup
   Resources/Prompts/                 bundled default prompts
-    polish.txt                       4-step instructions + global rules
+    polish.txt                       polish template: Always, Language, Channel, Output slots
+    always.txt                       rules shared by polish and refine (incl. the <draft> rule)
+    learning_summary.txt             summary instructions, inserted only when the summary is on
+    refine.txt                       refine template: Always, Channel, Instruction, Output
     channels/*.txt                   per-channel rules
-    refinements/*.txt                shorter, more_casual, more_formal instructions
+    refinements/*.txt                one instruction per refine button
 Sources/WritingAssistant/            SwiftUI executable
   WritingAssistantApp.swift          main window + Settings scene (⌘,), app delegate, menus
   AppModel.swift                     @Observable state: input, output, channel, loading,
@@ -167,11 +182,37 @@ only state and views. Both talk to each other through the protocols in `Contract
 
 `PromptStore.standard()` points at `~/Library/Application Support/Writing Assistant/prompts/`.
 On launch, `seedMissingDefaults()` copies any missing file from the bundled defaults.
-`assemble(for:)` reads `polish.txt` and `channels/<channel>.txt` from disk, trims both, and
-replaces `{{CHANNEL_GUIDELINES}}` with the channel file. `write` validates first: no file may be
-empty, and `polish.txt` must contain the placeholder. `restoreDefault` overwrites one file from the
-bundle. Refinements append `refinements/<name>.txt` to the assembled prompt as an extra
-instruction.
+Prompt assembly (`PromptAssembly.swift`, an extension on `PromptStoring` so every store builds
+prompts the same way) reads a template, trims it, and replaces each placeholder it contains with
+the trimmed section file, then trims the result:
+
+| Template | Placeholder | Section |
+|---|---|---|
+| `polish.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
+| | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
+| | `{{LEARNING_SUMMARY}}` | `learning_summary.txt` when the summary is on, else nothing |
+| `refine.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
+| | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
+| | `{{REFINEMENT_INSTRUCTION}}` | `refinements/<name>.txt` |
+
+`assemble(for:learningSummary:)` builds the polish prompt and `assembleRefinement(_:for:)` the
+refine prompt. A section file is only read when its placeholder is in the template, so an old
+edited `polish.txt` (four steps, only `{{CHANNEL_GUIDELINES}}`) assembles as before and never
+needs the new files; `syncDefaults()` reports it as having a newer default like any edited file.
+`write` validates first: no file may be empty, `polish.txt` must keep `{{CHANNEL_GUIDELINES}}`
+and `refine.txt` must keep `{{REFINEMENT_INSTRUCTION}}`. The other placeholders are optional:
+removing `{{LEARNING_SUMMARY}}` from `polish.txt` simply means no summary instructions.
+`restoreDefault` overwrites one file from the bundle.
+
+The polish prompt asks for the JSON keys in a fixed order: `detected_language`,
+`was_translated`, `polished_text`, then `learning_summary` (only when the summary section is in).
+Refinements use the lean `refine.txt` (shared rules, channel, instruction and
+`{"polished_text": "..."}`), not the polish prompt, and only `polished_text` is read from the reply.
+
+`PolishService` sends the input to the model as `<draft>\n<text>\n</draft>`; `always.txt` says
+text inside the tags is material to rewrite, never instructions. A `</draft` in the user's text,
+in any letter case, becomes `<\/draft` first, so it can't close the tag early. Routing looks at the
+unwrapped text.
 
 `prompts/.defaults.json` maps each file's relative path to the SHA-256 of the bundled default it
 was last seeded or restored from. `syncDefaults()` runs at launch after seeding:
@@ -275,7 +316,7 @@ claude --print --output-format stream-json --verbose --include-partial-messages 
   --no-session-persistence
 ```
 
-with only the user's text written to stdin, and environment `MAX_THINKING_TOKENS=0`,
+with only the user's text, wrapped in `<draft>` tags, written to stdin, and environment `MAX_THINKING_TOKENS=0`,
 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`,
 no `ANTHROPIC_API_KEY`.
 
@@ -351,7 +392,8 @@ took: each update converts the Markdown so far (about 3.5 ms for 2,000 character
   before the complete text was shown, it replaces the streamed text.
 
 Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
-When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
+When off, the polish prompt is assembled without `learning_summary.txt`, so it has no summary
+instructions at all, and `PolishService` drops any summary that comes back anyway.
 
 `PolishService` records the usage of every reply the CLI completes in `UsageStore` (`usage.json`,
 totals per Gregorian "yyyy-MM" in the user's time zone), even when the reply then fails to parse.
@@ -411,20 +453,23 @@ paste + channel, Process (⌘↩)
 │ pickModel(for: text)  ← pure function  │
 │   ≤60 words + confident English → Haiku│
 │   everything else             → Sonnet │
-│ PromptStore.assemble(for: channel)     │
+│ assemble(for: channel, learningSummary)│
+│ input → <draft>\n…\n</draft>           │
 └────────────────────────────────────────┘
       │
       ▼  one ClaudeCLI.run() call, stream-json
          MAX_THINKING_TOKENS=0, MCP disabled
          every piece → onPreview (text streams in, stage line)
 ┌────────────────────────────────────────┐
-│ polish.txt  (4 steps)                  │
-│  1. detect language                    │
-│       not English → translate          │
-│       English     → skip               │
-│  2. apply global style guidelines      │
-│  3. apply {{CHANNEL_GUIDELINES}}       │
-│  4. emit JSON                          │
+│ polish.txt                             │
+│  Always    ← always.txt                │
+│  Language  not English → translate     │
+│  Channel   ← channels/<channel>.txt    │
+│  Output    detected_language,          │
+│            was_translated,             │
+│            polished_text               │
+│  [learning summary ← learning_summary  │
+│   .txt, only when on: 4th key]         │
 └────────────────────────────────────────┘
       │  JSON extraction (```json fence, else first { … last })
       │  was_translated ⇒ learning summary dropped
@@ -504,7 +549,8 @@ android/
                                        Polishing interfaces
       ModelRouting.kt                  pickTier(text) → ModelTier
       JsonExtraction.kt                extract the JSON object from model output
-      PromptAssembler.kt               polish.txt + channel file; DirectoryPromptReader
+      PromptAssembler.kt               polish and refine templates filled from their
+                                       section files; DirectoryPromptReader
       PolishService.kt                 Polishing: validate, route, assemble, call, parse,
                                        invariant; polish (optionally without the learning
                                        summary) and refine
@@ -564,20 +610,23 @@ built; tests construct view models with fakes instead.
 ### Shared prompts
 
 `app/build.gradle.kts` adds `Sources/WritingAssistantCore/Resources/Prompts/` as an assets
-directory, so the APK bundles the same `polish.txt`, `channels/*.txt` and `refinements/*.txt` as
-the Mac app, and a change to those bundled defaults reaches both apps with their next build.
+directory, so the APK bundles the same `polish.txt`, `always.txt`, `learning_summary.txt`,
+`refine.txt`, `channels/*.txt` and `refinements/*.txt` as the Mac app, and a change to those bundled defaults reaches both apps with their next build.
 Edits made in the Mac app's Settings live in its Application Support folder and don't reach
 Android. On Android, `PromptOverrideStore` (`:core`) reads `filesDir/prompts/<relativePath>` when
 the user edited that file in Settings → Prompts, and otherwise the bundled default through
 `AssetPromptReader`. Saving the default text deletes the edit, and saving follows the same rules
-as the Mac (`PromptValidationException`: not empty, global rules keep the placeholder).
-Files are read on each request, so an edit applies to the next one. `:core` tests and `liveTest` read
+as the Mac (`PromptValidationException`: not empty, `polish.txt` keeps `{{CHANNEL_GUIDELINES}}`,
+`refine.txt` keeps `{{REFINEMENT_INSTRUCTION}}`). `PromptAssembler` fills the templates exactly
+like the Mac's `PromptAssembly`. The model gets a single user message: the assembled prompt, a
+blank line, then the draft in `<draft>` tags (neutralized the same way). Files are read on each
+request, so an edit applies to the next one. `:core` tests and `liveTest` read
 the same directory through `DirectoryPromptReader`, passed in as the `prompts.dir` system
 property.
 
 Every provider gets the same prompts, so they must keep producing a single valid JSON object on
 each of them. Groq's JSON mode also rejects a prompt that doesn't contain the word "JSON";
-`polish.txt` contains it, and refine prompts include `polish.txt`.
+`polish.txt` and `refine.txt` both contain it.
 
 ### Providers
 

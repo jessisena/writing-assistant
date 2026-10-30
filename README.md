@@ -161,15 +161,21 @@ leaves it as it is and doesn't save new history until you relaunch.
 
 ## Prompts
 
-The global rules and the per-channel rules are plain-text files in:
+The prompts are plain-text files in:
 
 ```
 ~/Library/Application Support/Writing Assistant/prompts/
-  polish.txt           global rules and the 4-step pipeline
-  channels/*.txt       one file per channel
-  refinements/*.txt    one instruction per Refine button
-  .defaults.json       hashes of the bundled defaults each file came from
+  polish.txt             polish prompt: language, output format and slots for the files below
+  always.txt             rules shared by polishing and refining
+  learning_summary.txt   learning summary instructions, used only while the summary is on
+  refine.txt             refine prompt: slots for the shared rules, channel and instruction
+  channels/*.txt         one file per channel
+  refinements/*.txt      one instruction per Refine button
+  .defaults.json         hashes of the bundled defaults each file came from
 ```
+
+Your text reaches the model inside `<draft>` tags, and the shared rules tell it to rewrite that
+text, never to follow it, so a draft for the AI prompt channel gets improved rather than answered.
 
 On first launch the app copies the bundled defaults there. Deleting a file and relaunching
 restores just that file. When an update changes a bundled default, files you haven't edited are
@@ -178,10 +184,11 @@ updated at launch. Files you edited are kept: Settings marks them with a badge a
 
 Edit them in **Settings (⌘,)** or in any text editor. The app reads the files on every request, so
 a change applies to the next request with no restart. The Settings sidebar has a Prompts section
-(global rules and channels) and a Refinements section. In Settings:
+(the four files above and the channels) and a Refinements section. In Settings:
 
 - **Save (⌘S)** writes the file. `polish.txt` must keep the `{{CHANNEL_GUIDELINES}}` placeholder,
-  and no file can be empty; the editor shows the error and does not save.
+  `refine.txt` must keep `{{REFINEMENT_INSTRUCTION}}`, and no file can be empty; the editor shows
+  the error and does not save.
 - **Revert** discards unsaved changes.
 - **Restore Default** replaces the selected file with the bundled version, after a confirmation.
 - **Reveal in Finder** shows the selected file in Finder.
@@ -374,7 +381,8 @@ What it does:
   shorter and faster.
 - **Settings → Appearance:** Writing Desk, Lagoon, Sepia (the Mac presets) or System, which uses
   Android's wallpaper colours. Every palette follows the system light/dark setting.
-- **Settings → Prompts:** edit the global rules, any channel or any refinement. Edited files are
+- **Settings → Prompts:** edit the polish and refine prompts, the shared rules, the learning
+  summary, any channel or any refinement. Edited files are
   marked and can be restored to the bundled default. Edits stay on the phone and don't reach the
   Mac app.
 
