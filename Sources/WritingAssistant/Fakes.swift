@@ -2,37 +2,39 @@
     import Foundation
     import WritingAssistantCore
 
-    /// In-memory `Polishing` for previews and tests. Sends `preview`, if set, then returns
+    /// In-memory `Polishing` for previews and tests. Sends `previews` in order, then returns
     /// `outcome` after `delay`; `refine` returns its polished text.
     final class FakePolisher: Polishing, @unchecked Sendable {
+        typealias RefineCall = (text: String, channel: Channel, refinement: RefinementInstruction)
+
         private let lock = NSLock()
         private var _outcome: Result<PolishResult, PolishError>
         private var _readiness: PolishError?
-        private var _preview: PolishPreview?
+        private var _previews: [PolishPreview]
         private var _calls: [(text: String, channel: Channel)] = []
-        private var _summaryRequests: [Bool] = []
-        private var _refineCalls: [(text: String, channel: Channel, refinement: Refinement)] = []
+        private var _requestedOptions: [PolishOptions] = []
+        private var _refineCalls: [RefineCall] = []
         let delay: Duration
 
         init(
             outcome: Result<PolishResult, PolishError> = .success(.sample),
             readiness: PolishError? = nil,
-            preview: PolishPreview? = nil,
+            previews: [PolishPreview] = [],
             delay: Duration = .zero
         ) {
             _outcome = outcome
             _readiness = readiness
-            _preview = preview
+            _previews = previews
             self.delay = delay
         }
 
-        var preview: PolishPreview? {
-            get { lock.withLock { _preview } }
-            set { lock.withLock { _preview = newValue } }
+        var previews: [PolishPreview] {
+            get { lock.withLock { _previews } }
+            set { lock.withLock { _previews = newValue } }
         }
 
-        /// The `includeLearningSummary` value of each `polish` call, in call order.
-        var summaryRequests: [Bool] { lock.withLock { _summaryRequests } }
+        /// The `options` of each `polish` call, in call order.
+        var requestedOptions: [PolishOptions] { lock.withLock { _requestedOptions } }
 
         var outcome: Result<PolishResult, PolishError> {
             get { lock.withLock { _outcome } }
@@ -46,20 +48,20 @@
 
         var calls: [(text: String, channel: Channel)] { lock.withLock { _calls } }
 
-        var refineCalls: [(text: String, channel: Channel, refinement: Refinement)] {
+        var refineCalls: [RefineCall] {
             lock.withLock { _refineCalls }
         }
 
         func polish(
-            text: String, channel: Channel, includeLearningSummary: Bool,
+            text: String, channel: Channel, options: PolishOptions,
             onPreview: @escaping @Sendable (PolishPreview) -> Void
         ) async throws(PolishError) -> PolishResult {
-            let preview = lock.withLock {
+            let previews = lock.withLock {
                 _calls.append((text, channel))
-                _summaryRequests.append(includeLearningSummary)
-                return _preview
+                _requestedOptions.append(options)
+                return _previews
             }
-            if let preview {
+            for preview in previews {
                 onPreview(preview)
             }
             if delay > .zero {
@@ -69,7 +71,7 @@
         }
 
         func refine(
-            text: String, channel: Channel, refinement: Refinement
+            text: String, channel: Channel, refinement: RefinementInstruction
         ) async throws(PolishError) -> String {
             lock.withLock { _refineCalls.append((text, channel, refinement)) }
             if delay > .zero {
@@ -107,21 +109,22 @@
             gate.resume(returning: outcome)
         }
 
-        /// Sends `preview` to the `onPreview` of the call at `index`, which keeps waiting.
+        /// Sends `preview` to the `onPreview` of the call at `index`, which keeps waiting. Call
+        /// it from one task at a time, as a runner streams.
         func sendPreview(_ index: Int, _ preview: PolishPreview) {
             let sink = lock.withLock { previewSinks[index] }
             sink(preview)
         }
 
         func polish(
-            text: String, channel: Channel, includeLearningSummary: Bool,
+            text: String, channel: Channel, options: PolishOptions,
             onPreview: @escaping @Sendable (PolishPreview) -> Void
         ) async throws(PolishError) -> PolishResult {
             try await wait(onPreview: onPreview)
         }
 
         func refine(
-            text: String, channel: Channel, refinement: Refinement
+            text: String, channel: Channel, refinement: RefinementInstruction
         ) async throws(PolishError) -> String {
             try await wait(onPreview: { _ in }).polishedText
         }
@@ -158,12 +161,23 @@
         let directoryURL = URL(fileURLWithPath: "/tmp/fake-prompts")
 
         init(files: [PromptFile: String]? = nil, newerDefaults: Set<PromptFile> = []) {
-            var seeded: [PromptFile: String] = [.global: "Rules\n\(PromptFile.channelPlaceholder)"]
+            var seeded: [PromptFile: String] = [
+                .global: "Rules\n\(PromptFile.channelPlaceholder)",
+                .always: "Always rules",
+                .learningSummary: "Learning summary rules",
+                .refine: "Refine\n\(PromptFile.instructionPlaceholder)",
+            ]
             for channel in Channel.allCases {
                 seeded[.channel(channel)] = "\(channel.rawValue) guidelines"
             }
             for refinement in Refinement.allCases {
                 seeded[.refinement(refinement)] = "\(refinement.rawValue) instruction"
+            }
+            for mode in Mode.allCases {
+                seeded[.mode(mode)] = "\(mode.rawValue) tone"
+            }
+            for language in OutputLanguage.allCases {
+                seeded[.languagePolicy(language)] = "\(language.rawValue) language"
             }
             defaults = seeded
             self.files = files ?? seeded
@@ -216,12 +230,6 @@
                 if let _acknowledgeFailure { throw _acknowledgeFailure }
                 _newerDefaults.remove(file)
             }
-        }
-
-        func assemble(for channel: Channel) throws -> String {
-            let global = try read(.global).trimmingCharacters(in: .whitespacesAndNewlines)
-            let rules = try read(.channel(channel)).trimmingCharacters(in: .whitespacesAndNewlines)
-            return global.replacingOccurrences(of: PromptFile.channelPlaceholder, with: rules)
         }
     }
 

@@ -53,7 +53,9 @@ class PromptsScreenTest {
         compose.setContent {
             WritingAssistantTheme { PromptListScreen(setOf(slack), { opened += it }) }
         }
-        compose.onNodeWithText("Global rules").assertExists()
+        listOf("Polish prompt", "Always rules", "Learning summary", "Refine prompt").forEach {
+            compose.onNodeWithText(it).assertExists()
+        }
         compose.onAllNodesWithText("Edited").assertCountEquals(1)
         val shorter = PromptFile.ForRefinement(Refinement.SHORTER)
         compose.onNodeWithText(shorter.displayName).performScrollTo().performClick()
@@ -75,8 +77,12 @@ class PromptsScreenTest {
         compose.onNodeWithText("Save").performScrollTo().performClick()
         compose.waitForIdle()
         compose
-            .onNodeWithText(PromptValidationException.MissingPlaceholder.message)
-            .assertExists()
+            .onNodeWithText(
+                PromptValidationException
+                    .MissingPlaceholder(
+                        PromptFile.CHANNEL_PLACEHOLDER,
+                    ).message,
+            ).assertExists()
         assertFalse(store.isCustomized(PromptFile.Global))
     }
 

@@ -7,13 +7,6 @@ public struct PolishService: Polishing {
     public static let defaultTimeout: Duration = .seconds(120)
 
     private static let logger = Logger(subsystem: "local.writing-assistant", category: "pipeline")
-    private static let refinementNote =
-        "The input is already-polished English: apply the additional instruction on top of the "
-        + "rules above. Where it conflicts with them (for example a minimal-edit, length or "
-        + "formatting rule), the additional instruction wins. Set was_translated to false and set "
-        + "learning_summary to null."
-    public static let summaryOffNote =
-        "The learning summary is turned off: skip Step 4 and set learning_summary to null."
 
     private let runner: any ClaudeRunning
     private let prompts: any PromptStoring
@@ -41,27 +34,30 @@ public struct PolishService: Polishing {
 
     /// Polishes (or translates, then polishes) `text` for `channel`.
     ///
-    /// When the model reports `was_translated: true`, or `includeLearningSummary` is false, the
-    /// result never carries a learning summary, whatever the model returned.
+    /// The result only carries a learning summary when
+    /// `options.allowsLearningSummary(detectedLanguage:wasTranslated:)` holds for the reply:
+    /// never for a translation, for non-English input or with the summary off, whatever the
+    /// model returned.
     ///
     /// - Parameters:
     ///   - text: The user's input. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - includeLearningSummary: False tells the model to skip the summary.
-    ///   - onPreview: Gets the polished text once it is complete, before the summary, at most
-    ///     once and on whichever thread the runner streams on. The returned result is parsed
-    ///     from the full reply on its own, so it can still fail after a preview was sent.
+    ///   - options: Select the mode tone and language policy inserted into the prompt; a false
+    ///     `includesLearningSummary` leaves the learning summary section out.
+    ///   - onPreview: Gets what the reply has said so far after every streamed piece that
+    ///     changes it (see `PolishedTextScanner`), in order, on whichever thread the runner
+    ///     streams on. The returned result is parsed from the full reply on its own, so it can
+    ///     still fail after a complete text was previewed.
     /// - Returns: The parsed result, including the model that produced it.
     /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
     ///   error thrown by the runner, unchanged.
     public func polish(
-        text: String, channel: Channel, includeLearningSummary: Bool,
+        text: String, channel: Channel, options: PolishOptions,
         onPreview: @escaping @Sendable (PolishPreview) -> Void
     ) async throws(PolishError) -> PolishResult {
         let input = try Self.validatedInput(text)
-        var systemPrompt = try assemblePrompt(for: channel)
-        if !includeLearningSummary {
-            systemPrompt += "\n\n\(Self.summaryOffNote)"
+        let systemPrompt = try loadPrompt(named: channel.rawValue) {
+            try prompts.assemble(for: channel, options: options)
         }
         let scanner = OSAllocatedUnfairLock(initialState: PolishedTextScanner())
         let (raw, model) = try await send(systemPrompt, input: input) { chunk in
@@ -69,47 +65,43 @@ public struct PolishService: Polishing {
                 onPreview(preview)
             }
         }
-        var result = try Self.parse(raw, model: model)
-        if !includeLearningSummary {
-            result.learningSummary = nil
-        }
-        return result
+        return try Self.parse(raw, model: model, options: options)
     }
 
     /// Rewrites already-polished `text` for `channel`, following one refinement instruction.
     ///
-    /// The prompt is the channel's assembled system prompt plus an "Additional instruction"
-    /// section holding the refinement file. Only `polished_text` is read from the reply: the
-    /// model's language and learning summary describe its own output, so they are ignored, even
-    /// when malformed.
+    /// The prompt is `refine.txt` with the shared rules, the channel guidelines and the
+    /// instruction: a preset's refinement file or the user's own text. Only `polished_text` is
+    /// read from the reply; any other key the model adds is ignored, even when malformed.
     ///
     /// - Parameters:
     ///   - text: The current polished text. Leading and trailing whitespace is ignored.
     ///   - channel: Selects the channel guidelines inserted into the prompt.
-    ///   - refinement: Selects the instruction file appended to the prompt.
+    ///   - refinement: The instruction inserted into the prompt. A custom one is checked with
+    ///     `RefinementInstruction.validated()` before anything else.
     /// - Returns: The refined text.
-    /// - Throws: `.emptyInput`, `.inputTooLong`, `.promptUnavailable`, `.badFormat`, or any
-    ///   error thrown by the runner, unchanged.
+    /// - Throws: `.emptyInstruction`, `.instructionTooLong`, `.emptyInput`, `.inputTooLong`,
+    ///   `.promptUnavailable`, `.badFormat`, or any error thrown by the runner, unchanged.
     public func refine(
-        text: String, channel: Channel, refinement: Refinement
+        text: String, channel: Channel, refinement: RefinementInstruction
     ) async throws(PolishError) -> String {
+        let instruction = try refinement.validated()
         let input = try Self.validatedInput(text)
-        let systemPrompt = try assemblePrompt(for: channel)
-        let instruction = try loadPrompt(named: refinement.rawValue) {
-            try prompts.read(.refinement(refinement))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        let systemPrompt = try loadPrompt(named: instruction.logName) {
+            try prompts.assembleRefinement(instruction, for: channel)
         }
-        let refinementPrompt = """
-            \(systemPrompt)
-
-            ## Additional instruction
-
-            \(instruction)
-
-            \(Self.refinementNote)
-            """
-        let (raw, _) = try await send(refinementPrompt, input: input)
+        let (raw, _) = try await send(systemPrompt, input: input)
         return try Self.polishedText(in: Self.decodeObject(raw))
+    }
+
+    /// Wraps `text` in `<draft>` tags so the model treats it as material, not instructions.
+    ///
+    /// A closing `</draft` inside the text gets a backslash (`<\/draft`), in any letter case, so
+    /// the author's text can't end the draft early.
+    static func wrapDraft(_ text: String) -> String {
+        let neutralized = text.replacingOccurrences(
+            of: "</(draft)", with: #"<\\/$1"#, options: [.regularExpression, .caseInsensitive])
+        return "<draft>\n\(neutralized)\n</draft>"
     }
 
     public func checkReady() async throws(PolishError) {
@@ -127,16 +119,17 @@ public struct PolishService: Polishing {
         return trimmed
     }
 
-    /// Runs the prompt on the routed model, returning the raw reply and the model used. The
-    /// reply's tokens are recorded; a recording failure is logged and doesn't fail the request.
+    /// Runs `input`, wrapped in `<draft>` tags, under `systemPrompt` on the model routed for the
+    /// unwrapped input, returning the raw reply and the model used. The reply's tokens are
+    /// recorded; a recording failure is logged and doesn't fail the request.
     private func send(
         _ systemPrompt: String, input: String,
         onText: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws(PolishError) -> (raw: String, model: String) {
         let model = ModelRouting.pickModel(for: input)
         let reply = try await runner.run(
-            prompt: "\(systemPrompt)\n\n---\n\n\(input)", model: model, timeout: timeout,
-            onText: onText)
+            systemPrompt: systemPrompt, input: Self.wrapDraft(input), model: model,
+            timeout: timeout, onText: onText)
         record(reply.usage, costUSD: reply.costUSD)
         return (reply.text, model)
     }
@@ -149,10 +142,6 @@ public struct PolishService: Polishing {
             Self.logger.error(
                 "Couldn't record usage: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    private func assemblePrompt(for channel: Channel) throws(PolishError) -> String {
-        try loadPrompt(named: channel.rawValue) { try prompts.assemble(for: channel) }
     }
 
     private func loadPrompt(
@@ -168,15 +157,22 @@ public struct PolishService: Polishing {
         }
     }
 
-    private static func parse(_ raw: String, model: String) throws(PolishError) -> PolishResult {
+    /// Reads the reply. `learning_summary` is only decoded when `options` allow a summary for the
+    /// reply's language fields; otherwise it is ignored, even when malformed.
+    private static func parse(
+        _ raw: String, model: String, options: PolishOptions
+    ) throws(PolishError) -> PolishResult {
         let object = try decodeObject(raw)
         let polishedText = try polishedText(in: object)
         let wasTranslated = isTruthy(object["was_translated"])
-        let summary = wasTranslated ? nil : try decodeSummary(object["learning_summary"])
+        let language = object["detected_language"] as? String ?? "Unknown"
+        let allowsSummary = options.allowsLearningSummary(
+            detectedLanguage: language, wasTranslated: wasTranslated)
+        let summary = allowsSummary ? try decodeSummary(object["learning_summary"]) : nil
         return PolishResult(
             polishedText: polishedText,
             learningSummary: summary,
-            detectedLanguage: object["detected_language"] as? String ?? "Unknown",
+            detectedLanguage: language,
             wasTranslated: wasTranslated,
             modelUsed: model
         )

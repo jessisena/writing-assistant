@@ -33,8 +33,8 @@ struct WritingAssistantApp: App {
         Window("Writing Assistant", id: ServiceProvider.mainWindowID) {
             MainWindowView(model: model)
                 .frame(minWidth: 600, minHeight: 500)
-                .environment(\.theme, themeSettings.palette)
-                .tint(themeSettings.palette.ink)
+                .environment(\.theme, themeSettings.palette.forMode(model.mode))
+                .tint(themeSettings.palette.forMode(model.mode).ink)
                 .task { await model.checkReadiness() }
                 .handsMainWindowOpener(to: appDelegate)
         }
@@ -43,6 +43,7 @@ struct WritingAssistantApp: App {
         .commands {
             FormatCommands()
             LearningLogCommands(model: model)
+            ModeCommands(model: model)
         }
 
         Settings {
@@ -149,10 +150,12 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: model.result) { oldValue, newValue in
-                // Not when only the summary arrives after a preview: the user may be editing.
-                guard let newValue, oldValue?.polishedText != newValue.polishedText else {
-                    return
-                }
+                // Once when a polish first shows text, not again while it streams in or when
+                // the summary arrives after it: the user may be reading or editing.
+                guard let newValue,
+                    oldValue == nil
+                        || (!model.isLoading && oldValue?.polishedText != newValue.polishedText)
+                else { return }
                 if reduceMotion {
                     proxy.scrollTo(Self.resultsID, anchor: .bottom)
                 } else {
@@ -168,6 +171,9 @@ struct MainWindowView: View {
             model.refreshMonthlyUsage()
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                ModePicker(model: model)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 MonthlyUsageLabel(model: model)
                 HistoryButton(model: model)

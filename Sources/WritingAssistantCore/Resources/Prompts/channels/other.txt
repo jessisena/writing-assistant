@@ -1,3 +1,3 @@
-Apply the general style guidelines without any channel-specific formatting adjustments.
+Apply the Always rules without any channel-specific formatting adjustments.
 Preserve the original structure and length unless improvements are clearly needed.
 Use your best judgment to match the tone and format to the content's apparent purpose.

@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.writingassistant.core.Channel
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
+import local.writingassistant.core.PolishOptions
 import local.writingassistant.core.PromptAssembler
 import local.writingassistant.core.PromptFile
 import local.writingassistant.core.Refinement
@@ -21,18 +24,17 @@ class AssetPromptReaderTest {
 
     @Test
     fun everyBundledPromptIsPackagedAsAnAsset() {
-        val files =
-            listOf(PromptFile.Global) +
-                Channel.entries.map { PromptFile.ForChannel(it) } +
-                Refinement.entries.map { PromptFile.ForRefinement(it) }
-
-        files.forEach { assertTrue(it.relativePath, reader.read(it).isNotBlank()) }
+        PromptFile.all.forEach { assertTrue(it.relativePath, reader.read(it).isNotBlank()) }
     }
 
     @Test
-    fun assembledPromptHasNoPlaceholderLeft() {
-        val prompt = PromptAssembler(reader).assemble(Channel.FORMAL)
+    fun assembledPromptsHaveNoPlaceholderLeft() {
+        val assembler = PromptAssembler(reader)
 
-        assertFalse(prompt.contains(PromptFile.CHANNEL_PLACEHOLDER))
+        for (mode in Mode.entries) {
+            val options = PolishOptions(mode, OutputLanguage.SAME_AS_INPUT, true)
+            assertFalse(assembler.assemble(Channel.FORMAL, options).contains("{{"))
+        }
+        assertFalse(assembler.assembleRefinement(Refinement.SHORTER, Channel.FORMAL).contains("{{"))
     }
 }

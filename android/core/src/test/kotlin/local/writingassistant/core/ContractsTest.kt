@@ -63,13 +63,33 @@ class ContractsTest {
     }
 
     @Test
-    fun promptFilesListGlobalThenChannelsThenRefinements() {
+    fun promptFilesListTopLevelFilesThenChannelsThenRefinements() {
         val expected =
-            listOf(PromptFile.Global) +
+            listOf(
+                PromptFile.Global,
+                PromptFile.Always,
+                PromptFile.LearningSummary,
+                PromptFile.Refine,
+            ) +
                 Channel.entries.map { PromptFile.ForChannel(it) } +
-                Refinement.entries.map { PromptFile.ForRefinement(it) }
+                Refinement.entries.map { PromptFile.ForRefinement(it) } +
+                listOf(
+                    PromptFile.ForMode(Mode.WORK),
+                    PromptFile.ForMode(Mode.PERSONAL),
+                    PromptFile.ForLanguage(OutputLanguage.ENGLISH),
+                    PromptFile.ForLanguage(OutputLanguage.SAME_AS_INPUT),
+                )
 
         assertEquals(expected, PromptFile.all)
+        assertEquals(
+            listOf(
+                "modes/work.txt",
+                "modes/personal.txt",
+                "languages/english.txt",
+                "languages/same_as_input.txt",
+            ),
+            PromptFile.all.takeLast(4).map { it.relativePath },
+        )
         PromptFile.all.forEach { assertEquals(it, PromptFile.fromRelativePath(it.relativePath)) }
         assertEquals(null, PromptFile.fromRelativePath("channels/nope.txt"))
     }
@@ -94,6 +114,10 @@ class ContractsTest {
             listOf("shorter", "more_casual", "more_formal", "more_diplomatic", "more_assertive"),
             Refinement.entries.map { it.id },
         )
+        assertEquals(listOf("work", "personal"), Mode.entries.map { it.id })
+        assertEquals(listOf("english", "sameAsInput"), OutputLanguage.entries.map { it.id })
+        assertEquals(Mode.PERSONAL, Mode.WORK.toggled)
+        assertEquals(Mode.WORK, Mode.PERSONAL.toggled)
     }
 
     @Test

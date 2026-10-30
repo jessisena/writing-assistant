@@ -18,12 +18,32 @@ import WritingAssistantCore
             ])
     }
 
-    @Test func promptFilesListGlobalThenChannelsThenRefinements() {
+    @Test func promptFilesListTopLevelFilesThenChannelsThenRefinements() {
         let expected: [PromptFile] =
-            [.global] + Channel.allCases.map { .channel($0) }
+            [.global, .always, .learningSummary, .refine] + Channel.allCases.map { .channel($0) }
             + Refinement.allCases.map { .refinement($0) }
+            + [.mode(.work), .mode(.personal), .languagePolicy(.english)]
+            + [.languagePolicy(.sameAsInput)]
         #expect(PromptFile.allCases == expected)
+        #expect(
+            [PromptFile.global, .always, .learningSummary, .refine].map(\.relativePath) == [
+                "polish.txt", "always.txt", "learning_summary.txt", "refine.txt",
+            ])
         #expect(PromptFile.channel(.slackInformal).relativePath == "channels/slack_informal.txt")
+        #expect(
+            [PromptFile.mode(.work), .mode(.personal)].map(\.relativePath) == [
+                "modes/work.txt", "modes/personal.txt",
+            ])
+        #expect(
+            OutputLanguage.allCases.map { PromptFile.languagePolicy($0).relativePath } == [
+                "languages/english.txt", "languages/same_as_input.txt",
+            ])
+    }
+
+    @Test func modesAndLanguagesHaveStableRawValues() {
+        #expect(Mode.allCases.map(\.rawValue) == ["work", "personal"])
+        #expect(Mode.work.toggled == .personal && Mode.personal.toggled == .work)
+        #expect(OutputLanguage.allCases.map(\.rawValue) == ["english", "sameAsInput"])
     }
 
     @Test func refinementsMatchPromptFileNames() {
@@ -71,19 +91,39 @@ import WritingAssistantCore
     }
 
     @Test func globalPromptWithoutPlaceholderIsRejected() {
-        #expect(throws: PromptValidationError.missingPlaceholder) {
+        let error = PromptValidationError.missingPlaceholder(PromptFile.channelPlaceholder)
+        #expect(throws: error) {
             try PromptFile.global.validate("Rules without the placeholder")
         }
+        #expect(error.errorDescription?.contains("channel guidelines") == true)
     }
 
-    @Test func channelPromptDoesNotNeedPlaceholder() throws {
+    @Test func refinePromptWithoutInstructionPlaceholderIsRejected() {
+        let error = PromptValidationError.missingPlaceholder(PromptFile.instructionPlaceholder)
+        #expect(throws: error) {
+            try PromptFile.refine.validate("Refine \(PromptFile.channelPlaceholder)")
+        }
+        #expect(error.errorDescription?.contains("refinement instruction") == true)
+    }
+
+    @Test func onlyTheTemplatesNeedTheirPlaceholder() throws {
         try PromptFile.channel(.formal).validate("Use headers.")
+        try PromptFile.always.validate("Be clear.")
+        try PromptFile.learningSummary.validate("Explain the changes.")
         try PromptFile.global.validate("Rules\n\(PromptFile.channelPlaceholder)")
+        try PromptFile.refine.validate("Refine\n\(PromptFile.instructionPlaceholder)")
     }
 
     @Test func timeoutMessageMatchesThePythonServer() {
         #expect(
             PolishError.timeout(seconds: 120).errorDescription
                 == "Claude took longer than 120 seconds. Please try again.")
+    }
+
+    @Test func outdatedCLIMessageSaysHowToUpdate() throws {
+        let message = try #require(
+            PolishError.cliOutdated(detail: "error: unknown option '--tools'").errorDescription)
+        #expect(message.contains("too old"))
+        #expect(message.contains("`claude update`"))
     }
 }

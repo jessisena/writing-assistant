@@ -1,5 +1,3 @@
 Make the tone more casual and relaxed, as if talking to a friendly colleague.
 Prefer contractions, simple words, and shorter sentences. Drop stiff or formal phrasing.
 Stay respectful and clear. Keep the same length, structure, and meaning.
-Do not add facts that are not in the text. Never use em dashes.
-Keep any emoji and Markdown formatting (bold, italic, lists, links).

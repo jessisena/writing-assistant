@@ -5,12 +5,18 @@ let claudeLogger = Logger(subsystem: "local.writing-assistant", category: "claud
 
 /// Runs prompts through the local `claude` CLI, authenticated by the user's Claude subscription.
 ///
-/// Each call is a throwaway headless invocation: MCP servers and session persistence are off,
-/// `ANTHROPIC_API_KEY` is removed so the subscription is used, and extended thinking is
-/// disabled. The blocking process work runs on a GCD queue, not Swift's cooperative pool.
+/// Each call is a throwaway headless invocation: the app's system prompt replaces Claude Code's
+/// own, and tools, slash commands, MCP servers, settings files (with their hooks and plugins)
+/// and session persistence are off. `ANTHROPIC_API_KEY` is removed so the subscription is used,
+/// and extended thinking is disabled. The blocking process work runs on a GCD queue, not Swift's
+/// cooperative pool.
 /// A found binary is cached per instance (and copies of it) until it stops being executable.
 public struct ClaudeCLI: ClaudeRunning {
+    /// `--bare` would skip the same things but also the keychain, where the subscription login is.
     static let headlessFlags = [
+        "--tools", "",
+        "--setting-sources", "",
+        "--disable-slash-commands",
         "--strict-mcp-config",
         "--mcp-config",
         #"{"mcpServers":{}}"#,
@@ -20,6 +26,8 @@ public struct ClaudeCLI: ClaudeRunning {
     /// CLI output can echo the user's text, so failure details are capped before logging.
     static let maxFailureDetailLength = 500
     static let cancelledDetail = "Cancelled"
+    /// What an older claude prints for a flag it doesn't know, e.g. `unknown option '--tools'`.
+    static let unknownFlagMarkers = ["unknown option", "unknown argument"]
 
     private let locator: ClaudeBinaryLocator
     private let cache = BinaryLocationCache()
@@ -29,30 +37,34 @@ public struct ClaudeCLI: ClaudeRunning {
         self.locator = locator
     }
 
-    /// Sends `prompt` on stdin to `claude --print` and returns the reply of its `result` event.
+    /// Sends `input` on stdin to `claude --print` and returns the reply of its `result` event.
     ///
-    /// The CLI streams newline-delimited JSON events. Each text delta goes to `onText` as it
-    /// arrives; the final `result` event supplies the reply text (trimmed), the token usage and
-    /// the cost. A non-zero exit is retried once, but only when no text delta reached `onText`
-    /// yet: a retry after that would make the caller see the reply text twice. A timeout is never
-    /// retried. Cancelling the calling task terminates the process (SIGTERM, then SIGKILL after
-    /// a grace period).
+    /// `systemPrompt` goes to `--system-prompt-file`, in a file only the user can read that is
+    /// deleted before this returns, whatever the outcome. The CLI streams newline-delimited JSON
+    /// events. Each text delta goes to `onText` as it arrives; the final `result` event supplies
+    /// the reply text (trimmed), the token usage and the cost. A non-zero exit is retried once,
+    /// but only when no text delta reached `onText` yet: a retry after that would make the caller
+    /// see the reply text twice. A timeout or a rejected flag is never retried. Cancelling the
+    /// calling task terminates the process (SIGTERM, then SIGKILL after a grace period).
     ///
     /// - Parameters:
-    ///   - prompt: Full prompt text written to the CLI's stdin.
+    ///   - systemPrompt: Replaces Claude Code's own system prompt.
+    ///   - input: The user turn, written to the CLI's stdin.
     ///   - model: Value passed to `--model`.
     ///   - timeout: Limit for each attempt; the process is terminated when it is exceeded.
     ///   - onText: Gets each text delta in order, on a background queue, while the CLI runs.
-    /// - Throws: `PolishError.claudeNotFound`, `.timeout(seconds:)`, or `.cliFailed(stderr:)`
-    ///   (`"Cancelled"` when the task is cancelled or `terminateRunningProcesses()` is called;
-    ///   the result text when the CLI reports an error; a note when no `result` event came).
+    /// - Throws: `PolishError.claudeNotFound`, `.timeout(seconds:)`, `.cliOutdated(detail:)`
+    ///   when the CLI rejects a flag, or `.cliFailed(stderr:)` (`"Cancelled"` when the task is
+    ///   cancelled or `terminateRunningProcesses()` is called; the result text when the CLI
+    ///   reports an error; a note when no `result` event came or the prompt file couldn't be
+    ///   written).
     public func run(
-        prompt: String, model: String, timeout: Duration,
+        systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
         let invocation = Invocation(
-            locator: locator, cache: cache, prompt: prompt, model: model, timeout: timeout,
-            onText: onText)
+            locator: locator, cache: cache, systemPrompt: systemPrompt, input: input,
+            model: model, timeout: timeout, onText: onText)
         let control = SubprocessControl()
         let result = await withTaskCancellationHandler {
             await Self.offCooperativePool { Self.runBlocking(invocation, control: control) }
@@ -82,7 +94,8 @@ public struct ClaudeCLI: ClaudeRunning {
     struct Invocation: Sendable {
         let locator: ClaudeBinaryLocator
         let cache: BinaryLocationCache
-        let prompt: String
+        let systemPrompt: String
+        let input: String
         let model: String
         let timeout: Duration
         let onText: @Sendable (String) -> Void
@@ -96,13 +109,29 @@ public struct ClaudeCLI: ClaudeRunning {
         guard let binary = invocation.cache.resolve(with: invocation.locator) else {
             return .failure(.claudeNotFound)
         }
+        let promptFile: SystemPromptFile
+        do {
+            promptFile = try SystemPromptFile(contents: invocation.systemPrompt)
+        } catch {
+            let detail = capped("Couldn't write the system prompt file: \(error)")
+            claudeLogger.error("\(detail, privacy: .public)")
+            return .failure(.cliFailed(stderr: detail))
+        }
+        defer { promptFile.remove() }
+        return runAttempts(invocation, binary: binary, promptFile: promptFile.url, control: control)
+    }
+
+    private static func runAttempts(
+        _ invocation: Invocation, binary: URL, promptFile: URL, control: SubprocessControl
+    ) -> Result<ClaudeReply, PolishError> {
         var lastFailure = ""
         for attempt in 1...maxAttempts {
             let stream = StreamJSONReader(onText: invocation.onText)
+            let request = makeRequest(
+                invocation, binary: binary, promptFile: promptFile, stream: stream)
             let outcome: SubprocessOutcome
             do {
-                outcome = try Subprocess.run(
-                    makeRequest(invocation, binary: binary, stream: stream), control: control)
+                outcome = try Subprocess.run(request, control: control)
             } catch {
                 return .failure(mapSubprocessError(error, timeout: invocation.timeout))
             }
@@ -110,6 +139,10 @@ public struct ClaudeCLI: ClaudeRunning {
                 return reply(from: stream, outcome: outcome)
             }
             lastFailure = failureDetail(outcome, stream: stream)
+            if rejectedAFlag(outcome, stream: stream) {
+                claudeLogger.error("claude CLI is too old: \(lastFailure, privacy: .public)")
+                return .failure(.cliOutdated(detail: lastFailure))
+            }
             claudeLogger.error(
                 """
                 claude CLI exited with status \(outcome.status) \
@@ -124,16 +157,17 @@ public struct ClaudeCLI: ClaudeRunning {
     }
 
     private static func makeRequest(
-        _ invocation: Invocation, binary: URL, stream: StreamJSONReader
+        _ invocation: Invocation, binary: URL, promptFile: URL, stream: StreamJSONReader
     ) -> SubprocessRequest {
         SubprocessRequest(
             executable: binary,
             arguments: [
                 "--print", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages", "--model", invocation.model,
+                "--system-prompt-file", promptFile.path,
             ] + headlessFlags,
             environment: makeEnvironment(binaryDirectory: binary.deletingLastPathComponent()),
-            input: Data(invocation.prompt.utf8),
+            input: Data(invocation.input.utf8),
             timeout: invocation.timeout,
             onStdoutLine: stream.consume
         )
@@ -173,6 +207,15 @@ public struct ClaudeCLI: ClaudeRunning {
         return capped(stream.plainOutput ?? trimmed(outcome.stdout))
     }
 
+    /// Looks in stderr and in the stdout lines that aren't JSON, where claude prints some errors.
+    /// Streamed reply text arrives as JSON, so a reply quoting the phrase doesn't match.
+    private static func rejectedAFlag(_ outcome: SubprocessOutcome, stream: StreamJSONReader)
+        -> Bool
+    {
+        let output = (trimmed(outcome.stderr) + "\n" + (stream.plainOutput ?? "")).lowercased()
+        return unknownFlagMarkers.contains { output.contains($0) }
+    }
+
     static func capped(_ detail: String) -> String {
         guard detail.count > maxFailureDetailLength else { return detail }
         return String(detail.prefix(maxFailureDetailLength)) + "… (truncated)"
@@ -190,6 +233,9 @@ public struct ClaudeCLI: ClaudeRunning {
         environment["ANTHROPIC_API_KEY"] = nil
         environment["MAX_THINKING_TOKENS"] = "0"
         environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        // Users often set these in ~/.claude/settings.json, which --setting-sources "" skips.
+        environment["DISABLE_TELEMETRY"] = "1"
+        environment["DISABLE_ERROR_REPORTING"] = "1"
         var searchPath = ([binaryDirectory] + ClaudeBinaryLocator.defaultSearchDirectories)
             .map(\.path)
         if let inherited = environment["PATH"], !inherited.isEmpty {
@@ -226,6 +272,39 @@ public struct ClaudeCLI: ClaudeRunning {
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: work())
             }
+        }
+    }
+}
+
+/// The system prompt of one call, in a new directory only the user can open. `remove()` deletes
+/// the directory with the file.
+struct SystemPromptFile {
+    let url: URL
+    private let directory: URL
+
+    init(contents: String) throws {
+        let fileManager = FileManager.default
+        directory = fileManager.temporaryDirectory
+            .appending(path: "WritingAssistant-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fileManager.createDirectory(
+            at: directory, withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700])
+        url = directory.appending(path: "system-prompt.txt", directoryHint: .notDirectory)
+        do {
+            try Data(contents.utf8).write(to: url, options: .withoutOverwriting)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            remove()
+            throw error
+        }
+    }
+
+    func remove() {
+        do {
+            try FileManager.default.removeItem(at: directory)
+        } catch {
+            claudeLogger.error(
+                "Couldn't delete \(directory.path, privacy: .public): \(error, privacy: .public)")
         }
     }
 }

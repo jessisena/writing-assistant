@@ -35,7 +35,27 @@ data class HistoryEntry(
     val detectedLanguage: String,
     val wasTranslated: Boolean,
     val modelUsed: String,
+    /**
+     * The mode the request ran in, stored by id. Entries saved before modes existed have none;
+     * they, and an id this version doesn't know, decode as [Mode.WORK], whose defaults match how
+     * the app behaved before modes.
+     */
+    @Serializable(with = ModeIdSerializer::class) val mode: Mode = Mode.WORK,
 )
+
+/** Stores a [Mode] as its id; an unknown id decodes as [Mode.WORK]. */
+internal object ModeIdSerializer : KSerializer<Mode> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("local.writingassistant.core.Mode", PrimitiveKind.STRING)
+
+    override fun serialize(
+        encoder: Encoder,
+        value: Mode,
+    ) = encoder.encodeString(value.id)
+
+    override fun deserialize(decoder: Decoder): Mode =
+        Mode.fromId(decoder.decodeString()) ?: Mode.WORK
+}
 
 /** Stores a [Channel] as its id; an unknown id decodes as [Channel.OTHER]. */
 internal object ChannelIdSerializer : KSerializer<Channel> {
@@ -159,6 +179,7 @@ class HistoryStore(
             Json {
                 ignoreUnknownKeys = true
                 prettyPrint = true
+                encodeDefaults = true
             }
 
         private fun reason(e: IOException): String =

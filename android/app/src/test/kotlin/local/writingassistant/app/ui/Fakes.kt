@@ -6,10 +6,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import local.writingassistant.app.data.ApiKeyStore
 import local.writingassistant.app.data.AppSettings
 import local.writingassistant.app.data.HistoryRepository
+import local.writingassistant.app.data.ModeProfile
+import local.writingassistant.app.data.ModeSettings
 import local.writingassistant.app.data.PalettePreset
 import local.writingassistant.core.Channel
 import local.writingassistant.core.HistoryEntry
 import local.writingassistant.core.HistoryStore
+import local.writingassistant.core.Mode
+import local.writingassistant.core.OutputLanguage
+import local.writingassistant.core.PolishOptions
 import local.writingassistant.core.PolishResult
 import local.writingassistant.core.Polishing
 import local.writingassistant.core.Provider
@@ -25,8 +30,8 @@ class FakePolishing : Polishing {
 
     val calls = mutableListOf<Call>()
 
-    /** The `learningSummary` argument of every [polish] call. */
-    val learningSummaryRequests = mutableListOf<Boolean>()
+    /** The `options` argument of every [polish] call. */
+    val requestedOptions = mutableListOf<PolishOptions>()
     var onPolish: suspend (String) -> PolishResult = { result(it) }
     var onRefine: suspend (
         String,
@@ -37,10 +42,10 @@ class FakePolishing : Polishing {
     override suspend fun polish(
         text: String,
         channel: Channel,
-        learningSummary: Boolean,
+        options: PolishOptions,
     ): PolishResult {
         calls += Call(text, channel)
-        learningSummaryRequests += learningSummary
+        requestedOptions += options
         return onPolish(text)
     }
 
@@ -67,34 +72,59 @@ class FakePolishing : Polishing {
     }
 }
 
+/** In-memory [AppSettings]; [modes] starts with every mode's defaults. */
 class FakeAppSettings(
-    var channel: Channel? = null,
     var provider: Provider = Provider.ANTHROPIC,
 ) : AppSettings {
-    override val disabledChannels = MutableStateFlow(emptySet<Channel>())
-    override val learningSummaryEnabled = MutableStateFlow(true)
+    override val modes = MutableStateFlow(ModeSettings())
     override val palette = MutableStateFlow(PalettePreset.WRITING_DESK)
 
-    override suspend fun setChannelEnabled(
-        channel: Channel,
-        enabled: Boolean,
+    /** The current mode's last channel, as stored. */
+    val channel: Channel get() = modes.value.profile.lastChannel
+
+    private fun update(
+        mode: Mode,
+        change: (ModeProfile) -> ModeProfile,
     ) {
-        disabledChannels.value =
-            if (enabled) disabledChannels.value - channel else disabledChannels.value + channel
+        val current = modes.value
+        modes.value =
+            when (mode) {
+                Mode.WORK -> current.copy(work = change(current.work))
+                Mode.PERSONAL -> current.copy(personal = change(current.personal))
+            }
     }
 
-    override suspend fun setLearningSummaryEnabled(enabled: Boolean) {
-        learningSummaryEnabled.value = enabled
+    override suspend fun setMode(mode: Mode) {
+        modes.value = modes.value.copy(current = mode)
     }
+
+    override suspend fun setLastChannel(
+        mode: Mode,
+        channel: Channel,
+    ) = update(mode) { it.copy(lastChannel = channel) }
+
+    override suspend fun setChannelVisible(
+        mode: Mode,
+        channel: Channel,
+        visible: Boolean,
+    ): Boolean {
+        val updated = modes.value[mode].withVisible(channel, visible) ?: return false
+        update(mode) { updated }
+        return true
+    }
+
+    override suspend fun setOutputLanguage(
+        mode: Mode,
+        language: OutputLanguage,
+    ) = update(mode) { it.copy(outputLanguage = language) }
+
+    override suspend fun setLearningSummary(
+        mode: Mode,
+        enabled: Boolean,
+    ) = update(mode) { it.copy(learningSummary = enabled) }
 
     override suspend fun setPalette(palette: PalettePreset) {
         this.palette.value = palette
-    }
-
-    override suspend fun lastChannel(): Channel? = channel
-
-    override suspend fun setLastChannel(channel: Channel) {
-        this.channel = channel
     }
 
     override suspend fun provider(): Provider = provider

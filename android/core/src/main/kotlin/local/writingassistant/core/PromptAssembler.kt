@@ -2,19 +2,72 @@ package local.writingassistant.core
 
 import java.io.File
 
-/** Builds the system prompt for a channel. Mirrors `PromptStore.assemble(for:)`. */
+/**
+ * Builds the system prompts from the prompt files. Mirrors `PromptAssembly.swift`.
+ *
+ * Each template's placeholders are replaced by the trimmed section files they name. A section
+ * file is only read when its placeholder is in the template, so a `polish.txt` edited before a
+ * section existed keeps working unchanged: it simply has nothing to fill.
+ */
 class PromptAssembler(
     private val reader: PromptReading,
 ) {
     /**
-     * Returns `polish.txt` with the placeholder replaced by the channel file (both trimmed).
+     * The polish prompt for [channel] under [options]: `polish.txt` with the shared rules, the
+     * language policy, the mode's tone, the channel guidelines and, only when
+     * [PolishOptions.includesLearningSummary] is true, the learning summary section. When it is
+     * false the placeholder is removed, so the prompt carries no summary instructions at all.
      *
-     * @throws java.io.IOException when either file can't be read.
+     * @throws java.io.IOException when a needed file can't be read.
      */
-    fun assemble(channel: Channel): String {
-        val global = reader.read(PromptFile.Global).trim()
-        val guidelines = reader.read(PromptFile.ForChannel(channel)).trim()
-        return global.replace(PromptFile.CHANNEL_PLACEHOLDER, guidelines)
+    fun assemble(
+        channel: Channel,
+        options: PolishOptions,
+    ): String =
+        fill(
+            PromptFile.Global,
+            listOf(
+                PromptFile.ALWAYS_PLACEHOLDER to PromptFile.Always,
+                PromptFile.LANGUAGE_POLICY_PLACEHOLDER to
+                    PromptFile.ForLanguage(options.outputLanguage),
+                PromptFile.MODE_PLACEHOLDER to PromptFile.ForMode(options.mode),
+                PromptFile.CHANNEL_PLACEHOLDER to PromptFile.ForChannel(channel),
+                PromptFile.LEARNING_SUMMARY_PLACEHOLDER to
+                    PromptFile.LearningSummary.takeIf { options.includesLearningSummary },
+            ),
+        )
+
+    /**
+     * The refine prompt: `refine.txt` with the shared rules, the channel guidelines and the
+     * [refinement] instruction.
+     *
+     * @throws java.io.IOException when a needed file can't be read.
+     */
+    fun assembleRefinement(
+        refinement: Refinement,
+        channel: Channel,
+    ): String =
+        fill(
+            PromptFile.Refine,
+            listOf(
+                PromptFile.ALWAYS_PLACEHOLDER to PromptFile.Always,
+                PromptFile.CHANNEL_PLACEHOLDER to PromptFile.ForChannel(channel),
+                PromptFile.INSTRUCTION_PLACEHOLDER to PromptFile.ForRefinement(refinement),
+            ),
+        )
+
+    /** Replaces each placeholder, in order, with its trimmed file; a null file removes it. */
+    private fun fill(
+        template: PromptFile,
+        sections: List<Pair<String, PromptFile?>>,
+    ): String {
+        var text = reader.read(template).trim()
+        for ((placeholder, file) in sections) {
+            if (placeholder in text) {
+                text = text.replace(placeholder, file?.let { reader.read(it).trim() }.orEmpty())
+            }
+        }
+        return text.trim()
     }
 }
 

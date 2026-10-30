@@ -76,6 +76,7 @@ private struct SkeletonCards: View {
         VStack(spacing: 16) {
             ResultCard(title: "Polished text") {
                 Text(String(repeating: "Polished text is on its way. ", count: 8))
+                    .shimmering()
             }
             .redacted(reason: .placeholder)
             if includesSummary {
@@ -179,9 +180,11 @@ private struct PolishedCard: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .disabled(model.isStreamingText)
                 .help("Highlights what changed between your input and the polished text")
             }
             CopyButton(model: model)
+                .disabled(model.isStreamingText)
         } content: {
             ZStack(alignment: .top) {
                 if showsDiff {
@@ -201,12 +204,15 @@ private struct PolishedCard: View {
     private var editor: some View {
         VStack(alignment: .leading, spacing: 6) {
             FormattingToolbar(controller: outputController)
+                .disabled(model.isStreamingText)
+            // Read-only while the text streams in: the next update would replace any edit.
             RichTextEditor(
                 text: $model.output,
                 controller: outputController,
                 accessibilityLabel: "Polished text",
                 minHeight: 80,
-                maxHeight: 480
+                maxHeight: 480,
+                isEditable: !model.isStreamingText
             )
         }
         .background(
@@ -217,13 +223,19 @@ private struct PolishedCard: View {
     }
 }
 
-/// The detected language and the model, as one quiet line. A translation gets a capsule.
+/// The detected language and the model, as one quiet line. A translation gets a capsule. An
+/// unknown language (the reply hasn't named it yet, or never did) shows only the model.
 private struct ResultMeta: View {
     let result: PolishResult
 
+    private var isLanguageKnown: Bool { result.detectedLanguage != "Unknown" }
+
     var body: some View {
         HStack(spacing: 8) {
-            if result.wasTranslated {
+            if !isLanguageKnown {
+                Text(result.modelUsed)
+                    .accessibilityLabel("Model \(result.modelUsed)")
+            } else if result.wasTranslated {
                 Text("Translated from \(result.detectedLanguage)")
                     .font(.caption)
                     .foregroundStyle(.tint)
@@ -244,6 +256,7 @@ private struct ResultMeta: View {
 
 private struct CopyButton: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button {
@@ -254,13 +267,16 @@ private struct CopyButton: View {
                 systemImage: model.copied ? "checkmark" : "doc.on.doc"
             )
             .contentTransition(.symbolEffect(.replace))
+            .symbolEffect(.bounce, value: model.copyGeneration)
+            .symbolEffectsRemoved(reduceMotion)
         }
         .tint(model.copied ? .green : nil)
         .sensoryFeedback(.alignment, trigger: model.copyGeneration)
     }
 }
 
-/// "Refine:" and a button per refinement, wrapping to more rows when the window is narrow.
+/// "Refine:", a button per refinement and a field for the user's own instruction, wrapping to
+/// more rows when the window is narrow.
 private struct RefinementRow: View {
     let model: AppModel
 
@@ -277,19 +293,127 @@ private struct RefinementRow: View {
                     } label: {
                         ZStack {
                             Text(refinement.displayName)
-                                .opacity(model.runningRefinement == refinement ? 0 : 1)
-                            if model.runningRefinement == refinement {
+                                .opacity(model.runningRefinement == .preset(refinement) ? 0 : 1)
+                            if model.runningRefinement == .preset(refinement) {
                                 ProgressView().controlSize(.small)
                             }
                         }
                     }
+                    .buttonStyle(ChipStyle())
                     .accessibilityLabel("Refine: \(refinement.displayName)")
                     .help("Rewrites the polished text, including your edits")
                 }
+                CustomRefinementField(model: model)
             }
         }
         .disabled(!model.canRefine)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Refine polished text")
+    }
+}
+
+/// A capsule field after the refine buttons for the user's own instruction ("mention the
+/// deadline is Friday"). Return sends it and a spinner shows while it runs; the field gives up
+/// focus meanwhile, so Esc reaches Cancel, and takes it back when the run ends. Close to the
+/// length limit a count appears, in red pencil once over it.
+private struct CustomRefinementField: View {
+    @Bindable var model: AppModel
+    @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isFocused: Bool
+
+    private static let limit = RefinementInstruction.maxCustomLength
+    private static let countThreshold = limit - 100
+
+    private var isRunning: Bool {
+        if case .custom = model.runningRefinement { return true }
+        return false
+    }
+
+    private var length: Int {
+        model.customInstruction.trimmingCharacters(in: .whitespacesAndNewlines).count
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Or type your own, e.g. less emoji", text: $model.customInstruction)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit { model.refineWithCustomInstruction() }
+                .accessibilityLabel("Refine with your own instruction")
+            trailing
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .frame(width: 260)
+        .background {
+            Capsule().strokeBorder(isFocused ? theme.ink : theme.rule, lineWidth: 1)
+        }
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isFocused)
+        .onChange(of: isRunning) { _, running in
+            isFocused = !running
+        }
+        .help("Type your own instruction, such as \"less emoji\", and press Return")
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if isRunning {
+            ProgressView().controlSize(.small)
+        } else if length > Self.countThreshold {
+            Text("\(length)/\(Self.limit)")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(length > Self.limit ? theme.redPencil : Color.secondary)
+                .accessibilityLabel("\(length) of \(Self.limit) characters")
+        }
+    }
+}
+
+extension View {
+    /// Sweeps a brighter band across a redacted placeholder, left to right, while it's on screen.
+    /// Reduce Motion leaves the placeholder still.
+    func shimmering() -> some View {
+        modifier(Shimmer())
+    }
+}
+
+private struct Shimmer: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isSweeping = false
+
+    private static let dimmed = Color.black.opacity(0.45)
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content
+                .mask { band }
+                .onAppear { isSweeping = true }
+        }
+    }
+
+    /// A gradient three times the content's width, dim except for a bright stripe in its middle,
+    /// slid from the stripe left of the content to the stripe right of it.
+    private var band: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            LinearGradient(
+                stops: [
+                    .init(color: Self.dimmed, location: 0.4),
+                    .init(color: .black, location: 0.5),
+                    .init(color: Self.dimmed, location: 0.6),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: width * 3, height: proxy.size.height)
+            .offset(x: isSweeping ? 0 : -width * 2)
+            .animation(
+                .linear(duration: 1.4).repeatForever(autoreverses: false), value: isSweeping)
+        }
     }
 }

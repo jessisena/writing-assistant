@@ -4,12 +4,16 @@ import WritingAssistantCore
 /// The month's token total and cost as one quiet toolbar line, with the breakdown in its tooltip.
 struct MonthlyUsageLabel: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let usage = model.monthlyUsage
-        Text(usage.compactSummary())
+        let summary = usage.compactSummary()
+        Text(summary)
             .font(.callout)
             .monospacedDigit()
+            .contentTransition(.numericText())
+            .animation(reduceMotion ? nil : .snappy, value: summary)
             .foregroundStyle(.secondary)
             .fixedSize()
             .padding(.horizontal, 6)

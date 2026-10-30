@@ -46,10 +46,25 @@ offers a way to disable thinking for 5.x models.
 
 ### `learning_summary` gate — enforced in code
 
-When input was not in English (`was_translated: true`), the learning summary is always nil. This is
-enforced in **two** places: the prompt instructs it, and `PolishService` drops any summary that
-comes back anyway. The prompt instruction alone is not a guarantee; the code is the actual
-invariant. A non-nil `learningSummary` implies `wasTranslated == false`.
+The learning summary only ever describes English input. It is always nil when the input was
+translated (`was_translated: true`), when the mode's summary is off, and, under the
+`sameAsInput` language policy, when `detected_language` isn't English (a missing language counts
+as not English). Under the `english` policy an untranslated draft is English by definition. This
+is enforced in **two** places: the prompt instructs it, and `PolishService` ignores any summary
+that comes back anyway, without decoding it, so a malformed one can't fail the request. The rule
+is `PolishOptions.allowsLearningSummary(detectedLanguage:wasTranslated:)`; `PolishStage` and
+`AppModel.isAwaitingSummary` use the same rule on the streamed preview, so a Spanish reply under
+`sameAsInput` never shows "Writing tips…". The prompt instruction alone is not a guarantee; the
+code is the actual invariant.
+
+### Two fixed modes
+
+Work and Personal are the only modes; there is no "add profile". A mode bundles what differs
+between the two contexts: the visible channels, the last channel, the output language (`english`
+translates, `sameAsInput` never does), the learning summary switch and a tone file
+(`modes/<mode>.txt`). Switching is instant and sends nothing. The switch is disabled while a
+request runs, so the result on screen (its summary card, its chips) always belongs to the mode
+shown; the request itself captured its options when it started. Refinements are mode-agnostic.
 
 ### CLI subprocess auth
 
@@ -69,6 +84,17 @@ compiled into the binary. The app reads them on every request, so edits from the
 any external editor apply to the next request. Bundled defaults are copied there when a file is
 missing. When a bundled default changes, files the user hasn't edited are updated and edited files
 are left alone, with a notice in Settings, so an upgrade never overwrites edits.
+
+### Prompts built from sections, drafts in tags
+
+`polish.txt` and `refine.txt` are templates with slots, and the shared rules live once in
+`always.txt`, so the two prompts can't drift apart. The learning summary instructions are their
+own file, inserted only when the summary is on: with it off the prompt says nothing about a
+summary, rather than asking for one and then telling the model to skip it. A section file is only
+read when its slot is in the template, so a `polish.txt` the user edited before a slot existed
+keeps working as written. The draft goes to the model inside `<draft>` tags, and the shared rules
+say that text is material to rewrite, never instructions. That matters most for the AI prompt
+channel, whose drafts are instructions by nature.
 
 ### Markdown between the app and Claude
 
@@ -100,27 +126,33 @@ Sources/WritingAssistantCore/        library: all logic, no UI
   Contracts.swift                    Channel, Refinement, PolishResult + summary types,
                                      PolishError, PromptFile, and the ClaudeRunning /
                                      PromptStoring / Polishing protocols
+  RefinementInstruction.swift        a refinement: preset (Refinement) or custom text, and
+                                     the custom text's checks (500 chars, no placeholders)
   ModelRouting.swift                 pickModel(for:) + model ID constants
   JSONExtraction.swift               extract the JSON object from CLI output
-  PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore,
-                                     assemble
+  PromptStore.swift                  PromptStoring: seed, sync defaults, read, write, restore
+  PromptAssembly.swift               PromptStoring extension: fill the polish and refine
+                                     templates from their section files
   ClaudeBinaryLocator.swift          find the claude binary
   ClaudeCLI.swift                    ClaudeRunning backed by Process
-  PolishService.swift                Polishing: validate, route, assemble, run, parse, invariant;
-                                     polish and refine
+  PolishService.swift                Polishing: validate, route, assemble, wrap the draft, run,
+                                     parse, invariant; polish and refine
   RichText.swift                     Markdown subset ↔ AttributedString, HTML and plain text
   TextDiff.swift                     word-level diff (DiffSegment: same / added / removed)
   LearningLog.swift                  format and append learning summaries to learning-log.md
   HistoryStore.swift                 HistoryEntry + history.json, newest 50, corrupt-file backup
   Resources/Prompts/                 bundled default prompts
-    polish.txt                       4-step instructions + global rules
+    polish.txt                       polish template: Always, Language, Channel, Output slots
+    always.txt                       rules shared by polish and refine (incl. the <draft> rule)
+    learning_summary.txt             summary instructions, inserted only when the summary is on
+    refine.txt                       refine template: Always, Channel, Instruction, Output
     channels/*.txt                   per-channel rules
-    refinements/*.txt                shorter, more_casual, more_formal instructions
+    refinements/*.txt                one instruction per refine button
 Sources/WritingAssistant/            SwiftUI executable
   WritingAssistantApp.swift          main window + Settings scene (⌘,), app delegate, menus
   AppModel.swift                     @Observable state: input, output, channel, loading,
                                      result, error, history; process, cancel, clear, copy
-  AppModel+Refine.swift              quick refinements of the edited output
+  AppModel+Refine.swift              preset and custom refinements of the edited output
   AppModel+LearningLog.swift         append to and open the learning log
   AppModel+History.swift             record, save, restore and delete history entries
   RequestRunner.swift                the running request: its task, cancel, and a generation
@@ -167,11 +199,55 @@ only state and views. Both talk to each other through the protocols in `Contract
 
 `PromptStore.standard()` points at `~/Library/Application Support/Writing Assistant/prompts/`.
 On launch, `seedMissingDefaults()` copies any missing file from the bundled defaults.
-`assemble(for:)` reads `polish.txt` and `channels/<channel>.txt` from disk, trims both, and
-replaces `{{CHANNEL_GUIDELINES}}` with the channel file. `write` validates first: no file may be
-empty, and `polish.txt` must contain the placeholder. `restoreDefault` overwrites one file from the
-bundle. Refinements append `refinements/<name>.txt` to the assembled prompt as an extra
-instruction.
+Prompt assembly (`PromptAssembly.swift`, an extension on `PromptStoring` so every store builds
+prompts the same way) reads a template, trims it, and replaces each placeholder it contains with
+the trimmed section file, then trims the result:
+
+| Template | Placeholder | Section |
+|---|---|---|
+| `polish.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
+| | `{{LANGUAGE_POLICY}}` | `languages/english.txt` or `languages/same_as_input.txt` |
+| | `{{MODE_GUIDELINES}}` | `modes/work.txt` or `modes/personal.txt` |
+| | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
+| | `{{LEARNING_SUMMARY}}` | `learning_summary.txt` when the summary is on, else nothing |
+| `refine.txt` | `{{ALWAYS_RULES}}` | `always.txt` |
+| | `{{CHANNEL_GUIDELINES}}` | `channels/<channel>.txt` |
+| | `{{REFINEMENT_INSTRUCTION}}` | `refinements/<name>.txt`, or the user's own instruction |
+
+`assemble(for:options:)` builds the polish prompt from a `PolishOptions` (mode, output
+language, summary on or off) and `assembleRefinement(_:for:)` the refine prompt. A section file is
+only read when its placeholder is in the template, so an old edited `polish.txt` (four steps, only
+`{{CHANNEL_GUIDELINES}}`, or the sectioned one without `{{LANGUAGE_POLICY}}` and
+`{{MODE_GUIDELINES}}`, which keeps its own "translate to English" text) assembles as before and
+never needs the new files; `syncDefaults()` reports it as having a newer default like any edited
+file. The channel rules win over the mode tone where they conflict; the default "professional
+but approachable" tone lives in `modes/work.txt`, not `always.txt`.
+`write` validates first: no file may be empty, `polish.txt` must keep `{{CHANNEL_GUIDELINES}}`
+and `refine.txt` must keep `{{REFINEMENT_INSTRUCTION}}`. The other placeholders are optional:
+removing `{{LEARNING_SUMMARY}}` from `polish.txt` simply means no summary instructions.
+`restoreDefault` overwrites one file from the bundle.
+
+The polish prompt asks for the JSON keys in a fixed order: `detected_language`,
+`was_translated`, `polished_text`, then `learning_summary` (only when the summary section is in).
+Refinements use the lean `refine.txt` (shared rules, channel, instruction and
+`{"polished_text": "..."}`), not the polish prompt, and only `polished_text` is read from the reply.
+
+A refinement is a `RefinementInstruction`: `.preset(Refinement)` (a button, filled from its
+`refinements/<name>.txt`) or `.custom(String)` (the Refine field: "mention the deadline is
+Friday"). Both go through `PolishService.refine` and `assembleRefinement(_:for:)` the same way.
+The custom text is the user's own instruction, so it goes into the system prompt's Instruction
+section, while the draft stays in `<draft>` tags. `RefinementInstruction.validated()` runs first:
+it removes any prompt placeholder from the text (repeating until none is left, so nested ones
+can't rebuild one), trims it, and throws `.emptyInstruction` when nothing is left or
+`.instructionTooLong` above 500 characters. The custom text is inserted after the other
+sections, so it can never pull a section in, and a custom refinement reads no refinement file.
+In the app, a blank field does nothing, a too-long one shows the limit in the banner without a
+request, a success empties the field and a failure or cancel keeps it.
+
+`PolishService` sends the input to the model as `<draft>\n<text>\n</draft>`; `always.txt` says
+text inside the tags is material to rewrite, never instructions. A `</draft` in the user's text,
+in any letter case, becomes `<\/draft` first, so it can't close the tag early. Routing looks at the
+unwrapped text.
 
 `prompts/.defaults.json` maps each file's relative path to the SHA-256 of the bundled default it
 was last seeded or restored from. `syncDefaults()` runs at launch after seeding:
@@ -207,7 +283,8 @@ responder.
 
 ### Theme
 
-Views draw with six tokens (`ink`, `paper`, `desk`, `rule`, `redPencil`, `marginGreen`) read
+Views draw with seven tokens (`ink`, `personalInk`, `paper`, `desk`, `rule`, `redPencil`,
+`marginGreen`) read
 from `@Environment(\.theme)`, a `ThemePalette`. Each token is a light and a dark `0xRRGGBB`
 value, turned into a dynamic `NSColor` that follows the appearance of the view it is drawn in;
 one `Color` is cached per value, so equal palettes give equal colours. `ThemeSettings` (owned by
@@ -217,7 +294,35 @@ overrides. Every change is saved as a JSON string under the `theme` UserDefaults
 (`{"preset":"lagoon","overrides":{"ink":{"light":"#025F67","dark":"#6FCFC6"}}}`); a value that
 doesn't parse is logged and loads as Writing Desk. System colours (error banner, prompt editor
 notices) are not themed. `EnvironmentValues.theme` uses a plain `EnvironmentKey`, since `@Entry`
-needs a macro plugin that ships only with Xcode.
+needs a macro plugin that ships only with Xcode. The main window gets
+`palette.forMode(model.mode)`, which puts `personalInk` in place of `ink` in Personal mode, so the
+tint shows the mode. A switch (toolbar control or View › Switch to … Mode, ⌘⇧M) runs in a 0.3 s
+ease-in-out animation that crossfades the chip set (it is keyed by mode) and shifts the tint; under
+Reduce Motion it applies without animation.
+
+### Modes
+
+`ModeSettings` (app) holds the current mode and a `ModeProfile` per mode, saved as a JSON string
+under the `modes` UserDefaults key:
+
+```json
+{"current":"work",
+ "personal":{"learningSummary":false,"lastChannel":"personal_message","outputLanguage":"sameAsInput",
+             "visibleChannels":["personal_message","email","proofread","other"]},
+ "work":{"learningSummary":true,"lastChannel":"slack","outputLanguage":"english",
+         "visibleChannels":["slack","slack_informal","email","talking_points","ai_prompt","formal",
+                            "proofread"]}}
+```
+
+Every key is optional on read and takes that mode's default; unknown channel names are dropped,
+an empty list takes the default list, and a value that doesn't parse is logged and loads as the
+defaults. `visibleChannels` is the chip order (⌘1–9 follow it); a channel shown again goes last.
+Hiding a mode's only visible channel is refused, and Settings › General disables its checkbox.
+`AppModel.channel` is the mode's last channel while it is visible, else the first visible one, so
+hiding the selected channel or restoring a history entry whose channel is now hidden falls back
+without losing the stored choice. The old `selectedChannel` and `learningSummaryEnabled` keys are
+gone and no longer read. `AppModel+Mode` turns the current profile into the `PolishOptions` each
+polish captures.
 
 ### Diff, learning log and history
 
@@ -226,7 +331,10 @@ the standard library's `difference(from:)`. `DiffView` colors the segments and g
 text version ("removed: …, added: …").
 
 After a successful Process, `AppModel` appends the learning summary to `LearningLog` (skipped when
-it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`. The
+it is nil or empty; refinements never append) and records a `HistoryEntry` in `HistoryStore`,
+with the mode it ran in. Entries saved before modes existed have no `mode` key and decode as
+`work`. History rows show the mode, the popover filters by All, Work or Personal
+(`AppModel.historyEntries(in:)`), and restoring an entry switches to its mode. The
 edited output is saved into the current entry on copy, refine, clear and before the next request,
 not on every keystroke. A history file that doesn't decode is renamed to `history.corrupt.json`,
 the store starts empty, and the app shows a banner. A file that can't be read, or a damaged one
@@ -249,7 +357,8 @@ delegate when they appear. The activation step is injected, so tests run without
 
 ```
 ~/Library/Application Support/Writing Assistant/
-  prompts/                 live prompts: polish.txt, channels/, refinements/, .defaults.json
+  prompts/                 live prompts: polish.txt, channels/, modes/, languages/,
+                           refinements/, .defaults.json
   history.json             the newest 50 requests
   history.corrupt.json     a history file that couldn't be read, moved aside
   usage.json               token and cost totals per month
@@ -270,11 +379,31 @@ installing `claude` works without relaunching. Those directories are prefixed on
 
 ```
 claude --print --output-format stream-json --verbose --include-partial-messages \
-  --model <model> --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
+  --model <model> --system-prompt-file <file> --tools "" --setting-sources "" \
+  --disable-slash-commands --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+  --no-session-persistence
 ```
 
-with `"{system}\n\n---\n\n{text}"` written to stdin, and environment
-`MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no `ANTHROPIC_API_KEY`.
+with only the user's text, wrapped in `<draft>` tags, written to stdin, and environment `MAX_THINKING_TOKENS=0`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`,
+no `ANTHROPIC_API_KEY`.
+
+- `--system-prompt-file` replaces Claude Code's own system prompt with the assembled polish (or
+  refinement) prompt. The file is written for each request into a new `WritingAssistant-<UUID>`
+  directory in the temporary directory (directory 0700, file 0600), so the prompt never shows in
+  `ps` or meets `ARG_MAX`, and the directory is deleted when the call returns, including after a
+  failure, timeout or cancel. Both attempts of a retried call use the same file.
+- `--tools ""` removes every built-in tool, so a draft can't trigger tool use, and
+  `--disable-slash-commands` drops skills and commands.
+- `--setting-sources ""` loads no user, project or local settings file, so the user's hooks,
+  plugins and other settings don't run on polish calls. Settings such as `DISABLE_TELEMETRY` that
+  usually live in `~/.claude/settings.json` are therefore set in the child environment instead.
+  Managed (policy) settings and Claude Code's built-in plugins still load.
+- `--bare` isn't used: it also skips the keychain, where the subscription login lives.
+- An older `claude` that doesn't know one of these flags exits with "unknown option" (on stderr,
+  or for some errors on stdout). That maps to `PolishError.cliOutdated`, which asks the user to
+  run `claude update`, and is never retried.
+
 stdout and stderr are drained at the same time to avoid a pipe-buffer deadlock. stdout is read as
 one JSON event per line (`StreamJSONReader`): `text_delta` events go to the caller's `onText` as
 they arrive, and the final `result` event gives the reply text, its `usage` (input, output,
@@ -282,22 +411,59 @@ cache write and cache read tokens) and `total_cost_usd`. After 120 s the process
 grace. A non-zero exit is retried once, but only if no text was streamed yet; a timeout is never
 retried. Cancelling the request or quitting the app terminates a running `claude` process.
 
-The `result` event arrives about 2.5 s after the model's last token (CLI shutdown), and each call
-also carries about 24K tokens of Claude Code's own system prompt, mostly cache reads. Both show in
-the token count; the preview makes the first.
+The `result` event arrives about 2.5 s after the model's last token (CLI shutdown); the preview
+makes up for it. Before 2026-10-30 each call also carried about 24K tokens of Claude Code's own
+system prompt and tool definitions, cache-written at the 1-hour rate or read from the cache. With
+the flags above, a Slack polish with the bundled prompts sends about 2K input tokens, none cached
+(the prompt is below the cacheable minimum), and costs about a sixth as much.
+
+Note (2026-10-30): the switch to these flags happened mid-month, so the October 2026 totals in
+`usage.json` mix runs before and after it. Per-request comparisons need November data or a
+measurement of single requests; `usage.json` was deliberately not reset.
 
 ### Progressive display, summary setting, token count and cost
 
-`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which reports the
-top-level `polished_text` the moment its JSON string closes (with `detected_language` and
-`was_translated` if they came first). `AppModel` shows it as the result with no summary and a
-placeholder summary card; the final result fills in the summary but keeps the output editor's
-text, so edits made during the wait survive. A preview for a request that is no longer current is
-ignored. After a cancel or failure the previewed text stays and is saved to history without a
-summary.
+`PolishService.polish` feeds the streamed text to `PolishedTextScanner`, which calls `onPreview`
+with a `PolishPreview` after every piece that changes what the reply has said:
+`detected_language` and `was_translated` once each value ends (before or after the text), and the
+top-level `polished_text` decoded as it arrives (`""` when its string opens, longer with each
+piece, `isTextComplete` when it closes). Escapes are decoded one scalar at a time with
+`JSONSerialization`'s rules, and an escape (`\n`, `\u00e9`, the `\uD83D\uDE80` surrogate
+pair) is only added once complete, so a partial text never ends in half an escape. A malformed
+top-level string stops the scan, so it never reports a complete text. Scanning stops when the
+top-level object closes.
 
-Settings › General has "Show English learning summary" (UserDefaults `learningSummaryEnabled`).
-When off, `PolishService` appends a note telling the model to skip Step 4 and drops any summary.
+`AppModel` hands previews to the main actor through `PreviewMailbox`, which keeps only the newest
+and one delivery in flight, so updates stay in order and a busy main actor skips stale ones.
+Deliveries are at least 33 ms apart (about 30 a second) and at least five times what the last one
+took: each update converts the Markdown so far (about 3.5 ms for 2,000 characters and 44 ms for
+20,000 in a debug build) and replaces the editor's text, and the CLI sends 50–100 pieces a second.
+
+- While the text streams in, the polished card shows it read-only: the formatting toolbar, Edit /
+  Changes and Copy are disabled, since the next update would replace an edit. Partial Markdown
+  shows as typed (`**bol` until the closing `**` arrives). There's no typewriter or fade effect,
+  so Reduce Motion has nothing to turn off beyond the existing card transitions.
+- Once the text is complete it is editable and Copy works. Later previews only update the
+  language, and the final result only adds the summary, so edits made meanwhile survive.
+- The window scrolls to the results once, when the first text appears, not while it streams or
+  when the summary arrives.
+- The Polish button's progress text follows `PolishStage`: "Detecting language…" until the reply
+  says `was_translated` or starts the text, then "Translating from Spanish…" (or "Translating…"
+  without a language) or "Polishing…", then "Writing tips…" once the text is complete and a
+  summary is coming, or "Finishing…" when none is (summary off, a translation, or non-English
+  text under Same as input). A reply that
+  writes `polished_text` first reads "Polishing…", and its card shows only the model until the
+  language arrives; a late `was_translated: true` removes the summary placeholder.
+- A cancel or failure after the text is complete keeps it and saves it to history without a
+  summary. While the text is still streaming in, a cancel returns to the empty state and a
+  failure shows only the error; neither saves a half text to history.
+- A preview for a request that is no longer current is ignored. If the final result arrives
+  before the complete text was shown, it replaces the streamed text.
+
+Settings › General has a per-mode "Show English learning summary" switch (on for Work, off for
+Personal), next to the mode's output language and channel checkboxes. When off, the polish
+prompt is assembled without `learning_summary.txt`, so it has no summary instructions at all, and
+`PolishService` drops any summary that comes back anyway.
 
 `PolishService` records the usage of every reply the CLI completes in `UsageStore` (`usage.json`,
 totals per Gregorian "yyyy-MM" in the user's time zone), even when the reply then fails to parse.
@@ -357,20 +523,23 @@ paste + channel, Process (⌘↩)
 │ pickModel(for: text)  ← pure function  │
 │   ≤60 words + confident English → Haiku│
 │   everything else             → Sonnet │
-│ PromptStore.assemble(for: channel)     │
+│ assemble(for: channel, learningSummary)│
+│ input → <draft>\n…\n</draft>           │
 └────────────────────────────────────────┘
       │
       ▼  one ClaudeCLI.run() call, stream-json
          MAX_THINKING_TOKENS=0, MCP disabled
-         polished_text closes → onPreview (shown at once)
+         every piece → onPreview (text streams in, stage line)
 ┌────────────────────────────────────────┐
-│ polish.txt  (4 steps)                  │
-│  1. detect language                    │
-│       not English → translate          │
-│       English     → skip               │
-│  2. apply global style guidelines      │
-│  3. apply {{CHANNEL_GUIDELINES}}       │
-│  4. emit JSON                          │
+│ polish.txt                             │
+│  Always    ← always.txt                │
+│  Language  not English → translate     │
+│  Channel   ← channels/<channel>.txt    │
+│  Output    detected_language,          │
+│            was_translated,             │
+│            polished_text               │
+│  [learning summary ← learning_summary  │
+│   .txt, only when on: 4th key]         │
 └────────────────────────────────────────┘
       │  JSON extraction (```json fence, else first { … last })
       │  was_translated ⇒ learning summary dropped
@@ -422,8 +591,10 @@ subprocess, which Android can't do.
 
 ### Change logic in both apps
 
-The model routing heuristic, JSON extraction, the polish and refine pipeline and the
-`learning_summary` invariant (always null when `was_translated` is truthy) exist twice: in Swift
+The model routing heuristic, JSON extraction, the polish and refine pipeline, the modes and
+language policy (`Mode`, `OutputLanguage`, `PolishOptions`) and the `learning_summary` invariant
+(null unless `PolishOptions.allowsLearningSummary` holds: never for a translation or non-English
+input) exist twice: in Swift
 under `Sources/WritingAssistantCore/` and in Kotlin under `android/core/`. The Kotlin tests are
 ports of the Swift tests. A change to any of these, or to the Anthropic model IDs, has to be made
 in both languages together with its tests in both. Each Kotlin file names the Swift file it
@@ -450,7 +621,8 @@ android/
                                        Polishing interfaces
       ModelRouting.kt                  pickTier(text) → ModelTier
       JsonExtraction.kt                extract the JSON object from model output
-      PromptAssembler.kt               polish.txt + channel file; DirectoryPromptReader
+      PromptAssembler.kt               polish and refine templates filled from their
+                                       section files; DirectoryPromptReader
       PolishService.kt                 Polishing: validate, route, assemble, call, parse,
                                        invariant; polish (optionally without the learning
                                        summary) and refine
@@ -475,8 +647,9 @@ android/
       data/ApiKeyStore.kt              interface; KeystoreApiKeyStore implements it
       data/KeystoreApiKeyStore.kt      AES-GCM with an Android Keystore key, in DataStore
       data/AppSettings.kt              interface; DataStoreAppSettings implements it
-      data/DataStoreAppSettings.kt     last-used channel, provider, disabled channels, learning
-                                       summary switch and palette, in Preferences DataStore
+      data/DataStoreAppSettings.kt     current mode, per-mode channels, last channel, output
+                                       language and learning summary (ModeProfile.kt), provider
+                                       and palette, in Preferences DataStore
       data/HistoryRepository.kt        in-memory history shared by composer and History screen,
                                        saved to filesDir/history.json
       data/AssetPromptReader.kt        PromptReading from the bundled assets
@@ -510,20 +683,24 @@ built; tests construct view models with fakes instead.
 ### Shared prompts
 
 `app/build.gradle.kts` adds `Sources/WritingAssistantCore/Resources/Prompts/` as an assets
-directory, so the APK bundles the same `polish.txt`, `channels/*.txt` and `refinements/*.txt` as
-the Mac app, and a change to those bundled defaults reaches both apps with their next build.
+directory, so the APK bundles the same `polish.txt`, `always.txt`, `learning_summary.txt`,
+`refine.txt`, `channels/*.txt`, `modes/*.txt`, `languages/*.txt` and `refinements/*.txt` as the
+Mac app, and a change to those bundled defaults reaches both apps with their next build.
 Edits made in the Mac app's Settings live in its Application Support folder and don't reach
 Android. On Android, `PromptOverrideStore` (`:core`) reads `filesDir/prompts/<relativePath>` when
 the user edited that file in Settings → Prompts, and otherwise the bundled default through
 `AssetPromptReader`. Saving the default text deletes the edit, and saving follows the same rules
-as the Mac (`PromptValidationException`: not empty, global rules keep the placeholder).
-Files are read on each request, so an edit applies to the next one. `:core` tests and `liveTest` read
+as the Mac (`PromptValidationException`: not empty, `polish.txt` keeps `{{CHANNEL_GUIDELINES}}`,
+`refine.txt` keeps `{{REFINEMENT_INSTRUCTION}}`). `PromptAssembler` fills the templates exactly
+like the Mac's `PromptAssembly`. The model gets a single user message: the assembled prompt, a
+blank line, then the draft in `<draft>` tags (neutralized the same way). Files are read on each
+request, so an edit applies to the next one. `:core` tests and `liveTest` read
 the same directory through `DirectoryPromptReader`, passed in as the `prompts.dir` system
 property.
 
 Every provider gets the same prompts, so they must keep producing a single valid JSON object on
 each of them. Groq's JSON mode also rejects a prompt that doesn't contain the word "JSON";
-`polish.txt` contains it, and refine prompts include `polish.txt`.
+`polish.txt` and `refine.txt` both contain it.
 
 ### Providers
 
@@ -619,8 +796,13 @@ Debug builds get `BuildConfig.DEBUG_API_KEY` from `ANTHROPIC_API_KEY` and
 stored; a key is stored once the user saves or tests it. Release builds set both to an empty
 string.
 
-`DataStoreAppSettings` keeps the last-used channel, which the composer preselects, and the
-selected provider (Anthropic until the user picks another). `AppGraph` builds both clients once
+`DataStoreAppSettings` keeps the current `mode` and, per mode (keys prefixed `work_` or
+`personal_`), `visible_channels` (channel ids in chip order, comma-separated, since a string set
+loses order), `last_channel`, `output_language` (`english` or `sameAsInput`) and
+`learning_summary`, with the same defaults and fallbacks as the Mac's `ModeSettings`; hiding a
+mode's last visible channel is refused. The old global `last_channel`, `disabled_channels` and
+`learning_summary` keys are no longer read. It also keeps the selected provider (Anthropic until
+the user picks another). `AppGraph` builds both clients once
 and gives `PolishService` a backend lambda that reads `settings.provider()` on every request. The
 Settings screen's Anthropic | Groq segmented buttons save the choice right away and load that
 provider's key; Save, Test and Clear act on the selected provider.
@@ -635,7 +817,11 @@ cancels the job, and a generation number keeps a cancelled or replaced request f
 newer state, as `RequestRunner.swift` does. Opening a sheet with different text cancels any
 request and starts over, so Replace never returns a result for other text. A failed request can
 be retried from the error banner. Polish is disabled while the key store holds no key for the
-selected provider, and `MainActivity` opens Settings once in that case.
+selected provider, and `MainActivity` opens Settings once in that case. A Work | Personal toggle
+above the chips switches the mode instantly and is disabled while a request runs; the chips show
+the mode's visible channels. Restoring a history entry switches to its mode and keeps its
+channel, adding it as an extra chip when that mode now hides it (the Mac selects the first
+visible chip instead). Android has no streaming, so there is no pending-summary state.
 
 ### System integration
 

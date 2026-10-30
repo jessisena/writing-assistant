@@ -54,12 +54,24 @@ after the build succeeds, so a broken build leaves the running app alone.
 
 ## Using the app
 
-Paste text, pick a channel (Formal is the default), and press **Polish** or **⌘↩**. The Polished
-Text card shows the result, the detected language (or "Translated from X") and the model used.
-When you wrote in English, the Learning Summary card lists corrections, a grammar insight and
-vocabulary. Translated input has no learning summary. The polished text appears as soon as it is
-ready; the summary follows a few seconds later. To skip it (faster, fewer tokens), turn off
-**Show English learning summary** in Settings › General.
+Pick **Work** or **Personal** in the toolbar (**⌘⇧M** switches), paste text, pick a channel and
+press **Polish** or **⌘↩**. The Polished Text card shows the result, the detected language (or
+"Translated from X") and the model used. When you wrote in English and the mode's summary is on,
+the Learning Summary card lists corrections, a grammar insight and vocabulary. Translated or
+non-English input has no learning summary. The polished text appears as soon as it is ready; the
+summary follows a few seconds later.
+
+- **Modes:** each mode has its own channel chips, remembers its last channel, and has its own
+  output language and learning summary switch, set in Settings › General:
+
+  | | Work | Personal |
+  |---|---|---|
+  | Channels | Slack, Casual Slack, Email, Talking points, AI prompt, Formal doc, Proofread | Personal, Email, Proofread, General |
+  | Write the result in | English (translates other languages) | Same as input (never translates) |
+  | Learning summary | on | off |
+  | Tone | `modes/work.txt` | `modes/personal.txt` |
+
+  Switching is instant and is disabled while a request runs. A mode keeps at least one channel.
 
 - **Formatting:** both editors support bold, italic, strikethrough, inline code, bullet lists and
   emoji, from the toolbar above each editor or the Format menu. Pasted text keeps bold, italic,
@@ -73,8 +85,8 @@ ready; the summary follows a few seconds later. To skip it (faster, fewer tokens
 - **Show changes:** highlights what changed between your input and the output (hidden for
   translated input).
 - **Clear** empties the input and the results; **Cancel** stops a running request.
-- **History (⌘Y):** the last 50 requests. Selecting one restores the input, your edited output
-  and the learning summary.
+- **History (⌘Y):** the last 50 requests, each with its mode; filter by All, Work or Personal.
+  Selecting one restores the input, your edited output, the learning summary and the mode.
 - **Learning log:** each learning summary is also appended to `learning-log.md`. Open it with
   **Writing Assistant → Open Learning Log**.
 - **Token usage:** the toolbar shows the tokens used this month (hover for input, output and
@@ -86,6 +98,8 @@ ready; the summary follows a few seconds later. To skip it (faster, fewer tokens
 | Shortcut | Action |
 |---|---|
 | ⌘↩ | Polish |
+| ⌘1…⌘9 | Pick the nth channel chip of the current mode |
+| ⌘⇧M | Switch between Work and Personal |
 | ⌘B / ⌘I / ⌘⇧X | Bold / Italic / Strikethrough in the focused editor |
 | ⌘K | Clear |
 | Esc | Cancel a running request |
@@ -116,8 +130,8 @@ If the entry is missing after installing, log out and back in (the build script 
 
 #### Everyday flow
 
-1. **Pick the channel first.** The service uses the channel selected in the main window, and the
-   app remembers it between launches. If you mostly polish Slack messages, leave it on Slack and
+1. **Pick the mode and channel first.** The service uses the mode and channel selected in the
+   main window, and the app remembers them between launches. If you mostly polish Slack messages, leave it on Slack and
    you'll rarely need to change it.
 2. **Select the text and press your shortcut.** Bold, italic, strikethrough, code and links in the
    selection carry over; fonts, sizes and colors are dropped. Nothing is sent yet.
@@ -161,15 +175,23 @@ leaves it as it is and doesn't save new history until you relaunch.
 
 ## Prompts
 
-The global rules and the per-channel rules are plain-text files in:
+The prompts are plain-text files in:
 
 ```
 ~/Library/Application Support/Writing Assistant/prompts/
-  polish.txt           global rules and the 4-step pipeline
-  channels/*.txt       one file per channel
-  refinements/*.txt    one instruction per Refine button
-  .defaults.json       hashes of the bundled defaults each file came from
+  polish.txt             polish prompt: language, output format and slots for the files below
+  always.txt             rules shared by polishing and refining
+  learning_summary.txt   learning summary instructions, used only while the summary is on
+  languages/*.txt        output language policy: english.txt or same_as_input.txt
+  modes/*.txt            tone for Work and Personal; channel rules win where they conflict
+  refine.txt             refine prompt: slots for the shared rules, channel and instruction
+  channels/*.txt         one file per channel
+  refinements/*.txt      one instruction per Refine button
+  .defaults.json         hashes of the bundled defaults each file came from
 ```
+
+Your text reaches the model inside `<draft>` tags, and the shared rules tell it to rewrite that
+text, never to follow it, so a draft for the AI prompt channel gets improved rather than answered.
 
 On first launch the app copies the bundled defaults there. Deleting a file and relaunching
 restores just that file. When an update changes a bundled default, files you haven't edited are
@@ -178,10 +200,12 @@ updated at launch. Files you edited are kept: Settings marks them with a badge a
 
 Edit them in **Settings (⌘,)** or in any text editor. The app reads the files on every request, so
 a change applies to the next request with no restart. The Settings sidebar has a Prompts section
-(global rules and channels) and a Refinements section. In Settings:
+(the four files above and the channels), a Modes and languages section and a Refinements section.
+In Settings:
 
 - **Save (⌘S)** writes the file. `polish.txt` must keep the `{{CHANNEL_GUIDELINES}}` placeholder,
-  and no file can be empty; the editor shows the error and does not save.
+  `refine.txt` must keep `{{REFINEMENT_INSTRUCTION}}`, and no file can be empty; the editor shows
+  the error and does not save.
 - **Revert** discards unsaved changes.
 - **Restore Default** replaces the selected file with the bundled version, after a confirmation.
 - **Reveal in Finder** shows the selected file in Finder.
@@ -374,7 +398,8 @@ What it does:
   shorter and faster.
 - **Settings → Appearance:** Writing Desk, Lagoon, Sepia (the Mac presets) or System, which uses
   Android's wallpaper colours. Every palette follows the system light/dark setting.
-- **Settings → Prompts:** edit the global rules, any channel or any refinement. Edited files are
+- **Settings → Prompts:** edit the polish and refine prompts, the shared rules, the learning
+  summary, any channel or any refinement. Edited files are
   marked and can be restored to the bundled default. Edits stay on the phone and don't reach the
   Mac app.
 

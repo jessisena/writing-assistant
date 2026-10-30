@@ -61,11 +61,12 @@ import WritingAssistantCore
         let service = PolishService(runner: runner, prompts: store)
 
         let refined = try await service.refine(
-            text: "Hello there", channel: .slack, refinement: .shorter)
+            text: "Hello there", channel: .slack, refinement: .preset(.shorter))
 
         #expect(refined == "Hi")
         let prompt = try #require(await runner.prompts.first)
-        #expect(prompt.contains("## Additional instruction\n\nUse at most ten words."))
+        #expect(prompt.contains("## Instruction\n\nUse at most ten words."))
+        #expect(await runner.inputs.first == "<draft>\nHello there\n</draft>")
         let guidelines = try store.read(.channel(.slack))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(prompt.contains(guidelines))
@@ -73,13 +74,17 @@ import WritingAssistantCore
 }
 
 private actor RecordingRunner: ClaudeRunning {
+    /// The system prompt of each call.
     private(set) var prompts: [String] = []
+    /// The stdin input of each call.
+    private(set) var inputs: [String] = []
 
     func run(
-        prompt: String, model: String, timeout: Duration,
+        systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
     ) async throws(PolishError) -> ClaudeReply {
-        prompts.append(prompt)
+        prompts.append(systemPrompt)
+        inputs.append(input)
         return ClaudeReply(
             text: #"{"polished_text": "Hi", "was_translated": false, "learning_summary": null}"#,
             usage: nil)

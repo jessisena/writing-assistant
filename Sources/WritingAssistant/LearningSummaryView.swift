@@ -43,8 +43,9 @@ private struct SummarySections: View {
         VStack(alignment: .leading, spacing: 20) {
             if !summary.corrections.isEmpty {
                 SummarySection(label: "Corrections") {
-                    ForEach(Array(summary.corrections.enumerated()), id: \.offset) { _, item in
+                    ForEach(Array(summary.corrections.enumerated()), id: \.offset) { index, item in
                         CorrectionRow(correction: item)
+                            .fadesIn(order: index)
                     }
                 }
             }
@@ -55,8 +56,9 @@ private struct SummarySections: View {
             }
             if !summary.vocabulary.isEmpty {
                 SummarySection(label: "New vocabulary") {
-                    ForEach(Array(summary.vocabulary.enumerated()), id: \.offset) { _, item in
+                    ForEach(Array(summary.vocabulary.enumerated()), id: \.offset) { index, item in
                         VocabularyRow(item: item)
+                            .fadesIn(order: summary.corrections.count + index)
                     }
                 }
             }
@@ -120,6 +122,36 @@ private struct GrammarInsight: View {
                 Rectangle().fill(theme.ink).frame(width: 3)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+extension View {
+    /// Fades the row in shortly after the ones before it, so a list arrives top to bottom.
+    fileprivate func fadesIn(order: Int) -> some View {
+        modifier(StaggeredFadeIn(order: order))
+    }
+}
+
+/// Reduce Motion shows the row at once.
+private struct StaggeredFadeIn: ViewModifier {
+    let order: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isShown = false
+
+    /// Later rows wait no longer than this many steps, so a long list doesn't lag.
+    private static let maxSteps = 8
+    private static let step: Double = 0.06
+
+    func body(content: Content) -> some View {
+        let isVisible = isShown || reduceMotion
+        content
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : 4)
+            .onAppear {
+                guard !reduceMotion else { return }
+                let delay = Double(min(order, Self.maxSteps)) * Self.step
+                withAnimation(.easeOut(duration: 0.25).delay(delay)) { isShown = true }
+            }
     }
 }
 

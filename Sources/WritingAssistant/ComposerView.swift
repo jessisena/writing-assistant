@@ -87,13 +87,15 @@ private struct ComposerFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ChannelChips(selection: $model.channel)
+            ChannelChips(
+                selection: $model.channel, channels: model.visibleChannels, mode: model.mode)
             ActionRow(
                 inputLength: inputLength,
                 isLoading: model.isLoading,
                 isPolishing: model.isLoading && model.runningRefinement == nil,
                 canClear: model.canClear,
                 requestStartedAt: model.requestStartedAt,
+                stage: model.polishStage ?? .detectingLanguage,
                 onPolish: model.startProcessing,
                 onClear: onClear,
                 onCancel: model.cancel
@@ -103,8 +105,14 @@ private struct ComposerFooter: View {
     }
 }
 
+/// The current mode's visible channel chips, in their order. ⌘1…⌘9 pick the first nine.
+/// A mode switch crossfades to the other mode's chips.
 private struct ChannelChips: View {
     @Binding var selection: Channel
+    let channels: [Channel]
+    let mode: Mode
+    @Namespace private var selectionNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -112,55 +120,40 @@ private struct ChannelChips: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             FlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                ForEach(Channel.allCases) { channel in
-                    Button(channel.shortName) { selection = channel }
-                        .buttonStyle(ChipStyle(isSelected: selection == channel))
-                        .help(channel.displayName)
-                        .accessibilityLabel(channel.displayName)
-                        .accessibilityAddTraits(selection == channel ? .isSelected : [])
+                ForEach(Array(channels.enumerated()), id: \.element) { index, channel in
+                    chip(for: channel, number: index + 1)
                 }
             }
+            .id(mode)
+            .transition(.opacity)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Channel")
+            .accessibilityLabel("\(mode.displayName) channels")
         }
     }
-}
 
-private struct ChipStyle: ButtonStyle {
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        ChipBody(isSelected: isSelected, isPressed: configuration.isPressed) {
-            configuration.label
+    @ViewBuilder private func chip(for channel: Channel, number: Int) -> some View {
+        let button = Button(channel.shortName) { select(channel) }
+            .buttonStyle(
+                ChipStyle(
+                    isSelected: selection == channel, selectionNamespace: selectionNamespace)
+            )
+            .accessibilityLabel(channel.displayName)
+            .accessibilityAddTraits(selection == channel ? .isSelected : [])
+        if number <= 9 {
+            button
+                .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+                .help("\(channel.displayName) (⌘\(number))")
+        } else {
+            button.help(channel.displayName)
         }
     }
-}
 
-private struct ChipBody<Label: View>: View {
-    let isSelected: Bool
-    let isPressed: Bool
-    @ViewBuilder let label: Label
-    @Environment(\.theme) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovered = false
-
-    var body: some View {
-        label
-            .font(.callout)
-            .foregroundStyle(isSelected ? theme.ink : Color.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(fill, in: Capsule())
-            .overlay(Capsule().strokeBorder(isSelected ? theme.ink : theme.rule, lineWidth: 1))
-            .contentShape(Capsule())
-            .onHover { isHovered = $0 }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: isSelected)
-    }
-
-    private var fill: Color {
-        if isSelected { return theme.ink.opacity(0.15) }
-        if isPressed { return Color.primary.opacity(0.10) }
-        return isHovered ? Color.primary.opacity(0.06) : .clear
+    private func select(_ channel: Channel) {
+        if reduceMotion {
+            selection = channel
+        } else {
+            withAnimation(.snappy(duration: 0.25)) { selection = channel }
+        }
     }
 }
 
@@ -170,6 +163,7 @@ private struct ActionRow: View {
     let isPolishing: Bool
     let canClear: Bool
     let requestStartedAt: Date?
+    let stage: PolishStage
     let onPolish: () -> Void
     let onClear: () -> Void
     let onCancel: () -> Void
@@ -199,6 +193,7 @@ private struct ActionRow: View {
                 isPolishing: isPolishing,
                 isOverLimit: isOverLimit,
                 requestStartedAt: requestStartedAt,
+                stage: stage,
                 action: onPolish
             )
         }
@@ -229,6 +224,7 @@ private struct PolishButton: View {
     let isPolishing: Bool
     let isOverLimit: Bool
     let requestStartedAt: Date?
+    let stage: PolishStage
     let action: () -> Void
     @Environment(\.theme) private var theme
 
@@ -246,7 +242,7 @@ private struct PolishButton: View {
         .controlSize(.large)
         .disabled(isOverLimit)
         .keyboardShortcut(.return, modifiers: .command)
-        .accessibilityLabel(isPolishing ? "Polishing" : "Polish")
+        .accessibilityLabel(isPolishing ? stage.label : "Polish")
         .help(isOverLimit ? tooLongHelp : "Polish the text (⌘↵)")
     }
 
@@ -254,7 +250,7 @@ private struct PolishButton: View {
         if isPolishing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                ProgressText(startedAt: requestStartedAt)
+                ProgressText(stage: stage, startedAt: requestStartedAt)
             }
         } else {
             HStack(spacing: 8) {
@@ -272,9 +268,12 @@ private struct PolishButton: View {
     }
 }
 
-/// "Polishing…", with the seconds elapsed once the request has run for a while.
+/// The polish's stage ("Detecting language…", "Polishing…", …), with the seconds elapsed once
+/// the request has run for a while.
 private struct ProgressText: View {
+    let stage: PolishStage
     let startedAt: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let showsElapsedAfter = 5
 
@@ -282,14 +281,18 @@ private struct ProgressText: View {
         if let startedAt {
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(startedAt))
-                Text(Self.text(elapsedSeconds: elapsed)).monospacedDigit()
+                Text(text(elapsedSeconds: elapsed))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: Double(elapsed)))
+                    .animation(reduceMotion ? nil : .snappy, value: elapsed)
             }
         } else {
-            Text(Self.text(elapsedSeconds: 0))
+            Text(text(elapsedSeconds: 0))
         }
     }
 
-    private static func text(elapsedSeconds: Int) -> String {
-        elapsedSeconds >= showsElapsedAfter ? "Polishing… \(elapsedSeconds) s" : "Polishing…"
+    private func text(elapsedSeconds: Int) -> String {
+        elapsedSeconds >= Self.showsElapsedAfter
+            ? "\(stage.label) \(elapsedSeconds) s" : stage.label
     }
 }

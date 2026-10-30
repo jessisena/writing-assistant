@@ -11,8 +11,10 @@ import kotlinx.serialization.json.putJsonArray
 import java.io.IOException
 
 /**
- * Prompt files for pipeline tests. The assembled prompt is `SYSTEM <CHANNEL> RULES`; a
- * refinement reads `<REFINEMENT> INSTRUCTION`. Files in [missing] throw [IOException].
+ * Prompt files for pipeline tests. The polish prompt is `SYSTEM <CHANNEL> RULES`, plus
+ * `LEARNING RULES` on a new line while the summary is on. The refine prompt is
+ * `REFINE ALWAYS <CHANNEL> RULES <REFINEMENT> INSTRUCTION`. Files in [missing] throw
+ * [IOException].
  */
 class StubPromptReader(
     private val missing: Set<PromptFile> = emptySet(),
@@ -22,12 +24,56 @@ class StubPromptReader(
             throw IOException("${file.relativePath} is missing")
         }
         return when (file) {
-            PromptFile.Global -> "  SYSTEM ${PromptFile.CHANNEL_PLACEHOLDER}\n"
-            is PromptFile.ForChannel -> "\n${file.channel.id.uppercase()} RULES  "
-            is PromptFile.ForRefinement -> "  ${file.refinement.id.uppercase()} INSTRUCTION \n"
+            PromptFile.Global -> {
+                "  SYSTEM ${PromptFile.CHANNEL_PLACEHOLDER}\n" +
+                    "${PromptFile.LEARNING_SUMMARY_PLACEHOLDER}\n"
+            }
+
+            PromptFile.Always -> {
+                " ALWAYS "
+            }
+
+            PromptFile.LearningSummary -> {
+                "\nLEARNING RULES\n"
+            }
+
+            PromptFile.Refine -> {
+                "REFINE ${PromptFile.ALWAYS_PLACEHOLDER} ${PromptFile.CHANNEL_PLACEHOLDER} " +
+                    PromptFile.INSTRUCTION_PLACEHOLDER
+            }
+
+            is PromptFile.ForChannel -> {
+                "\n${file.channel.id.uppercase()} RULES  "
+            }
+
+            is PromptFile.ForRefinement -> {
+                "  ${file.refinement.id.uppercase()} INSTRUCTION \n"
+            }
+
+            is PromptFile.ForMode -> {
+                " ${file.mode.id.uppercase()} TONE "
+            }
+
+            is PromptFile.ForLanguage -> {
+                " ${file.language.id.uppercase()} LANGUAGE "
+            }
         }
     }
 }
+
+/** Work mode, English output, with the learning summary as given. */
+fun englishOptions(summary: Boolean = true) =
+    PolishOptions(Mode.WORK, OutputLanguage.ENGLISH, summary)
+
+/** Personal mode, output in the draft's language, with the learning summary as given. */
+fun sameAsInputOptions(summary: Boolean = true) =
+    PolishOptions(Mode.PERSONAL, OutputLanguage.SAME_AS_INPUT, summary)
+
+/** A polish in Work mode with the summary on, for tests that don't care about the options. */
+suspend fun Polishing.polish(
+    text: String,
+    channel: Channel,
+): PolishResult = polish(text, channel, englishOptions())
 
 fun summaryObject(): JsonObject =
     buildJsonObject {

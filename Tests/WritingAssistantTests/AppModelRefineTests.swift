@@ -24,6 +24,7 @@ import WritingAssistantCore
 
     private func polishedModel(_ polisher: FakePolisher) async -> AppModel {
         let model = makeModel(polisher)
+        model.channel = .formal
         model.input = NSAttributedString(string: "I will to review the doc")
         await model.process()
         return model
@@ -57,7 +58,7 @@ import WritingAssistantCore
         #expect(polisher.refineCalls.count == 1)
         #expect(polisher.refineCalls.first?.text == "My **edited** *text* 🙂\n- one")
         #expect(polisher.refineCalls.first?.channel == .formal)
-        #expect(polisher.refineCalls.first?.refinement == .shorter)
+        #expect(polisher.refineCalls.first?.refinement == .preset(.shorter))
     }
 
     @Test func withoutACurrentEntryRefineUsesTheSelectedChannel() async throws {

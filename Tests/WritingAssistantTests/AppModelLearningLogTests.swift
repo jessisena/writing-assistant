@@ -32,13 +32,25 @@ import WritingAssistantCore
         #expect(logText() == before)
     }
 
+    @Test func customRefineDoesNotAppend() async throws {
+        let model = await process(.success(.sample))
+        let before = try #require(logText())
+        model.customInstruction = "less emoji"
+
+        model.refineWithCustomInstruction()
+        await model.requests.task?.value
+
+        #expect(model.customInstruction.isEmpty)
+        #expect(logText() == before)
+    }
+
     @Test func successWithSummaryAppendsOneEntry() async throws {
         let model = await process(.success(.sample))
 
         let text = try #require(logText())
         #expect(text.components(separatedBy: "### Corrections").count == 2)
         #expect(text.contains("I will to review → I'll review"))
-        #expect(text.contains(Channel.formal.displayName))
+        #expect(text.contains(Channel.slack.displayName))
         #expect(model.errorMessage == nil)
     }
 

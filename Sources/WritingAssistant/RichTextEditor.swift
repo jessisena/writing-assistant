@@ -484,6 +484,8 @@ struct RichTextEditor: View {
     /// When false the editor draws no background, clipping or border, so its parent can draw
     /// them.
     var isBordered = true
+    /// When false the text can be selected but not changed.
+    var isEditable = true
 
     var body: some View {
         if isBordered {
@@ -501,7 +503,8 @@ struct RichTextEditor: View {
             text: $text,
             controller: controller,
             accessibilityLabel: accessibilityLabel,
-            heightRange: minHeight...maxHeight
+            heightRange: minHeight...maxHeight,
+            isEditable: isEditable
         )
         .overlay(alignment: .topLeading) {
             if let placeholder, text.length == 0 {
@@ -522,6 +525,7 @@ private struct FormattingTextViewRepresentable: NSViewRepresentable {
     let controller: RichTextController
     let accessibilityLabel: String
     let heightRange: ClosedRange<CGFloat>
+    let isEditable: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text)
@@ -539,6 +543,7 @@ private struct FormattingTextViewRepresentable: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.setContents(text)
+        textView.isEditable = isEditable
         textView.onFocusChange = { [weak controller] in controller?.isFocused = $0 }
         controller.textView = textView
 
@@ -556,6 +561,7 @@ private struct FormattingTextViewRepresentable: NSViewRepresentable {
         coordinator.text = $text
         guard let textView = scrollView.documentView as? FormattingTextView else { return }
         controller.textView = textView
+        textView.isEditable = isEditable
         // Compare against the last value exchanged with the binding, not the text storage,
         // which adjusts fonts (emoji, CJK) on its own and would never compare equal.
         guard text !== coordinator.lastSynced, !text.isEqual(to: coordinator.lastSynced) else {

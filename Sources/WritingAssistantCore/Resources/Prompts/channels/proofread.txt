@@ -2,4 +2,4 @@ Proofread only. Make the smallest edits that fix the text and leave everything e
 Fix grammar, spelling, punctuation, word choice and unnatural idioms.
 Keep the author's voice, tone, length, structure and line breaks.
 Do not rephrase sentences that are already correct, do not add or remove content, and do not add
-bullets, headers or emphasis. These rules override the global style guidelines where they conflict.
+bullets, headers or emphasis. These rules override the Always rules where they conflict.
