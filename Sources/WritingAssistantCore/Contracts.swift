@@ -225,12 +225,20 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
     case cliFailed(stderr: String)
     /// The installed claude rejected a flag this app passes; `detail` is what it printed.
     case cliOutdated(detail: String)
+    /// The CLI has no valid login: never signed in, signed out, or the login expired.
+    case notLoggedIn(detail: String)
     case badFormat(detail: String)
     case promptUnavailable(detail: String)
     /// A custom refinement instruction was blank.
     case emptyInstruction
     /// A custom refinement instruction had more than `limit` characters.
     case instructionTooLong(limit: Int)
+
+    static let reloginCommand = "claude auth login"
+    static let logsHint =
+        "Full error trace: in Terminal, run /usr/bin/log show --last 1h --predicate "
+        + "'subsystem == \"local.writing-assistant\"', or filter Console.app on the subsystem "
+        + "local.writing-assistant."
 
     public var errorDescription: String? {
         switch self {
@@ -247,13 +255,18 @@ public enum PolishError: LocalizedError, Equatable, Sendable {
                 + "`claude --version` works in a terminal, then try again."
         case .timeout(let seconds):
             "Claude took longer than \(seconds) seconds. Please try again."
-        case .cliFailed:
-            "Claude returned an error. Check the logs."
+        case .cliFailed(let stderr) where stderr.isEmpty:
+            "Claude returned an error. \(Self.logsHint)"
+        case .cliFailed(let stderr):
+            "Claude returned an error: \(stderr.withoutTrailingPeriod). \(Self.logsHint)"
         case .cliOutdated:
             "Your Claude Code is too old for this app. Update it by running `claude update` in a "
                 + "terminal, then try again."
+        case .notLoggedIn:
+            "Your Claude login is missing or has expired. Run `\(Self.reloginCommand)` in "
+                + "Terminal to sign in again, then try again. \(Self.logsHint)"
         case .badFormat:
-            "Unexpected response format from Claude. Check the logs."
+            "Unexpected response format from Claude. \(Self.logsHint)"
         case .promptUnavailable(let detail):
             "Couldn't read the prompt files (\(detail)). Open Settings (⌘,) to restore them."
         }
@@ -361,7 +374,8 @@ public enum PromptValidationError: LocalizedError, Equatable, Sendable {
 }
 
 /// Runs one request through the claude CLI and returns its reply.
-/// Throws `PolishError.claudeNotFound`, `.timeout`, `.cliOutdated`, or `.cliFailed`.
+/// Throws `PolishError.claudeNotFound`, `.timeout`, `.cliOutdated`, `.notLoggedIn`, or
+/// `.cliFailed`.
 public protocol ClaudeRunning: Sendable {
     /// Sends `input` as the user turn under `systemPrompt`, which replaces Claude Code's own.
     /// `onText` receives the reply text in order, piece by piece, while it is generated.

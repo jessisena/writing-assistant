@@ -44,8 +44,9 @@ public struct ClaudeCLI: ClaudeRunning {
     /// events. Each text delta goes to `onText` as it arrives; the final `result` event supplies
     /// the reply text (trimmed), the token usage and the cost. A non-zero exit is retried once,
     /// but only when no text delta reached `onText` yet: a retry after that would make the caller
-    /// see the reply text twice. A timeout or a rejected flag is never retried. Cancelling the
-    /// calling task terminates the process (SIGTERM, then SIGKILL after a grace period).
+    /// see the reply text twice. A timeout, a rejected flag or a login failure is never retried.
+    /// Cancelling the calling task terminates the process (SIGTERM, then SIGKILL after a grace
+    /// period).
     ///
     /// - Parameters:
     ///   - systemPrompt: Replaces Claude Code's own system prompt.
@@ -54,10 +55,10 @@ public struct ClaudeCLI: ClaudeRunning {
     ///   - timeout: Limit for each attempt; the process is terminated when it is exceeded.
     ///   - onText: Gets each text delta in order, on a background queue, while the CLI runs.
     /// - Throws: `PolishError.claudeNotFound`, `.timeout(seconds:)`, `.cliOutdated(detail:)`
-    ///   when the CLI rejects a flag, or `.cliFailed(stderr:)` (`"Cancelled"` when the task is
-    ///   cancelled or `terminateRunningProcesses()` is called; the result text when the CLI
-    ///   reports an error; a note when no `result` event came or the prompt file couldn't be
-    ///   written).
+    ///   when the CLI rejects a flag, `.notLoggedIn(detail:)` when its login is missing or
+    ///   expired, or `.cliFailed(stderr:)` (`"Cancelled"` when the task is cancelled or
+    ///   `terminateRunningProcesses()` is called; the result text when the CLI reports an error;
+    ///   a note when no `result` event came or the prompt file couldn't be written).
     public func run(
         systemPrompt: String, input: String, model: String, timeout: Duration,
         onText: @escaping @Sendable (String) -> Void
@@ -148,12 +149,31 @@ public struct ClaudeCLI: ClaudeRunning {
                 claude CLI exited with status \(outcome.status) \
                 (attempt \(attempt) of \(maxAttempts)): \(lastFailure, privacy: .public)
                 """)
+            if isLoginFailure(lastFailure) {
+                claudeLogger.info("Not retrying: the claude CLI login is missing or expired")
+                return .failure(.notLoggedIn(detail: lastFailure))
+            }
             if stream.hasEmittedText {
                 claudeLogger.info("Not retrying: part of the reply was already streamed")
                 break
             }
         }
         return .failure(.cliFailed(stderr: lastFailure))
+    }
+
+    /// Phrases the claude CLI uses when it has no valid login, compared in lowercase.
+    static let loginFailureMarkers = [
+        "failed to authenticate",
+        "not logged in",
+        "run /login",
+        "claude auth login",
+        "oauth token has expired",
+    ]
+
+    /// Whether a CLI failure means the user has to sign in again, so retrying can't help.
+    static func isLoginFailure(_ detail: String) -> Bool {
+        let lowercased = detail.lowercased()
+        return loginFailureMarkers.contains { lowercased.contains($0) }
     }
 
     private static func makeRequest(
@@ -187,7 +207,8 @@ public struct ClaudeCLI: ClaudeRunning {
         if result.isError {
             let detail = capped(text)
             claudeLogger.error("claude CLI reported an error: \(detail, privacy: .public)")
-            return .failure(.cliFailed(stderr: detail))
+            return .failure(
+                isLoginFailure(detail) ? .notLoggedIn(detail: detail) : .cliFailed(stderr: detail))
         }
         return .success(ClaudeReply(text: text, usage: result.usage, costUSD: result.costUSD))
     }
