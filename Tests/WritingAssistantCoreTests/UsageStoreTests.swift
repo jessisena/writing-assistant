@@ -119,12 +119,41 @@ private final class TestClock: @unchecked Sendable {
         #expect(FileManager.default.fileExists(atPath: store.backupURL.path))
     }
 
-    @Test func fileWithoutCostsIsDamaged() throws {
+    private func writeFileWithoutCosts() throws {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let tokens = #"{"cacheCreation": 0, "cacheRead": 0, "input": 1, "output": 2}"#
-        let withoutCost = #"{"months": {"2026-10": {"requests": 1, "tokens": \#(tokens)}}}"#
+        let tokens = #"{"cacheCreation": 100, "cacheRead": 2000, "input": 3, "output": 40}"#
+        let withoutCost = #"{"months": {"2026-10": {"requests": 7, "tokens": \#(tokens)}}}"#
         try Data(withoutCost.utf8).write(to: fileURL)
+    }
+
+    @Test func fileSavedBeforeCostsKeepsItsTotalsWithZeroCost() throws {
+        try writeFileWithoutCosts()
+
+        #expect(try store.currentMonth() == MonthlyUsage(tokens: small, requests: 7, costUSD: 0))
+        #expect(!FileManager.default.fileExists(atPath: store.backupURL.path))
+    }
+
+    @Test func recordingOnAFileSavedBeforeCostsAddsToItsTotals() throws {
+        try writeFileWithoutCosts()
+
+        try store.record(large, costUSD: 0.5)
+
+        #expect(
+            try store.currentMonth()
+                == MonthlyUsage(tokens: small + large, requests: 8, costUSD: 0.5))
+        #expect(try String(contentsOf: fileURL, encoding: .utf8).contains("\"costUSD\" : 0.5"))
+    }
+
+    @Test(arguments: [
+        #"{"months": {"2026-10": {"requests": 1}}}"#,
+        #"{"months": {"2026-10": {"requests": 1, "costUSD": "free", "tokens": "#
+            + #"{"cacheCreation": 0, "cacheRead": 0, "input": 1, "output": 2}}}}"#,
+    ])
+    func monthWithMissingOrWrongFieldsIsStillDamaged(json: String) throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: fileURL)
 
         #expect(throws: UsageStoreError.corrupted(backup: store.backupURL)) {
             try store.currentMonth()
