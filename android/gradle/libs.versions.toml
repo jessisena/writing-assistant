@@ -1,7 +1,7 @@
 # Every dependency for all work streams is declared here up front, so parallel workers never
 # edit shared build files. Versions are pinned to releases at least 7 days old.
 [versions]
-agp = "9.5.0"
+agp = "9.5.1"
 kotlin = "2.4.21"
 ktlint-gradle = "14.2.0"
 ktlint-cli = "1.8.0"
