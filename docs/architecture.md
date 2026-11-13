@@ -479,8 +479,9 @@ token counts don't distinguish. The app runs on the user's subscription login, s
 what the tokens would cost through the API, not what is billed; the UI says so. A `result` without
 a numeric `total_cost_usd` still counts its tokens and adds nothing to the cost. The toolbar shows
 cents ("48.2K tokens · $0.42 this month"); its tooltip and Settings show four decimals. A cost
-above zero but under the smallest step shows as "<$0.01". `costUSD` is required in `usage.json`,
-so a file written before it existed is treated as damaged and moved aside.
+above zero but under the smallest step shows as "<$0.01". A month in `usage.json` written before
+costs were tracked has no `costUSD`; it reads as 0, keeps its token and request totals, and gets
+the cost of later requests added to it.
 
 ### Logging
 

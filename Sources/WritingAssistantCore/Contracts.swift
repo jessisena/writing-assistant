@@ -179,6 +179,14 @@ public struct MonthlyUsage: Codable, Sendable, Equatable {
         self.requests = requests
         self.costUSD = costUSD
     }
+
+    /// Reads a month; one saved before costs were tracked has no `costUSD` and reads as 0.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try container.decode(TokenUsage.self, forKey: .tokens)
+        requests = try container.decode(Int.self, forKey: .requests)
+        costUSD = try container.decodeIfPresent(Double.self, forKey: .costUSD) ?? 0
+    }
 }
 
 /// What the claude CLI answered: the reply text and, when reported, the tokens it used and their
