@@ -521,10 +521,41 @@ private func setEnvironment(_ name: String, _ value: String?) {
     }
 
     @Test func failureOnStdoutOnlyIsReported() async throws {
-        let fake = try FakeClaude(script: "echo 'Not logged in · Please run /login'; exit 1")
+        let fake = try FakeClaude(script: "echo 'Usage limit reached'; exit 1")
         defer { fake.remove() }
 
-        await #expect(throws: PolishError.cliFailed(stderr: "Not logged in · Please run /login")) {
+        await #expect(throws: PolishError.cliFailed(stderr: "Usage limit reached")) {
+            try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
+        }
+    }
+
+    @Test(arguments: [
+        "echo 'Failed to authenticate: this login reached its time limit' >&2",
+        "echo 'Not logged in · Please run /login'",
+        printLines(resultEvent("Invalid API key · Please run /login", isError: true)),
+    ])
+    func loginFailureIsNotRetried(failure: String) async throws {
+        let fake = try FakeClaude(script: "\(countInvocation); \(failure); exit 1")
+        defer { fake.remove() }
+
+        do {
+            _ = try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
+            Issue.record("expected notLoggedIn")
+        } catch {
+            guard case .notLoggedIn = error else {
+                Issue.record("expected notLoggedIn, got \(error)")
+                return
+            }
+        }
+        #expect(try fake.invocationCount() == 1)
+    }
+
+    @Test func loginErrorResultOnSuccessfulExitIsNotLoggedIn() async throws {
+        let fake = try FakeClaude(
+            script: printLines(resultEvent("OAuth token has expired", isError: true)))
+        defer { fake.remove() }
+
+        await #expect(throws: PolishError.notLoggedIn(detail: "OAuth token has expired")) {
             try await fake.cli.run(input: "p", model: "haiku", timeout: .seconds(10))
         }
     }

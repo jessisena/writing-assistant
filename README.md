@@ -245,7 +245,8 @@ The app logs CLI errors and unexpected responses with the subsystem `local.writi
 ```
 
 Use the full `/usr/bin/log` path: in zsh, plain `log` is a shell builtin. Or open Console.app and
-filter on that subsystem. Errors that say "Check the logs" refer to these.
+filter on that subsystem. The CLI, login and response-format errors in the app end with this
+pointer to the full error trace.
 
 ---
 
@@ -266,10 +267,18 @@ If `claude` is installed somewhere else, make sure that directory is on the `PAT
 login shell profile, `~/.zprofile`, then try again. The app runs a non-interactive login shell,
 which doesn't read `~/.zshrc`.
 
-### "Claude returned an error" after a reboot
+### "Your Claude login is missing or has expired"
 
-The CLI's subscription auth may need to be confirmed again. Run `claude` once in a terminal to
-re-authenticate, then retry in the app.
+The `claude` CLI's subscription login has run out or was never set up. Sign in again in a
+terminal, then retry in the app:
+
+```sh
+claude auth login
+```
+
+The app uses the CLI's default login. If your shell sets `CLAUDE_CONFIG_DIR`, that command renews
+a different login than the one an app opened from Finder or the Dock uses; run
+`env -u CLAUDE_CONFIG_DIR claude auth login` instead. A login failure is not retried.
 
 ### "Claude took longer than 120 seconds"
 

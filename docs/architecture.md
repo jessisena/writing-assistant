@@ -485,7 +485,8 @@ so a file written before it existed is treated as damaged and moved aside.
 ### Logging
 
 `os.Logger` with subsystem `local.writing-assistant`. CLI stderr and unparsable responses are
-logged there; the user-facing messages say "Check the logs".
+logged there; the `cliFailed`, `notLoggedIn` and `badFormat` messages end with the `log show`
+command and the Console.app filter for it.
 
 ### Packaging
 
@@ -558,8 +559,9 @@ PolishResult{polishedText, learningSummary?,
 | Over 20,000 characters | `inputTooLong` | Text is too long. The limit is 20,000 characters. |
 | `claude` binary not found | `claudeNotFound` | claude CLI not found, with the install link |
 | No response within 120 s | `timeout` | Claude took longer than 120 seconds. Please try again. |
-| CLI exits non-zero twice | `cliFailed` | Claude returned an error. Check the logs. |
-| Unparsable JSON / missing `polished_text` | `badFormat` | Unexpected response format from Claude. Check the logs. |
+| CLI exits non-zero twice | `cliFailed` | Claude returned an error, with the CLI's message and the logs pointer |
+| CLI reports a missing or expired login (not retried) | `notLoggedIn` | Your Claude login is missing or has expired, with `claude auth login` and the logs pointer |
+| Unparsable JSON / missing `polished_text` | `badFormat` | Unexpected response format from Claude, with the logs pointer |
 | Prompt files unreadable | `promptUnavailable` | Couldn't read the prompt files, with a pointer to Settings |
 
 The app also checks for `claude` at launch (`checkReady()`) and shows the not-found banner before
